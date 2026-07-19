@@ -1,0 +1,190 @@
+# ========================================
+# SmartHR-Agent-all Git 忽略规则
+# 保留源码、项目文档、仓库配置和环境模板；
+# 忽略真实环境配置、依赖、构建产物、日志、缓存和本地工具文件。
+# ========================================
+
+# ---------- 环境变量与本地密钥 ----------
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+!.env.*.example
+!.env.*.template
+!.env.*.sample
+
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets/
+.secrets/
+
+# 本地专用配置；对应的 example/template/sample 文件应提交到 Git
+**/application-local.yml
+**/application-local.yaml
+**/application-local.properties
+**/bootstrap-local.yml
+**/bootstrap-local.yaml
+**/bootstrap-local.properties
+**/config/local.*
+**/config/*.local.*
+
+# ---------- 操作系统文件 ----------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Thumbs.db:encryptable
+Desktop.ini
+$RECYCLE.BIN/
+ehthumbs.db
+ehthumbs_vista.db
+
+# ---------- IDE 与编辑器 ----------
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# ---------- 日志、运行时与临时文件 ----------
+logs/
+log/
+*.log
+*.log.*
+*.pid
+*.pid.lock
+*.seed
+*.stackdump
+*.tmp
+*.temp
+*.bak
+*.cache
+tmp/
+temp/
+.tmp/
+.temp/
+
+# ---------- Node.js / 前端 ----------
+node_modules/
+.npm/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnpm-store/
+.turbo/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+.vite/
+.next/
+.nuxt/
+.output/
+dist/
+build/
+out/
+storybook-static/
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+.ipynb_checkpoints/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+wheels/
+
+# ---------- Java / JVM ----------
+target/
+.gradle/
+*.class
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+!**/.mvn/wrapper/maven-wrapper.jar
+*.war
+*.ear
+hs_err_pid*
+replay_pid*
+
+# ---------- .NET ----------
+bin/
+obj/
+TestResults/
+*.nupkg
+*.snupkg
+
+# ---------- Go ----------
+vendor/
+*.test
+*.out
+
+# ---------- Rust ----------
+target/
+
+# ---------- 测试与覆盖率报告 ----------
+coverage/
+.coverage
+.coverage.*
+htmlcov/
+.nyc_output/
+junit.xml
+coverage.xml
+lcov.info
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+
+# ---------- 本地数据库与运行数据 ----------
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+uploads/
+storage/
+data/local/
+
+# ---------- 构建制品、压缩包与二进制 ----------
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.exe
+*.dll
+*.so
+*.dylib
+
+# ---------- 本地工具目录 ----------
+.codex/
+.claude/
+.cursor/
+
+# ---------- 按用户要求保留在本地的实施计划 ----------
+docs/AI简历筛选MVP实施计划.md
