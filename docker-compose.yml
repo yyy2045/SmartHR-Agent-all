@@ -27,10 +27,22 @@ services:
   api:
     build:
       context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-120}
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     env_file:
       - path: .env
         required: false
     environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-change-me}
+      APP_SESSION_COOKIE: ${APP_SESSION_COOKIE:-smarthr_session}
+      APP_SESSION_EXPIRE_MINUTES: ${APP_SESSION_EXPIRE_MINUTES:-480}
+      APP_SESSION_SECURE: ${APP_SESSION_SECURE:-false}
+      INITIAL_RECRUITER_USERNAME: ${INITIAL_RECRUITER_USERNAME:-recruiter}
+      INITIAL_RECRUITER_PASSWORD: ${INITIAL_RECRUITER_PASSWORD:-change-me-before-use}
+      INITIAL_RECRUITER_DISPLAY_NAME: ${INITIAL_RECRUITER_DISPLAY_NAME:-招聘专员}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://smarthr:smarthr-local-password@postgres:5432/smarthr}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
@@ -52,11 +64,15 @@ services:
   worker:
     build:
       context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-120}
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
     env_file:
       - path: .env
         required: false
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://smarthr:smarthr-local-password@postgres:5432/smarthr}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}

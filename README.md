@@ -38,6 +38,28 @@
 
 `docker compose down` 不会删除数据库和 Redis 数据卷；只有显式增加 `-v` 才会删除数据。
 
+## 后端登录认证
+
+API 启动时会自动执行 Alembic 迁移，并在账号不存在时根据以下环境变量初始化唯一招聘专员：
+
+```text
+INITIAL_RECRUITER_USERNAME
+INITIAL_RECRUITER_PASSWORD
+INITIAL_RECRUITER_DISPLAY_NAME
+```
+
+初始密码使用 Argon2 哈希保存。修改环境变量不会覆盖已经存在的用户。
+
+当前认证接口：
+
+```text
+POST /api/auth/login
+GET  /api/auth/me
+POST /api/auth/logout
+```
+
+登录会话使用 HttpOnly Cookie，服务端会话保存在 Redis。当前步骤只实现后端认证接口，前端登录页将在独立步骤中完成。
+
 ## 项目结构
 
 ```text

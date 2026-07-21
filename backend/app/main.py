@@ -3,12 +3,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.router import api_router
+from app.bootstrap import ensure_initial_recruiter
 from app.config import settings
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.file_storage_root.mkdir(parents=True, exist_ok=True)
+    ensure_initial_recruiter()
     yield
 
 

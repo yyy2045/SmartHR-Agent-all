@@ -9,10 +9,10 @@ description = "SmartHR AI 简历筛选 MVP 后端"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "alembic>=1.14,<2",
+  "argon2-cffi>=25,<26",
   "celery[redis]>=5.4,<6",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
-  "passlib[argon2]>=1.7,<2",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.7,<3",
   "python-multipart>=0.0.20,<1",
@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "fakeredis>=2.28,<3",
   "pytest>=8.3,<9",
   "pytest-asyncio>=0.25,<1",
   "ruff>=0.9,<1",

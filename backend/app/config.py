@@ -17,9 +17,11 @@ class Settings(BaseSettings):
     app_secret_key: str = Field(default="development-only-change-me", min_length=16)
     app_session_cookie: str = "smarthr_session"
     app_session_expire_minutes: int = 480
+    app_session_secure: bool = False
 
     initial_recruiter_username: str = "recruiter"
     initial_recruiter_password: str = "change-me-before-use"
+    initial_recruiter_display_name: str = "招聘专员"
 
     database_url: str = "postgresql+psycopg://smarthr:smarthr-local-password@postgres:5432/smarthr"
     redis_url: str = "redis://redis:6379/0"
@@ -39,6 +41,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
+
+    @property
+    def session_cookie_secure(self) -> bool:
+        return self.app_session_secure or self.is_production
 
 
 @lru_cache
