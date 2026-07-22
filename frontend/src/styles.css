@@ -684,6 +684,200 @@ input {
   width: 180px;
 }
 
+/* 简历批次 */
+.upload-panel,
+.batch-card {
+  overflow: hidden;
+  border-color: #e4e9f0;
+  border-radius: 14px;
+  box-shadow: 0 3px 14px rgb(26 45 72 / 3%);
+}
+
+.upload-panel > .ant-card-head,
+.batch-card > .ant-card-head {
+  background: #fbfcfe;
+  border-bottom-color: #edf0f4;
+}
+
+.upload-panel-layout {
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  gap: 28px;
+}
+
+.upload-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.upload-settings > label {
+  margin-top: 2px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.upload-settings .ant-select,
+.upload-settings .ant-input {
+  width: 100%;
+}
+
+.upload-policy-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 15px;
+  margin-top: 8px;
+  color: #2375d2;
+  background: #f2f7fd;
+  border: 1px solid #d9e8f8;
+  border-radius: 10px;
+}
+
+.upload-policy-card > .anticon {
+  margin-top: 3px;
+  font-size: 18px;
+}
+
+.upload-policy-card > div,
+.upload-policy-card span {
+  display: block;
+}
+
+.upload-dropzone {
+  min-width: 0;
+}
+
+.upload-dropzone .ant-upload-wrapper,
+.upload-dropzone .ant-upload-drag {
+  width: 100%;
+}
+
+.upload-dropzone .ant-upload-drag {
+  min-height: 220px;
+  background: #fafcff;
+  border-color: #cbd9e9;
+  border-radius: 12px;
+}
+
+.upload-dropzone .ant-upload-drag:hover {
+  background: #f5f9ff;
+  border-color: #2d7fe6;
+}
+
+.upload-dropzone .ant-upload-drag-icon .anticon {
+  color: #2d7fe6;
+  font-size: 46px;
+}
+
+.upload-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.batch-history {
+  margin-top: 28px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.section-heading h3 {
+  margin: 0 0 4px;
+  color: #101828;
+  font-size: 20px;
+}
+
+.batch-list {
+  display: grid;
+  gap: 18px;
+}
+
+.batch-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.batch-card-heading h4 {
+  margin: 0;
+  color: #101828;
+  font-size: 18px;
+}
+
+.batch-progress-summary {
+  width: 240px;
+  flex: 0 0 auto;
+}
+
+.batch-progress-summary > span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.batch-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0;
+}
+
+.batch-stat-grid .ant-statistic {
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #edf0f4;
+  border-radius: 10px;
+}
+
+.batch-stat-grid .ant-statistic-title {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.batch-stat-grid .ant-statistic-content {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.document-list {
+  border-top: 1px solid #edf0f4;
+}
+
+.document-list .ant-list-item {
+  padding: 15px 2px;
+}
+
+.document-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  color: #2679db;
+  font-size: 18px;
+  background: #edf6ff;
+  border-radius: 10px;
+  place-items: center;
+}
+
+.document-icon.is-error {
+  color: #c43f48;
+  background: #fff1f1;
+}
+
+.batch-empty {
+  min-height: 260px;
+}
+
 .sidebar-backdrop {
   display: none;
 }
@@ -699,6 +893,10 @@ input {
 
   .criteria-field-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .upload-panel-layout {
+    grid-template-columns: 260px minmax(0, 1fr);
   }
 }
 
@@ -737,6 +935,10 @@ input {
   }
 
   .criteria-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-panel-layout {
     grid-template-columns: 1fr;
   }
 
@@ -813,6 +1015,30 @@ input {
   .criteria-field-grid,
   .criteria-dimension-grid {
     grid-template-columns: 1fr;
+  }
+
+  .section-heading,
+  .batch-card-heading,
+  .upload-submit-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .batch-progress-summary {
+    width: 100%;
+  }
+
+  .batch-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .document-list .ant-list-item {
+    align-items: flex-start;
+  }
+
+  .document-list .ant-list-item-action {
+    margin-inline-start: 8px;
   }
 
   .dimension-progress {

@@ -85,6 +85,53 @@ export interface JobDetail extends JobRecord {
   criteria_versions: CriteriaVersion[]
 }
 
+export type BatchStatus =
+  | 'uploading'
+  | 'ready'
+  | 'partial_failure'
+  | 'failed'
+  | 'processing'
+  | 'completed'
+export type ResumeDocumentStatus =
+  | 'uploaded'
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+
+export interface ResumeDocumentRecord {
+  id: string
+  batch_id: string
+  original_filename: string
+  file_extension: string
+  content_type: string
+  detected_type: string
+  size_bytes: number
+  sha256: string | null
+  status: ResumeDocumentStatus
+  failure_code: string | null
+  failure_message: string | null
+  attempt_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ScreeningBatchRecord {
+  id: string
+  job_id: string
+  criteria_version_id: string
+  criteria_version_number: number
+  name: string
+  status: BatchStatus
+  total_count: number
+  success_count: number
+  failed_count: number
+  processing_count: number
+  created_at: string
+  updated_at: string
+  documents: ResumeDocumentRecord[]
+}
+
 export const AUTH_UNAUTHORIZED_EVENT = 'smarthr:auth-unauthorized'
 
 export class ApiError extends Error {
@@ -103,7 +150,7 @@ async function apiRequest<T>(
   fallbackMessage = '请求失败',
 ): Promise<T> {
   const headers = new Headers(init.headers)
-  if (init.body && !headers.has('Content-Type')) {
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -238,4 +285,44 @@ export function confirmCriteriaVersion(
     { method: 'POST' },
     '确认筛选标准失败',
   )
+}
+
+export function fetchScreeningBatches(jobId: string): Promise<ScreeningBatchRecord[]> {
+  return apiRequest(`/api/jobs/${jobId}/batches`, {}, '无法读取简历批次')
+}
+
+export function createScreeningBatch(
+  jobId: string,
+  criteriaVersionId: string,
+  files: File[],
+  name = '',
+): Promise<ScreeningBatchRecord> {
+  const body = new FormData()
+  body.append('criteria_version_id', criteriaVersionId)
+  body.append('name', name)
+  files.forEach((file) => body.append('files', file))
+  return apiRequest(
+    `/api/jobs/${jobId}/batches`,
+    { method: 'POST', body },
+    '上传简历批次失败',
+  )
+}
+
+export function retryResumeDocument(
+  jobId: string,
+  batchId: string,
+  documentId: string,
+  file: File,
+): Promise<ResumeDocumentRecord> {
+  const body = new FormData()
+  body.append('file', file)
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/retry`,
+    { method: 'PUT', body },
+    '重新上传简历失败',
+  )
+}
+
+export function resumeFileUrl(jobId: string, batchId: string, documentId: string): string {
+  return `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/file`
 }

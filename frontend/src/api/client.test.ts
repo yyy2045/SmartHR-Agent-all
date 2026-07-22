@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   AUTH_UNAUTHORIZED_EVENT,
+  createScreeningBatch,
   fetchCurrentUser,
   fetchJobs,
   fetchLiveHealth,
@@ -104,5 +105,43 @@ describe('API client', () => {
     expect(unauthorizedListener).toHaveBeenCalledOnce()
 
     window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, unauthorizedListener)
+  })
+
+  it('使用浏览器生成的 multipart 边界上传简历批次', async () => {
+    const batch = {
+      id: 'batch-1',
+      job_id: 'job-1',
+      criteria_version_id: 'version-1',
+      criteria_version_number: 1,
+      name: '测试批次',
+      status: 'ready',
+      total_count: 1,
+      success_count: 1,
+      failed_count: 0,
+      processing_count: 0,
+      created_at: '2026-07-22T12:00:00Z',
+      updated_at: '2026-07-22T12:00:00Z',
+      documents: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(batch), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const file = new File(['resume'], 'resume.pdf', { type: 'application/pdf' })
+
+    await expect(
+      createScreeningBatch('job-1', 'version-1', [file], '测试批次'),
+    ).resolves.toEqual(batch)
+
+    const request = fetchMock.mock.calls[0]
+    expect(request[0]).toBe('/api/jobs/job-1/batches')
+    expect(request[1]?.body).toBeInstanceOf(FormData)
+    expect(new Headers(request[1]?.headers).has('Content-Type')).toBe(false)
+    const body = request[1]?.body as FormData
+    expect(body.get('criteria_version_id')).toBe('version-1')
+    expect(body.getAll('files')).toHaveLength(1)
   })
 })

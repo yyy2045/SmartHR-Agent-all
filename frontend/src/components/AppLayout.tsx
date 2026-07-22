@@ -34,6 +34,9 @@ function pageMeta(pathname: string) {
   if (pathname.endsWith('/criteria')) {
     return { title: '筛选标准', subtitle: '配置硬性要求、评分维度与版本' }
   }
+  if (pathname.endsWith('/batches')) {
+    return { title: '简历批次', subtitle: '批量上传并跟踪逐文件处理状态' }
+  }
   return { title: '职位管理', subtitle: '管理招聘职位与版本化筛选标准' }
 }
 

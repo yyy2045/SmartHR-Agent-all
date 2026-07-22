@@ -1,6 +1,7 @@
 import {
   EditOutlined,
   FileSearchOutlined,
+  FolderOpenOutlined,
   InboxOutlined,
   PlusOutlined,
   SettingOutlined,
@@ -59,6 +60,12 @@ export function JobListPage() {
         </Paragraph>
 
         <Space wrap>
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={() => navigate(`/jobs/${job.id}/batches`)}
+          >
+            简历批次
+          </Button>
           <Button
             type="primary"
             icon={<SettingOutlined />}

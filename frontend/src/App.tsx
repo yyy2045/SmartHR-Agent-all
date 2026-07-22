@@ -9,6 +9,9 @@ import { LoginPage } from './pages/LoginPage'
 const CriteriaPage = lazy(() =>
   import('./pages/CriteriaPage').then((module) => ({ default: module.CriteriaPage })),
 )
+const BatchPage = lazy(() =>
+  import('./pages/BatchPage').then((module) => ({ default: module.BatchPage })),
+)
 const JobFormPage = lazy(() =>
   import('./pages/JobFormPage').then((module) => ({ default: module.JobFormPage })),
 )
@@ -33,6 +36,7 @@ function App() {
                 <Route path="/jobs/new" element={<JobFormPage />} />
                 <Route path="/jobs/:jobId/edit" element={<JobFormPage />} />
                 <Route path="/jobs/:jobId/criteria" element={<CriteriaPage />} />
+                <Route path="/jobs/:jobId/batches" element={<BatchPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
