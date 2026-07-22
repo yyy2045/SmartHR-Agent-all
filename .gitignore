@@ -90,6 +90,9 @@ node_modules/
 .eslintcache
 .stylelintcache
 .vite/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 .next/
 .nuxt/
 .output/
@@ -157,6 +160,7 @@ coverage.xml
 lcov.info
 playwright-report/
 test-results/
+.playwright-mcp/
 allure-results/
 allure-report/
 
@@ -186,5 +190,7 @@ data/local/
 .claude/
 .cursor/
 
-# ---------- 按用户要求保留在本地的实施计划 ----------
-docs/AI简历筛选MVP实施计划.md
+# ---------- 本地开发文档（仅保留产品功能清单） ----------
+*.md
+!/README.md
+!docs/智能招聘平台功能清单.md

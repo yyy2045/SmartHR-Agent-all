@@ -1,0 +1,104 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smarthr}
+      POSTGRES_USER: ${POSTGRES_USER:-smarthr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smarthr-local-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smarthr} -d ${POSTGRES_DB:-smarthr}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-120}
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-development-only-change-me}
+      APP_SESSION_COOKIE: ${APP_SESSION_COOKIE:-smarthr_session}
+      APP_SESSION_EXPIRE_MINUTES: ${APP_SESSION_EXPIRE_MINUTES:-480}
+      APP_SESSION_SECURE: ${APP_SESSION_SECURE:-false}
+      INITIAL_RECRUITER_USERNAME: ${INITIAL_RECRUITER_USERNAME:-recruiter}
+      INITIAL_RECRUITER_PASSWORD: ${INITIAL_RECRUITER_PASSWORD:-change-me-before-use}
+      INITIAL_RECRUITER_DISPLAY_NAME: ${INITIAL_RECRUITER_DISPLAY_NAME:-招聘专员}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://smarthr:smarthr-local-password@postgres:5432/smarthr}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      FILE_STORAGE_ROOT: ${FILE_STORAGE_ROOT:-/app/data/uploads}
+    volumes:
+      - ./data/local/uploads:/app/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-120}
+        INSTALL_OCR: "true"
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn}
+    command: ["sh", "/app/worker-entrypoint.sh"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://smarthr:smarthr-local-password@postgres:5432/smarthr}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
+      FILE_STORAGE_ROOT: ${FILE_STORAGE_ROOT:-/app/data/uploads}
+    volumes:
+      - ./data/local/uploads:/app/data/uploads
+      - ./data/local/paddlex:/root/.paddlex
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
