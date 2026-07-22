@@ -106,7 +106,7 @@ def batch_dependencies(
     previous_max_count = settings.max_batch_file_count
     settings.file_storage_root = tmp_path
     settings.max_resume_file_size_mb = 20
-    settings.max_batch_file_count = 50
+    settings.max_batch_file_count = 2
     enqueued_document_ids: list[str] = []
 
     def enqueue(document_id: object) -> str:
@@ -160,7 +160,7 @@ async def test_all_supported_resume_formats_are_accepted(
     job_id = batch_dependencies.job_id
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         await login(client)
-        response = await client.post(
+        document_batch = await client.post(
             f"/jobs/{job_id}/batches",
             data={"criteria_version_id": batch_dependencies.criteria_version_id},
             files=[
@@ -173,18 +173,27 @@ async def test_all_supported_resume_formats_are_accepted(
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     ),
                 ),
+            ],
+        )
+        image_batch = await client.post(
+            f"/jobs/{job_id}/batches",
+            data={"criteria_version_id": batch_dependencies.criteria_version_id},
+            files=[
                 ("files", ("resume.jpg", VALID_JPEG, "image/jpeg")),
                 ("files", ("resume.png", VALID_PNG, "image/png")),
             ],
         )
 
-    assert response.status_code == 201
-    body = response.json()
-    assert body["status"] == "processing"
-    assert body["total_count"] == 4
-    assert body["success_count"] == 0
-    assert body["processing_count"] == 4
-    assert {item["detected_type"] for item in body["documents"]} == {
+    assert document_batch.status_code == 201
+    assert image_batch.status_code == 201
+    bodies = [document_batch.json(), image_batch.json()]
+    assert all(body["status"] == "processing" for body in bodies)
+    assert all(body["total_count"] == 2 for body in bodies)
+    assert all(body["success_count"] == 0 for body in bodies)
+    assert all(body["processing_count"] == 2 for body in bodies)
+    assert {
+        item["detected_type"] for body in bodies for item in body["documents"]
+    } == {
         "pdf",
         "docx",
         "jpg",
@@ -271,11 +280,11 @@ async def test_batch_limits_and_mime_validation(
             data={"criteria_version_id": criteria_version_id},
             files=[
                 ("files", (f"resume-{index}.pdf", VALID_PDF, "application/pdf"))
-                for index in range(51)
+                for index in range(3)
             ],
         )
         assert too_many.status_code == 422
-        assert "最多上传 50 份" in too_many.text
+        assert "最多上传 2 份" in too_many.text
 
         settings.max_resume_file_size_mb = 1
         large_pdf = b"%PDF-1.4\n" + (b"0" * (1024 * 1024)) + b"%%EOF"
