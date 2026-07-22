@@ -7,7 +7,7 @@ from decimal import Decimal
 import fakeredis
 import httpx
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -195,7 +195,7 @@ def screening_route_dependencies(
 
     enqueued_document_ids: list[uuid.UUID] = []
 
-    def enqueue(document_id: uuid.UUID) -> str:
+    def enqueue(document_id: uuid.UUID, **_: object) -> str:
         enqueued_document_ids.append(document_id)
         return "analysis-task-1"
 
@@ -680,3 +680,216 @@ async def test_candidate_comparison_enforces_count_job_and_analysis_version(
     assert "同一职位标准和同一分析版本" in mismatch.text
     assert cross_job.status_code == 422
     assert "同一职位" in cross_job.text
+
+
+@pytest.mark.asyncio
+async def test_profile_correction_creates_version_and_queues_only_target_candidate(
+    screening_route_dependencies: ScreeningRouteDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependency = screening_route_dependencies
+    enqueued: list[tuple[uuid.UUID, dict[str, object]]] = []
+
+    def enqueue(document_id: uuid.UUID, **kwargs: object) -> str:
+        enqueued.append((document_id, kwargs))
+        return "correction-task-1"
+
+    monkeypatch.setattr(
+        "app.api.routes.candidate_versions.enqueue_resume_analysis",
+        enqueue,
+    )
+    with dependency.session_factory() as db:
+        result = db.get(ScreeningResult, dependency.result_id)
+        assert result is not None
+        source = result.candidate_profile
+        assert source is not None
+        source_id = source.id
+        criteria_id = result.criteria_version_id
+        payload = {
+            "source_profile_id": str(source.id),
+            "criteria_version_id": str(criteria_id),
+            "education": source.education,
+            "work_experiences": source.work_experiences,
+            "projects": source.projects,
+            "skills": [
+                {
+                    "name": "Python 3",
+                    "level": "精通",
+                    "evidence": [
+                        {"segment_key": "SEG-0001", "quote": "Python"}
+                    ],
+                }
+            ],
+            "certifications": source.certifications,
+            "languages": source.languages,
+        }
+
+    base = (
+        f"/jobs/{dependency.job_id}/batches/{dependency.batch_id}"
+        f"/documents/{dependency.document_id}"
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        corrected = await client.post(f"{base}/profile-corrections", json=payload)
+        profiles = await client.get(f"{base}/profiles")
+        history = await client.get(f"{base}/analysis-history")
+
+    assert corrected.status_code == 201
+    body = corrected.json()
+    assert body["profile"]["version_number"] == 2
+    assert body["profile"]["source"] == "manual"
+    assert body["profile"]["source_profile_id"] == str(source_id)
+    assert body["profile"]["skills"][0]["name"] == "Python 3"
+    assert body["reanalysis"]["status"] == "queued"
+    assert body["reanalysis"]["analysis_version"] == 2
+    assert enqueued == [
+        (
+            dependency.document_id,
+            {
+                "criteria_version_id": criteria_id,
+                "candidate_profile_id": uuid.UUID(body["profile"]["id"]),
+                "analysis_version": 2,
+            },
+        )
+    ]
+    assert profiles.status_code == 200
+    assert [item["version_number"] for item in profiles.json()] == [2, 1]
+    assert history.status_code == 200
+    assert [item["analysis_version"] for item in history.json()] == [1]
+
+
+@pytest.mark.asyncio
+async def test_profile_correction_rejects_sensitive_data(
+    screening_route_dependencies: ScreeningRouteDependencies,
+) -> None:
+    dependency = screening_route_dependencies
+    with dependency.session_factory() as db:
+        result = db.get(ScreeningResult, dependency.result_id)
+        assert result is not None and result.candidate_profile is not None
+        source = result.candidate_profile
+        payload = {
+            "source_profile_id": str(source.id),
+            "criteria_version_id": str(result.criteria_version_id),
+            "education": source.education,
+            "work_experiences": source.work_experiences,
+            "projects": source.projects,
+            "skills": [{"name": "联系电话 13912345678", "level": "", "evidence": []}],
+            "certifications": source.certifications,
+            "languages": source.languages,
+        }
+
+    path = (
+        f"/jobs/{dependency.job_id}/batches/{dependency.batch_id}"
+        f"/documents/{dependency.document_id}/profile-corrections"
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.post(path, json=payload)
+
+    assert response.status_code == 422
+    assert "敏感信息" in response.text
+    with dependency.session_factory() as db:
+        assert (
+            db.scalar(
+                select(func.count(CandidateProfile.id)).where(
+                    CandidateProfile.document_id == dependency.document_id
+                )
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_batch_reanalysis_uses_shared_version_and_latest_profiles(
+    screening_route_dependencies: ScreeningRouteDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependency = screening_route_dependencies
+    with dependency.session_factory() as db:
+        batch = db.get(ScreeningBatch, dependency.batch_id)
+        first_result = db.get(ScreeningResult, dependency.result_id)
+        assert batch is not None and first_result is not None
+        second_document = ResumeDocument(
+            batch_id=batch.id,
+            original_filename="batch-rerun.pdf",
+            file_extension=".pdf",
+            content_type="application/pdf",
+            detected_type="pdf",
+            size_bytes=100,
+            status="completed",
+            parsed_at=datetime.now(UTC),
+            redacted_at=datetime.now(UTC),
+        )
+        second_profile = CandidateProfile(
+            document=second_document,
+            version_number=1,
+            source="ai",
+            model_name="stub-model",
+            prompt_version="resume-match-v1",
+            education=[],
+            work_experiences=[],
+            projects=[],
+            skills=[],
+            certifications=[],
+            languages=[],
+        )
+        second_result = ScreeningResult(
+            document=second_document,
+            candidate_profile=second_profile,
+            criteria_version_id=batch.criteria_version_id,
+            analysis_version=1,
+            status="completed",
+            ai_group="passed",
+            total_score=Decimal("70.00"),
+            pass_threshold=60,
+            hard_requirement_results=[],
+            strengths=[],
+            gaps=[],
+            missing_items=[],
+            interview_questions=[],
+            model_name="stub-model",
+            prompt_version="resume-match-v1",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        db.add(second_result)
+        db.commit()
+        criteria_id = batch.criteria_version_id
+        first_profile_id = first_result.candidate_profile_id
+        second_document_id = second_document.id
+        second_profile_id = second_profile.id
+
+    enqueued: list[tuple[uuid.UUID, dict[str, object]]] = []
+
+    def enqueue(document_id: uuid.UUID, **kwargs: object) -> str:
+        enqueued.append((document_id, kwargs))
+        return f"task-{len(enqueued)}"
+
+    monkeypatch.setattr(
+        "app.api.routes.candidate_versions.enqueue_resume_analysis",
+        enqueue,
+    )
+    path = f"/jobs/{dependency.job_id}/batches/{dependency.batch_id}/reanalysis"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.post(path, json={"criteria_version_id": str(criteria_id)})
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "queued"
+    assert body["analysis_version"] == 2
+    assert body["queued_count"] == 2
+    assert body["failed_count"] == 0
+    assert body["skipped_count"] == 0
+    assert {item[0] for item in enqueued} == {
+        dependency.document_id,
+        second_document_id,
+    }
+    assert {item[1]["analysis_version"] for item in enqueued} == {2}
+    assert {item[1]["candidate_profile_id"] for item in enqueued} == {
+        first_profile_id,
+        second_profile_id,
+    }

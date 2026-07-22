@@ -7,6 +7,7 @@ import {
   FileExcelOutlined,
   FileOutlined,
   FileSearchOutlined,
+  HistoryOutlined,
   RedoOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
@@ -22,6 +23,7 @@ import {
   Empty,
   Input,
   List,
+  Modal,
   Progress,
   Select,
   Skeleton,
@@ -43,10 +45,13 @@ import {
   fetchJob,
   fetchResumeDocumentDetail,
   fetchScreeningBatches,
+  reanalyzeBatch,
   resumeFileUrl,
   retryResumeDocument,
   retryResumeParsing,
+  type BatchReanalysisRecord,
   type BatchStatus,
+  type CriteriaVersion,
   type ResumeDocumentRecord,
   type ScreeningBatchRecord,
 } from '../api/client'
@@ -116,14 +121,20 @@ function BatchCard({
   batch,
   jobId,
   archived,
+  criteriaVersions,
 }: {
   batch: ScreeningBatchRecord
   jobId: string
   archived: boolean
+  criteriaVersions: CriteriaVersion[]
 }) {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>()
+  const [reanalysisOpen, setReanalysisOpen] = useState(false)
+  const [reanalysisCriteriaVersionId, setReanalysisCriteriaVersionId] = useState<string>()
+  const [lastReanalysis, setLastReanalysis] = useState<BatchReanalysisRecord>()
   const retryMutation = useMutation({
     mutationFn: ({ documentId, file }: { documentId: string; file: File }) =>
       retryResumeDocument(jobId, batch.id, documentId, file),
@@ -143,6 +154,29 @@ function BatchCard({
     },
     onError: (error) =>
       messageApi.error(error instanceof ApiError ? error.message : '重新处理失败'),
+  })
+  const reanalysisMutation = useMutation({
+    mutationFn: (criteriaVersionId: string) =>
+      reanalyzeBatch(jobId, batch.id, criteriaVersionId),
+    onSuccess: async (response) => {
+      setReanalysisOpen(false)
+      setLastReanalysis(response)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['batches', jobId] }),
+        queryClient.invalidateQueries({ queryKey: ['screening-results', jobId] }),
+      ])
+      if (response.status === 'queued') {
+        messageApi.success(
+          `整批分析 V${response.analysis_version} 已排队，共 ${response.queued_count} 份`,
+        )
+      } else {
+        messageApi.warning(
+          `整批分析已创建：排队 ${response.queued_count}，失败 ${response.failed_count}，跳过 ${response.skipped_count}`,
+        )
+      }
+    },
+    onError: (error) =>
+      messageApi.error(error instanceof ApiError ? error.message : '整批重新分析失败'),
   })
   const detail = useQuery({
     queryKey: ['resume-document', jobId, batch.id, selectedDocumentId],
@@ -169,6 +203,20 @@ function BatchCard({
           onClick={() => setSelectedDocumentId(document.id)}
         >
           查看文本
+        </Button>,
+      )
+      actions.push(
+        <Button
+          key="history"
+          type="link"
+          icon={<HistoryOutlined />}
+          onClick={() =>
+            navigate(
+              `/jobs/${jobId}/batches/${batch.id}/documents/${document.id}/history`,
+            )
+          }
+        >
+          资料与版本
         </Button>,
       )
     }
@@ -236,11 +284,38 @@ function BatchCard({
           </Space>
           <Text type="secondary">创建于 {formatDate(batch.created_at)}</Text>
         </div>
-        <div className="batch-progress-summary">
-          <Text type="secondary">批次处理进度</Text>
-          <Progress percent={processedPercent} size="small" />
+        <div className="batch-card-actions">
+          <div className="batch-progress-summary">
+            <Text type="secondary">批次处理进度</Text>
+            <Progress percent={processedPercent} size="small" />
+          </div>
+          <Button
+            icon={<ReloadOutlined />}
+            disabled={
+              archived ||
+              !batch.documents.some(
+                (document) => document.status === 'completed' && document.redacted_at,
+              )
+            }
+            onClick={() => {
+              setReanalysisCriteriaVersionId(criteriaVersions[0]?.id)
+              setReanalysisOpen(true)
+            }}
+          >
+            整批重新分析
+          </Button>
         </div>
       </div>
+
+      {lastReanalysis && (
+        <Alert
+          className="batch-reanalysis-result"
+          type={lastReanalysis.status === 'queued' ? 'success' : 'warning'}
+          showIcon
+          message={`分析 V${lastReanalysis.analysis_version} 已创建`}
+          description={`排队 ${lastReanalysis.queued_count} 份，创建失败 ${lastReanalysis.failed_count} 份，跳过 ${lastReanalysis.skipped_count} 份。所有旧分析结果继续保留。`}
+        />
+      )}
 
       <div className="batch-stat-grid">
         <Statistic title="文件总数" value={batch.total_count} />
@@ -387,6 +462,42 @@ function BatchCard({
           </>
         )}
       </Drawer>
+
+      <Modal
+        title={`整批重新分析 · ${batch.name}`}
+        open={reanalysisOpen}
+        okText="确认整批重跑"
+        cancelText="取消"
+        confirmLoading={reanalysisMutation.isPending}
+        okButtonProps={{ disabled: !reanalysisCriteriaVersionId }}
+        onOk={() =>
+          reanalysisCriteriaVersionId &&
+          reanalysisMutation.mutate(reanalysisCriteriaVersionId)
+        }
+        onCancel={() => setReanalysisOpen(false)}
+      >
+        <Space direction="vertical" size="middle" className="full-width-space">
+          <Alert
+            type="info"
+            showIcon
+            message="本次重跑会为整个批次创建统一的分析版本"
+            description="仅处理已完成解析和脱敏的简历；未就绪文件会跳过，历史档案与分析结果不会被覆盖。"
+          />
+          <div>
+            <label htmlFor={`batch-reanalysis-criteria-${batch.id}`}>职位标准版本</label>
+            <Select
+              id={`batch-reanalysis-criteria-${batch.id}`}
+              className="batch-reanalysis-select"
+              value={reanalysisCriteriaVersionId}
+              onChange={setReanalysisCriteriaVersionId}
+              options={criteriaVersions.map((version) => ({
+                value: version.id,
+                label: `标准 V${version.version_number} · 通过线 ${version.pass_threshold}`,
+              }))}
+            />
+          </div>
+        </Space>
+      </Modal>
     </Card>
   )
 }
@@ -617,7 +728,13 @@ export function BatchPage() {
         {batches.isSuccess && batches.data.length > 0 && (
           <div className="batch-list">
             {batches.data.map((batch) => (
-              <BatchCard key={batch.id} batch={batch} jobId={jobId!} archived={archived} />
+              <BatchCard
+                key={batch.id}
+                batch={batch}
+                jobId={jobId!}
+                archived={archived}
+                criteriaVersions={confirmedVersions}
+              />
             ))}
           </div>
         )}

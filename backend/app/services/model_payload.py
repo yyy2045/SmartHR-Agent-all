@@ -4,12 +4,40 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from app.models import JobCriteriaVersion, ResumeDocument
+from app.models import CandidateProfile, JobCriteriaVersion, ResumeDocument
 from app.services.resume_redactor import contains_detectable_sensitive_data
 
 
 class ModelPayloadSecurityError(RuntimeError):
     pass
+
+
+def _candidate_profile_payload(profile: CandidateProfile) -> dict[str, Any]:
+    return {
+        "education": profile.education,
+        "work_experiences": profile.work_experiences,
+        "projects": profile.projects,
+        "skills": profile.skills,
+        "certifications": profile.certifications,
+        "languages": profile.languages,
+    }
+
+
+def validate_candidate_profile_payload(
+    document: ResumeDocument,
+    profile_payload: dict[str, Any],
+) -> None:
+    serialized = json.dumps(profile_payload, ensure_ascii=False)
+    original_values = {
+        redaction.original_text
+        for segment in document.text_segments
+        for redaction in segment.redactions
+        if redaction.original_text
+    }
+    if any(value in serialized for value in original_values):
+        raise ModelPayloadSecurityError("修正后的候选人资料包含原始敏感信息")
+    if contains_detectable_sensitive_data(serialized):
+        raise ModelPayloadSecurityError("修正后的候选人资料包含可识别的敏感信息")
 
 
 def build_resume_model_payload(document: ResumeDocument) -> dict[str, Any]:
@@ -55,9 +83,10 @@ def send_resume_model_payload(
 def build_resume_analysis_payload(
     document: ResumeDocument,
     criteria_version: JobCriteriaVersion,
+    candidate_profile: CandidateProfile | None = None,
 ) -> dict[str, Any]:
     resume_payload = build_resume_model_payload(document)
-    return {
+    payload = {
         **resume_payload,
         "criteria": {
             "criteria_version_id": str(criteria_version.id),
@@ -89,3 +118,8 @@ def build_resume_analysis_payload(
             ],
         },
     }
+    if candidate_profile is not None:
+        profile_payload = _candidate_profile_payload(candidate_profile)
+        validate_candidate_profile_payload(document, profile_payload)
+        payload["candidate_profile_override"] = profile_payload
+    return payload

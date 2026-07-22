@@ -93,6 +93,24 @@ class CandidateProfileDraft(BaseModel):
     languages: list[LanguageItem] = Field(default_factory=list, max_length=100)
 
 
+class CandidateProfileCorrectionRequest(CandidateProfileDraft):
+    source_profile_id: uuid.UUID
+    criteria_version_id: uuid.UUID
+
+
+class ReanalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    criteria_version_id: uuid.UUID
+    candidate_profile_id: uuid.UUID | None = None
+
+
+class BatchReanalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    criteria_version_id: uuid.UUID
+
+
 class HardRequirementJudgmentDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -169,6 +187,32 @@ class CandidateProfileResponse(CandidateProfileDraft):
     model_name: str
     prompt_version: str
     created_at: datetime
+
+
+class ReanalysisTaskResponse(BaseModel):
+    status: Literal["queued", "enqueue_failed", "skipped"]
+    document_id: uuid.UUID
+    criteria_version_id: uuid.UUID
+    analysis_version: int
+    candidate_profile_id: uuid.UUID | None
+    task_id: str | None = None
+    message: str | None = None
+
+
+class CandidateProfileCorrectionResponse(BaseModel):
+    profile: CandidateProfileResponse
+    reanalysis: ReanalysisTaskResponse
+
+
+class BatchReanalysisResponse(BaseModel):
+    status: Literal["queued", "partial_failure", "enqueue_failed"]
+    batch_id: uuid.UUID
+    criteria_version_id: uuid.UUID
+    analysis_version: int
+    queued_count: int
+    failed_count: int
+    skipped_count: int
+    tasks: list[ReanalysisTaskResponse]
 
 
 class HardRequirementJudgmentResponse(BaseModel):

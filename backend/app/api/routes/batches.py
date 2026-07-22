@@ -3,13 +3,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
 from app.config import settings
 from app.database import get_db
 from app.models import (
+    CandidateProfile,
     DimensionScore,
     Job,
     JobCriteriaVersion,
@@ -163,7 +164,11 @@ def get_latest_screening_result(
                 RecruiterDecision.operator
             ),
         )
-        .order_by(ScreeningResult.analysis_version.desc())
+        .order_by(
+            case((ScreeningResult.status == "completed", 0), else_=1),
+            ScreeningResult.created_at.desc(),
+            ScreeningResult.analysis_version.desc(),
+        )
         .limit(1)
     )
 
@@ -616,11 +621,34 @@ def retry_document_analysis(
             status_code=status.HTTP_409_CONFLICT,
             detail="简历尚未完成解析和脱敏，不能开始 AI 分析",
         )
-    latest = get_latest_screening_result(db, document.id)
-    if latest is not None and latest.status == "processing":
+    processing_result = db.scalar(
+        select(ScreeningResult.id).where(
+            ScreeningResult.document_id == document.id,
+            ScreeningResult.criteria_version_id == document.batch.criteria_version_id,
+            ScreeningResult.status == "processing",
+        )
+    )
+    if processing_result is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="AI 分析正在进行中")
+    profile_id = db.scalar(
+        select(CandidateProfile.id)
+        .where(CandidateProfile.document_id == document.id)
+        .order_by(CandidateProfile.version_number.desc())
+        .limit(1)
+    )
+    latest_version = db.scalar(
+        select(func.max(ScreeningResult.analysis_version)).where(
+            ScreeningResult.document_id == document.id,
+            ScreeningResult.criteria_version_id == document.batch.criteria_version_id,
+        )
+    )
     try:
-        task_id = enqueue_resume_analysis(document.id)
+        task_id = enqueue_resume_analysis(
+            document.id,
+            criteria_version_id=document.batch.criteria_version_id,
+            candidate_profile_id=profile_id,
+            analysis_version=(latest_version or 0) + 1,
+        )
     except Exception as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

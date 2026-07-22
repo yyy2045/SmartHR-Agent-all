@@ -43,6 +43,9 @@ function pageMeta(pathname: string) {
   if (pathname.endsWith('/compare')) {
     return { title: '候选人对比', subtitle: '在同一职位标准下横向比较候选人' }
   }
+  if (pathname.endsWith('/history') && pathname.includes('/documents/')) {
+    return { title: '候选人资料与版本', subtitle: '修正结构化资料并追踪每次分析结果' }
+  }
   return { title: '职位管理', subtitle: '管理招聘职位与版本化筛选标准' }
 }
 
