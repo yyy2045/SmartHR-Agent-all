@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -25,6 +26,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.job import Job, JobCriteriaVersion
+    from app.models.user import User
 
 
 class ScreeningBatch(Base):
@@ -369,6 +371,11 @@ class ScreeningResult(Base):
         cascade="all, delete-orphan",
         order_by="EvidenceCitation.sort_order",
     )
+    recruiter_decisions: Mapped[list[RecruiterDecision]] = relationship(
+        back_populates="screening_result",
+        cascade="all, delete-orphan",
+        order_by="RecruiterDecision.sequence_number",
+    )
 
 
 class DimensionScore(Base):
@@ -459,3 +466,52 @@ class EvidenceCitation(Base):
     segment: Mapped[ResumeTextSegment | None] = relationship(
         back_populates="evidence_citations"
     )
+
+
+class RecruiterDecision(Base):
+    __tablename__ = "recruiter_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "previous_decision IN ('unprocessed', 'shortlisted', 'pending', 'rejected')",
+            name="ck_recruiter_decisions_previous",
+        ),
+        CheckConstraint(
+            "decision IN ('shortlisted', 'pending', 'rejected')",
+            name="ck_recruiter_decisions_decision",
+        ),
+        CheckConstraint("sequence_number >= 1", name="ck_recruiter_decisions_sequence"),
+        UniqueConstraint(
+            "screening_result_id",
+            "sequence_number",
+            name="uq_recruiter_decision_result_sequence",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    screening_result_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("screening_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    is_auto_rejection_override: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    screening_result: Mapped[ScreeningResult] = relationship(
+        back_populates="recruiter_decisions"
+    )
+    operator: Mapped[User] = relationship()

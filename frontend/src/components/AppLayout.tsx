@@ -37,6 +37,9 @@ function pageMeta(pathname: string) {
   if (pathname.endsWith('/batches')) {
     return { title: '简历批次', subtitle: '批量上传并跟踪逐文件处理状态' }
   }
+  if (pathname.endsWith('/results')) {
+    return { title: '筛选结果', subtitle: '查看 AI 依据并记录招聘专员的最终判断' }
+  }
   return { title: '职位管理', subtitle: '管理招聘职位与版本化筛选标准' }
 }
 

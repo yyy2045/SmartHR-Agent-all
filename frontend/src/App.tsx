@@ -18,6 +18,11 @@ const JobFormPage = lazy(() =>
 const JobListPage = lazy(() =>
   import('./pages/JobListPage').then((module) => ({ default: module.JobListPage })),
 )
+const ScreeningResultsPage = lazy(() =>
+  import('./pages/ScreeningResultsPage').then((module) => ({
+    default: module.ScreeningResultsPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -37,6 +42,7 @@ function App() {
                 <Route path="/jobs/:jobId/edit" element={<JobFormPage />} />
                 <Route path="/jobs/:jobId/criteria" element={<CriteriaPage />} />
                 <Route path="/jobs/:jobId/batches" element={<BatchPage />} />
+                <Route path="/jobs/:jobId/results" element={<ScreeningResultsPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

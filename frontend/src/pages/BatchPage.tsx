@@ -6,6 +6,7 @@ import {
   FileDoneOutlined,
   FileExcelOutlined,
   FileOutlined,
+  FileSearchOutlined,
   RedoOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
@@ -484,6 +485,13 @@ export function BatchPage() {
             onClick={() => navigate(`/jobs/${jobId}/criteria`)}
           >
             筛选标准
+          </Button>
+          <Button
+            type="primary"
+            icon={<FileSearchOutlined />}
+            onClick={() => navigate(`/jobs/${jobId}/results`)}
+          >
+            筛选结果
           </Button>
         </Space>
       </div>

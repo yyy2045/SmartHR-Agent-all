@@ -166,6 +166,144 @@ export interface ScreeningBatchRecord {
   documents: ResumeDocumentRecord[]
 }
 
+export type AnalysisStatus = 'processing' | 'completed' | 'failed'
+export type AIGroup = 'passed' | 'low_match' | 'auto_rejected'
+export type RequirementStatus = 'passed' | 'failed' | 'unknown'
+export type ManualDecision = 'unprocessed' | 'shortlisted' | 'pending' | 'rejected'
+export type DecisionAction = Exclude<ManualDecision, 'unprocessed'>
+
+export interface EvidenceCitationRecord {
+  id: string
+  subject_type: 'profile' | 'hard_requirement' | 'dimension'
+  subject_key: string
+  segment_key: string
+  quote: string
+  source_type: 'pdf_page' | 'docx_paragraph' | 'image_ocr'
+  page_number: number | null
+  paragraph_index: number | null
+  sort_order: number
+}
+
+export interface HardRequirementJudgmentRecord {
+  requirement_id: string
+  requirement_type: string
+  title: string
+  expected_value: string
+  auto_reject: boolean
+  status: RequirementStatus
+  rationale: string
+  evidence_segment_keys: string[]
+}
+
+export interface DimensionScoreRecord {
+  id: string
+  scoring_dimension_id: string | null
+  dimension_name: string
+  score: number
+  weight_percent: number
+  weighted_score: number
+  rationale: string
+  missing_items: string[]
+  sort_order: number
+  evidence: EvidenceCitationRecord[]
+}
+
+export interface CandidateProfileRecord {
+  id: string
+  document_id: string
+  version_number: number
+  source: 'ai' | 'manual'
+  source_profile_id: string | null
+  model_name: string
+  prompt_version: string
+  education: Record<string, unknown>[]
+  work_experiences: Record<string, unknown>[]
+  projects: Record<string, unknown>[]
+  skills: Record<string, unknown>[]
+  certifications: Record<string, unknown>[]
+  languages: Record<string, unknown>[]
+  created_at: string
+}
+
+export interface RecruiterDecisionRecord {
+  id: string
+  screening_result_id: string
+  sequence_number: number
+  previous_decision: ManualDecision
+  decision: DecisionAction
+  reason: string | null
+  is_auto_rejection_override: boolean
+  operator_id: string
+  operator_display_name: string
+  created_at: string
+}
+
+export interface ScreeningResultSummary {
+  id: string
+  batch_id: string
+  batch_name: string
+  document_id: string
+  candidate_code: string
+  criteria_version_id: string
+  criteria_version_number: number
+  analysis_version: number
+  status: AnalysisStatus
+  ai_group: AIGroup | null
+  total_score: number | null
+  pass_threshold: number
+  current_decision: ManualDecision
+  latest_decision_at: string | null
+  created_at: string
+}
+
+export interface ScreeningResultDetail {
+  id: string
+  document_id: string
+  candidate_code: string
+  criteria_version_id: string
+  criteria_version_number: number
+  analysis_version: number
+  status: AnalysisStatus
+  ai_group: AIGroup | null
+  total_score: number | null
+  pass_threshold: number
+  hard_requirements: HardRequirementJudgmentRecord[]
+  strengths: string[]
+  gaps: string[]
+  missing_items: string[]
+  interview_questions: string[]
+  model_name: string
+  prompt_version: string
+  failure_code: string | null
+  failure_message: string | null
+  started_at: string
+  completed_at: string | null
+  created_at: string
+  candidate_profile: CandidateProfileRecord | null
+  dimension_scores: DimensionScoreRecord[]
+  evidence: EvidenceCitationRecord[]
+  current_decision: ManualDecision
+  decision_history: RecruiterDecisionRecord[]
+}
+
+export interface OriginalEvidenceRecord {
+  citation_id: string
+  segment_key: string
+  quote: string
+  original_text: string
+  source_type: 'pdf_page' | 'docx_paragraph' | 'image_ocr'
+  page_number: number | null
+  paragraph_index: number | null
+}
+
+export interface ScreeningResultFilters {
+  processingStatus?: AnalysisStatus
+  aiGroup?: AIGroup
+  minScore?: number
+  maxScore?: number
+  decision?: ManualDecision
+}
+
 export const AUTH_UNAUTHORIZED_EVENT = 'smarthr:auth-unauthorized'
 
 export class ApiError extends Error {
@@ -391,4 +529,61 @@ export function fetchResumeDocumentDetail(
 
 export function resumeFileUrl(jobId: string, batchId: string, documentId: string): string {
   return `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/file`
+}
+
+export function fetchScreeningResults(
+  jobId: string,
+  filters: ScreeningResultFilters = {},
+): Promise<ScreeningResultSummary[]> {
+  const query = new URLSearchParams()
+  if (filters.processingStatus) query.set('processing_status', filters.processingStatus)
+  if (filters.aiGroup) query.set('ai_group', filters.aiGroup)
+  if (filters.minScore !== undefined) query.set('min_score', String(filters.minScore))
+  if (filters.maxScore !== undefined) query.set('max_score', String(filters.maxScore))
+  if (filters.decision) query.set('decision', filters.decision)
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(
+    `/api/jobs/${jobId}/screening-results${suffix}`,
+    {},
+    '无法读取筛选结果',
+  )
+}
+
+export function fetchScreeningResult(
+  jobId: string,
+  resultId: string,
+): Promise<ScreeningResultDetail> {
+  return apiRequest(
+    `/api/jobs/${jobId}/screening-results/${resultId}`,
+    {},
+    '无法读取候选人筛选详情',
+  )
+}
+
+export function fetchOriginalEvidence(
+  jobId: string,
+  resultId: string,
+  citationId: string,
+): Promise<OriginalEvidenceRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/screening-results/${resultId}/evidence/${citationId}`,
+    {},
+    '无法读取原文证据',
+  )
+}
+
+export function createRecruiterDecision(
+  jobId: string,
+  resultId: string,
+  decision: DecisionAction,
+  reason?: string,
+): Promise<RecruiterDecisionRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/screening-results/${resultId}/decisions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ decision, reason: reason || null }),
+    },
+    '保存人工结论失败',
+  )
 }

@@ -13,6 +13,7 @@ from app.models import (
     DimensionScore,
     Job,
     JobCriteriaVersion,
+    RecruiterDecision,
     ResumeDocument,
     ScreeningBatch,
     ScreeningResult,
@@ -29,6 +30,7 @@ from app.schemas.screening import (
     DimensionScoreResponse,
     EvidenceCitationResponse,
     HardRequirementJudgmentResponse,
+    RecruiterDecisionResponse,
     ScreeningResultResponse,
 )
 from app.services.batch_status import refresh_batch_status
@@ -157,6 +159,9 @@ def get_latest_screening_result(
                 DimensionScore.evidence_citations
             ),
             selectinload(ScreeningResult.evidence_citations),
+            selectinload(ScreeningResult.recruiter_decisions).selectinload(
+                RecruiterDecision.operator
+            ),
         )
         .order_by(ScreeningResult.analysis_version.desc())
         .limit(1)
@@ -240,6 +245,21 @@ def screening_result_response(
         EvidenceCitationResponse.model_validate(item)
         for item in result.evidence_citations
     ]
+    decision_history = [
+        RecruiterDecisionResponse(
+            id=item.id,
+            screening_result_id=item.screening_result_id,
+            sequence_number=item.sequence_number,
+            previous_decision=item.previous_decision,
+            decision=item.decision,
+            reason=item.reason,
+            is_auto_rejection_override=item.is_auto_rejection_override,
+            operator_id=item.operator_id,
+            operator_display_name=item.operator.display_name,
+            created_at=item.created_at,
+        )
+        for item in result.recruiter_decisions
+    ]
     return ScreeningResultResponse(
         id=result.id,
         document_id=result.document_id,
@@ -290,6 +310,12 @@ def screening_result_response(
             for item in result.dimension_scores
         ],
         evidence=citations,
+        current_decision=(
+            result.recruiter_decisions[-1].decision
+            if result.recruiter_decisions
+            else "unprocessed"
+        ),
+        decision_history=decision_history,
     )
 
 
