@@ -9,12 +9,27 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.dependencies.auth import CurrentUser
 from app.config import settings
 from app.database import get_db
-from app.models import Job, JobCriteriaVersion, ResumeDocument, ScreeningBatch
+from app.models import (
+    DimensionScore,
+    Job,
+    JobCriteriaVersion,
+    ResumeDocument,
+    ScreeningBatch,
+    ScreeningResult,
+)
 from app.schemas.batch import (
     ResumeDocumentDetailResponse,
     ResumeDocumentResponse,
     ResumeTextSegmentResponse,
     ScreeningBatchResponse,
+)
+from app.schemas.screening import (
+    AnalysisQueueResponse,
+    CandidateProfileResponse,
+    DimensionScoreResponse,
+    EvidenceCitationResponse,
+    HardRequirementJudgmentResponse,
+    ScreeningResultResponse,
 )
 from app.services.batch_status import refresh_batch_status
 from app.services.file_storage import (
@@ -24,7 +39,7 @@ from app.services.file_storage import (
     safe_original_filename,
     store_resume_upload,
 )
-from app.workers.dispatcher import enqueue_resume_parsing
+from app.workers.dispatcher import enqueue_resume_analysis, enqueue_resume_parsing
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -128,6 +143,26 @@ def get_owned_document_detail(
     return document
 
 
+def get_latest_screening_result(
+    db: Session,
+    document_id: uuid.UUID,
+) -> ScreeningResult | None:
+    return db.scalar(
+        select(ScreeningResult)
+        .where(ScreeningResult.document_id == document_id)
+        .options(
+            selectinload(ScreeningResult.candidate_profile),
+            selectinload(ScreeningResult.criteria_version),
+            selectinload(ScreeningResult.dimension_scores).selectinload(
+                DimensionScore.evidence_citations
+            ),
+            selectinload(ScreeningResult.evidence_citations),
+        )
+        .order_by(ScreeningResult.analysis_version.desc())
+        .limit(1)
+    )
+
+
 def is_duplicate_resume(
     db: Session,
     *,
@@ -194,6 +229,67 @@ def batch_response(batch: ScreeningBatch) -> ScreeningBatchResponse:
         created_at=batch.created_at,
         updated_at=batch.updated_at,
         documents=[document_response(item) for item in documents],
+    )
+
+
+def screening_result_response(
+    result: ScreeningResult,
+    candidate_code: str,
+) -> ScreeningResultResponse:
+    citations = [
+        EvidenceCitationResponse.model_validate(item)
+        for item in result.evidence_citations
+    ]
+    return ScreeningResultResponse(
+        id=result.id,
+        document_id=result.document_id,
+        candidate_code=candidate_code,
+        criteria_version_id=result.criteria_version_id,
+        criteria_version_number=result.criteria_version.version_number,
+        analysis_version=result.analysis_version,
+        status=result.status,
+        ai_group=result.ai_group,
+        total_score=float(result.total_score) if result.total_score is not None else None,
+        pass_threshold=result.pass_threshold,
+        hard_requirements=[
+            HardRequirementJudgmentResponse.model_validate(item)
+            for item in result.hard_requirement_results
+        ],
+        strengths=result.strengths,
+        gaps=result.gaps,
+        missing_items=result.missing_items,
+        interview_questions=result.interview_questions,
+        model_name=result.model_name,
+        prompt_version=result.prompt_version,
+        failure_code=result.failure_code,
+        failure_message=result.failure_message,
+        started_at=result.started_at,
+        completed_at=result.completed_at,
+        created_at=result.created_at,
+        candidate_profile=(
+            CandidateProfileResponse.model_validate(result.candidate_profile)
+            if result.candidate_profile is not None
+            else None
+        ),
+        dimension_scores=[
+            DimensionScoreResponse(
+                id=item.id,
+                scoring_dimension_id=item.scoring_dimension_id,
+                dimension_name=item.dimension_name,
+                score=item.score,
+                weight_percent=item.weight_percent,
+                weighted_score=float(item.weighted_score),
+                rationale=item.rationale,
+                missing_items=item.missing_items,
+                sort_order=item.sort_order,
+                evidence=[
+                    EvidenceCitationResponse.model_validate(citation)
+                    for citation in item.evidence_citations
+                ],
+            )
+            for item in result.dimension_scores
+        ],
+        evidence=citations,
     )
 
 
@@ -444,6 +540,67 @@ def get_document_detail(
             for segment in document.text_segments
         ],
     )
+
+
+@router.get(
+    "/{job_id}/batches/{batch_id}/documents/{document_id}/analysis",
+    response_model=ScreeningResultResponse,
+)
+def get_document_analysis(
+    job_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    document_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> ScreeningResultResponse:
+    document = get_owned_document(
+        db,
+        job_id,
+        batch_id,
+        document_id,
+        current_user.id,
+    )
+    result = get_latest_screening_result(db, document.id)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="尚无 AI 分析结果")
+    return screening_result_response(result, document.candidate_code)
+
+
+@router.post(
+    "/{job_id}/batches/{batch_id}/documents/{document_id}/analysis-retry",
+    response_model=AnalysisQueueResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_document_analysis(
+    job_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    document_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> AnalysisQueueResponse:
+    document = get_owned_document(
+        db,
+        job_id,
+        batch_id,
+        document_id,
+        current_user.id,
+    )
+    if document.status != "completed" or document.redacted_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="简历尚未完成解析和脱敏，不能开始 AI 分析",
+        )
+    latest = get_latest_screening_result(db, document.id)
+    if latest is not None and latest.status == "processing":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="AI 分析正在进行中")
+    try:
+        task_id = enqueue_resume_analysis(document.id)
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI 分析任务创建失败，请稍后重试",
+        ) from error
+    return AnalysisQueueResponse(status="queued", task_id=task_id)
 
 
 @router.get("/{job_id}/batches/{batch_id}/documents/{document_id}/file")

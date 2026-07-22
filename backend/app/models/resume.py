@@ -5,12 +5,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -130,6 +132,16 @@ class ResumeDocument(Base):
         cascade="all, delete-orphan",
         order_by="ResumeTextSegment.sort_order",
     )
+    candidate_profiles: Mapped[list[CandidateProfile]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="CandidateProfile.version_number",
+    )
+    screening_results: Mapped[list[ScreeningResult]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="ScreeningResult.analysis_version",
+    )
 
     @property
     def candidate_code(self) -> str:
@@ -180,6 +192,9 @@ class ResumeTextSegment(Base):
         cascade="all, delete-orphan",
         order_by="ResumeRedaction.start_offset",
     )
+    evidence_citations: Mapped[list[EvidenceCitation]] = relationship(
+        back_populates="segment",
+    )
 
 
 class ResumeRedaction(Base):
@@ -219,3 +234,228 @@ class ResumeRedaction(Base):
     )
 
     segment: Mapped[ResumeTextSegment] = relationship(back_populates="redactions")
+
+
+class CandidateProfile(Base):
+    __tablename__ = "candidate_profiles"
+    __table_args__ = (
+        CheckConstraint("version_number >= 1", name="ck_candidate_profiles_version"),
+        CheckConstraint("source IN ('ai', 'manual')", name="ck_candidate_profiles_source"),
+        UniqueConstraint(
+            "document_id",
+            "version_number",
+            name="uq_candidate_profile_document_version",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("resume_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="ai")
+    source_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("candidate_profiles.id", ondelete="SET NULL")
+    )
+    model_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    education: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    work_experiences: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    projects: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    skills: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    certifications: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    languages: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    document: Mapped[ResumeDocument] = relationship(back_populates="candidate_profiles")
+    screening_results: Mapped[list[ScreeningResult]] = relationship(
+        back_populates="candidate_profile"
+    )
+
+
+class ScreeningResult(Base):
+    __tablename__ = "screening_results"
+    __table_args__ = (
+        CheckConstraint("analysis_version >= 1", name="ck_screening_results_version"),
+        CheckConstraint(
+            "status IN ('processing', 'completed', 'failed')",
+            name="ck_screening_results_status",
+        ),
+        CheckConstraint(
+            "ai_group IS NULL OR ai_group IN ('passed', 'low_match', 'auto_rejected')",
+            name="ck_screening_results_ai_group",
+        ),
+        CheckConstraint(
+            "total_score IS NULL OR (total_score >= 0 AND total_score <= 100)",
+            name="ck_screening_results_total_score",
+        ),
+        CheckConstraint(
+            "pass_threshold >= 0 AND pass_threshold <= 100",
+            name="ck_screening_results_pass_threshold",
+        ),
+        UniqueConstraint(
+            "document_id",
+            "criteria_version_id",
+            "analysis_version",
+            name="uq_screening_result_analysis_version",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("resume_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    candidate_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("candidate_profiles.id", ondelete="CASCADE"),
+        index=True,
+    )
+    criteria_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_criteria_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="processing", index=True
+    )
+    ai_group: Mapped[str | None] = mapped_column(String(30), index=True)
+    total_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    pass_threshold: Mapped[int] = mapped_column(Integer, nullable=False)
+    hard_requirement_results: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    strengths: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    gaps: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    missing_items: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    interview_questions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    model_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(50))
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    document: Mapped[ResumeDocument] = relationship(back_populates="screening_results")
+    candidate_profile: Mapped[CandidateProfile | None] = relationship(
+        back_populates="screening_results"
+    )
+    criteria_version: Mapped[JobCriteriaVersion] = relationship(
+        back_populates="screening_results"
+    )
+    dimension_scores: Mapped[list[DimensionScore]] = relationship(
+        back_populates="screening_result",
+        cascade="all, delete-orphan",
+        order_by="DimensionScore.sort_order",
+    )
+    evidence_citations: Mapped[list[EvidenceCitation]] = relationship(
+        back_populates="screening_result",
+        cascade="all, delete-orphan",
+        order_by="EvidenceCitation.sort_order",
+    )
+
+
+class DimensionScore(Base):
+    __tablename__ = "dimension_scores"
+    __table_args__ = (
+        CheckConstraint("score >= 0 AND score <= 100", name="ck_dimension_scores_score"),
+        CheckConstraint(
+            "weight_percent >= 0 AND weight_percent <= 100",
+            name="ck_dimension_scores_weight",
+        ),
+        CheckConstraint(
+            "weighted_score >= 0 AND weighted_score <= 100",
+            name="ck_dimension_scores_weighted_score",
+        ),
+        CheckConstraint("sort_order >= 0", name="ck_dimension_scores_sort_order"),
+        UniqueConstraint(
+            "screening_result_id",
+            "sort_order",
+            name="uq_dimension_score_result_sort_order",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    screening_result_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("screening_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    scoring_dimension_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("scoring_dimensions.id", ondelete="SET NULL"),
+        index=True,
+    )
+    dimension_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    weight_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    weighted_score: Mapped[float] = mapped_column(Numeric(7, 2), nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    missing_items: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    screening_result: Mapped[ScreeningResult] = relationship(
+        back_populates="dimension_scores"
+    )
+    evidence_citations: Mapped[list[EvidenceCitation]] = relationship(
+        back_populates="dimension_score"
+    )
+
+
+class EvidenceCitation(Base):
+    __tablename__ = "evidence_citations"
+    __table_args__ = (
+        CheckConstraint(
+            "subject_type IN ('profile', 'hard_requirement', 'dimension')",
+            name="ck_evidence_citations_subject_type",
+        ),
+        CheckConstraint("sort_order >= 0", name="ck_evidence_citations_sort_order"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    screening_result_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("screening_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    dimension_score_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("dimension_scores.id", ondelete="SET NULL"),
+        index=True,
+    )
+    segment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("resume_text_segments.id", ondelete="SET NULL"),
+        index=True,
+    )
+    subject_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    subject_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    segment_key: Mapped[str] = mapped_column(String(20), nullable=False)
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    paragraph_index: Mapped[int | None] = mapped_column(Integer)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    screening_result: Mapped[ScreeningResult] = relationship(
+        back_populates="evidence_citations"
+    )
+    dimension_score: Mapped[DimensionScore | None] = relationship(
+        back_populates="evidence_citations"
+    )
+    segment: Mapped[ResumeTextSegment | None] = relationship(
+        back_populates="evidence_citations"
+    )
