@@ -27,6 +27,23 @@ def parse_resume_task(task, document_id: str) -> dict[str, str | int | bool]:
 
 
 @celery_app.task(name="resume.analyze", bind=True, acks_late=True)
-def analyze_resume_task(task, document_id: str) -> dict[str, str | float | int]:
+def analyze_resume_task(
+    task,
+    document_id: str,
+    criteria_version_id: str | None = None,
+    candidate_profile_id: str | None = None,
+    analysis_version: int | None = None,
+) -> dict[str, str | float | int]:
     del task
-    return asyncio.run(analyze_resume_document(uuid.UUID(document_id)))
+    return asyncio.run(
+        analyze_resume_document(
+            uuid.UUID(document_id),
+            criteria_version_id=(
+                uuid.UUID(criteria_version_id) if criteria_version_id else None
+            ),
+            candidate_profile_id=(
+                uuid.UUID(candidate_profile_id) if candidate_profile_id else None
+            ),
+            analysis_version=analysis_version,
+        )
+    )

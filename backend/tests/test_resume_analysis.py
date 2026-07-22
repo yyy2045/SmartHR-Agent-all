@@ -32,6 +32,7 @@ from app.services.security import hash_password
 class AnalysisDependencies:
     session_factory: sessionmaker[Session]
     document_id: uuid.UUID
+    criteria_version_id: uuid.UUID
     requirement_ids: dict[str, uuid.UUID]
     dimension_ids: dict[str, uuid.UUID]
 
@@ -196,6 +197,7 @@ def analysis_dependencies() -> Generator[AnalysisDependencies, None, None]:
         dependencies = AnalysisDependencies(
             session_factory=testing_session,
             document_id=document.id,
+            criteria_version_id=criteria.id,
             requirement_ids=requirement_ids,
             dimension_ids=dimension_ids,
         )
@@ -442,6 +444,104 @@ async def test_invalid_evidence_and_configuration_failure_are_isolated(
         assert document is not None
         assert document.status == "completed"
         assert db.scalar(select(func.count(CandidateProfile.id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_reanalysis_uses_manual_profile_and_preserves_previous_result(
+    analysis_dependencies: AnalysisDependencies,
+) -> None:
+    initial = await analyze_resume_document(
+        analysis_dependencies.document_id,
+        session_factory=analysis_dependencies.session_factory,
+        ai_client=StubAnalysisClient(valid_analysis(analysis_dependencies)),
+    )
+    assert initial["status"] == "completed"
+
+    with analysis_dependencies.session_factory() as db:
+        source = db.scalar(
+            select(CandidateProfile).where(
+                CandidateProfile.document_id == analysis_dependencies.document_id
+            )
+        )
+        assert source is not None
+        manual = CandidateProfile(
+            document_id=source.document_id,
+            version_number=2,
+            source="manual",
+            source_profile_id=source.id,
+            model_name="manual-correction",
+            prompt_version="profile-correction-v1",
+            education=source.education,
+            work_experiences=source.work_experiences,
+            projects=source.projects,
+            skills=[
+                {
+                    "name": "Python 3",
+                    "level": "精通",
+                    "evidence": [
+                        {"segment_key": "SEG-0001", "quote": "Python"}
+                    ],
+                }
+            ],
+            certifications=source.certifications,
+            languages=source.languages,
+        )
+        db.add(manual)
+        db.commit()
+        manual_id = manual.id
+
+    rerun_client = StubAnalysisClient(
+        valid_analysis(analysis_dependencies, system_score=90, quality_score=80)
+    )
+    rerun = await analyze_resume_document(
+        analysis_dependencies.document_id,
+        criteria_version_id=analysis_dependencies.criteria_version_id,
+        candidate_profile_id=manual_id,
+        analysis_version=2,
+        session_factory=analysis_dependencies.session_factory,
+        ai_client=rerun_client,
+    )
+
+    assert rerun["status"] == "completed"
+    assert rerun["analysis_version"] == 2
+    assert rerun["total_score"] == 86.0
+    override = rerun_client.payloads[0]["candidate_profile_override"]
+    assert isinstance(override, dict)
+    assert override["skills"][0]["name"] == "Python 3"
+
+    with analysis_dependencies.session_factory() as db:
+        results = list(
+            db.scalars(
+                select(ScreeningResult)
+                .where(ScreeningResult.document_id == analysis_dependencies.document_id)
+                .order_by(ScreeningResult.analysis_version)
+            )
+        )
+        assert [item.analysis_version for item in results] == [1, 2]
+        assert results[0].candidate_profile_id != manual_id
+        assert results[1].candidate_profile_id == manual_id
+        assert db.scalar(select(func.count(CandidateProfile.id))) == 2
+
+    failed = await analyze_resume_document(
+        analysis_dependencies.document_id,
+        criteria_version_id=analysis_dependencies.criteria_version_id,
+        candidate_profile_id=manual_id,
+        analysis_version=3,
+        session_factory=analysis_dependencies.session_factory,
+        ai_client=StubAnalysisClient(error=AIConfigurationError("模型暂不可用")),
+    )
+    assert failed["status"] == "failed"
+
+    with analysis_dependencies.session_factory() as db:
+        completed_versions = list(
+            db.scalars(
+                select(ScreeningResult.analysis_version).where(
+                    ScreeningResult.document_id == analysis_dependencies.document_id,
+                    ScreeningResult.status == "completed",
+                )
+            )
+        )
+        assert sorted(completed_versions) == [1, 2]
 
 
 def test_default_result_sorting_uses_group_then_descending_score() -> None:

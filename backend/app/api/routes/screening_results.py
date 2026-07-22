@@ -2,7 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
@@ -125,15 +125,6 @@ def list_screening_results(
             detail="最低分不能高于最高分",
         )
 
-    latest_version = (
-        select(func.max(ScreeningResult.analysis_version))
-        .where(
-            ScreeningResult.document_id == ResumeDocument.id,
-            ScreeningResult.criteria_version_id == ScreeningBatch.criteria_version_id,
-        )
-        .correlate(ResumeDocument, ScreeningBatch)
-        .scalar_subquery()
-    )
     statement = (
         select(ScreeningResult)
         .join(ResumeDocument)
@@ -142,21 +133,44 @@ def list_screening_results(
         .where(
             ScreeningBatch.job_id == job_id,
             Job.owner_id == current_user.id,
-            ScreeningResult.criteria_version_id == ScreeningBatch.criteria_version_id,
-            ScreeningResult.analysis_version == latest_version,
         )
         .options(*_result_options())
     )
-    if processing_status is not None:
-        statement = statement.where(ScreeningResult.status == processing_status)
-    if ai_group is not None:
-        statement = statement.where(ScreeningResult.ai_group == ai_group)
-    if min_score is not None:
-        statement = statement.where(ScreeningResult.total_score >= min_score)
-    if max_score is not None:
-        statement = statement.where(ScreeningResult.total_score <= max_score)
+    all_results = list(db.scalars(statement).unique().all())
+    grouped: dict[uuid.UUID, list[ScreeningResult]] = {}
+    for item in all_results:
+        grouped.setdefault(item.document_id, []).append(item)
 
-    results = list(db.scalars(statement).unique().all())
+    results: list[ScreeningResult] = []
+    for document_results in grouped.values():
+        completed = [item for item in document_results if item.status == "completed"]
+        candidates = completed or document_results
+        results.append(
+            max(
+                candidates,
+                key=lambda item: (
+                    item.created_at,
+                    item.criteria_version.version_number,
+                    item.analysis_version,
+                ),
+            )
+        )
+    if processing_status is not None:
+        results = [item for item in results if item.status == processing_status]
+    if ai_group is not None:
+        results = [item for item in results if item.ai_group == ai_group]
+    if min_score is not None:
+        results = [
+            item
+            for item in results
+            if item.total_score is not None and float(item.total_score) >= min_score
+        ]
+    if max_score is not None:
+        results = [
+            item
+            for item in results
+            if item.total_score is not None and float(item.total_score) <= max_score
+        ]
     if decision is not None:
         results = [item for item in results if _current_decision(item) == decision]
 

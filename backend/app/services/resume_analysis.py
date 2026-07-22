@@ -20,7 +20,7 @@ from app.models import (
     ScreeningBatch,
     ScreeningResult,
 )
-from app.schemas.screening import EvidenceReference, ResumeAnalysisDraft
+from app.schemas.screening import CandidateProfileDraft, EvidenceReference, ResumeAnalysisDraft
 from app.services.ai_client import (
     RESUME_MATCH_PROMPT_VERSION,
     AIConfigurationError,
@@ -71,6 +71,27 @@ def _load_document(db: Session, document_id: uuid.UUID) -> ResumeDocument | None
     )
 
 
+def _load_criteria(
+    db: Session,
+    criteria_version_id: uuid.UUID,
+) -> JobCriteriaVersion | None:
+    return db.scalar(
+        select(JobCriteriaVersion)
+        .where(JobCriteriaVersion.id == criteria_version_id)
+        .options(
+            selectinload(JobCriteriaVersion.hard_requirements),
+            selectinload(JobCriteriaVersion.scoring_dimensions),
+        )
+    )
+
+
+def _load_profile(
+    db: Session,
+    candidate_profile_id: uuid.UUID,
+) -> CandidateProfile | None:
+    return db.get(CandidateProfile, candidate_profile_id)
+
+
 def _latest_analysis_version(
     db: Session,
     *,
@@ -114,16 +135,38 @@ def _validate_evidence(
             )
 
 
+def validate_profile_evidence(
+    document: ResumeDocument,
+    profile: CandidateProfileDraft,
+) -> None:
+    segment_map = {segment.segment_key: segment for segment in document.text_segments}
+    for _, evidence in _profile_evidence(profile):
+        _validate_evidence(evidence, segment_map)
+
+
+def _profile_draft(profile: CandidateProfile) -> CandidateProfileDraft:
+    return CandidateProfileDraft.model_validate(
+        {
+            "education": profile.education,
+            "work_experiences": profile.work_experiences,
+            "projects": profile.projects,
+            "skills": profile.skills,
+            "certifications": profile.certifications,
+            "languages": profile.languages,
+        }
+    )
+
+
 def _profile_evidence(
-    analysis: ResumeAnalysisDraft,
+    profile: CandidateProfileDraft,
 ) -> Iterable[tuple[str, list[EvidenceReference]]]:
     collections = (
-        ("education", analysis.candidate_profile.education),
-        ("work_experience", analysis.candidate_profile.work_experiences),
-        ("project", analysis.candidate_profile.projects),
-        ("skill", analysis.candidate_profile.skills),
-        ("certification", analysis.candidate_profile.certifications),
-        ("language", analysis.candidate_profile.languages),
+        ("education", profile.education),
+        ("work_experience", profile.work_experiences),
+        ("project", profile.projects),
+        ("skill", profile.skills),
+        ("certification", profile.certifications),
+        ("language", profile.languages),
     )
     for item_type, items in collections:
         for index, item in enumerate(items):
@@ -134,6 +177,7 @@ def _validate_analysis_contract(
     analysis: ResumeAnalysisDraft,
     criteria: JobCriteriaVersion,
     segment_map: dict[str, ResumeTextSegment],
+    profile: CandidateProfileDraft,
 ) -> None:
     expected_requirements = {item.id for item in criteria.hard_requirements}
     returned_requirements = {item.requirement_id for item in analysis.hard_requirements}
@@ -148,7 +192,7 @@ def _validate_analysis_contract(
     if sum(item.weight_percent for item in criteria.scoring_dimensions) != 100:
         raise AnalysisContractError("已确认职位标准的评分权重总和不是 100%")
 
-    for _, evidence in _profile_evidence(analysis):
+    for _, evidence in _profile_evidence(profile):
         _validate_evidence(evidence, segment_map)
     for judgment in analysis.hard_requirements:
         _validate_evidence(judgment.evidence, segment_map)
@@ -220,6 +264,9 @@ def _mark_result_failed(
 async def analyze_resume_document(
     document_id: uuid.UUID,
     *,
+    criteria_version_id: uuid.UUID | None = None,
+    candidate_profile_id: uuid.UUID | None = None,
+    analysis_version: int | None = None,
     session_factory: SessionFactory = SessionLocal,
     ai_client: OpenAICompatibleClient | None = None,
 ) -> dict[str, str | float | int]:
@@ -233,44 +280,104 @@ async def analyze_resume_document(
                 "status": "not_ready",
                 "document_id": str(document_id),
             }
-        criteria = document.batch.criteria_version
-        if criteria.status != "confirmed":
+        criteria = (
+            _load_criteria(db, criteria_version_id)
+            if criteria_version_id is not None
+            else document.batch.criteria_version
+        )
+        if (
+            criteria is None
+            or criteria.job_id != document.batch.job_id
+            or criteria.status != "confirmed"
+        ):
             return {
                 "status": "not_ready",
                 "document_id": str(document_id),
             }
-        analysis_version = _latest_analysis_version(
+        profile = (
+            _load_profile(db, candidate_profile_id)
+            if candidate_profile_id is not None
+            else None
+        )
+        if profile is not None and profile.document_id != document.id:
+            return {
+                "status": "not_ready",
+                "document_id": str(document_id),
+            }
+        resolved_analysis_version = analysis_version or _latest_analysis_version(
             db,
             document_id=document.id,
             criteria_version_id=criteria.id,
         )
-        result = ScreeningResult(
-            document_id=document.id,
-            criteria_version_id=criteria.id,
-            analysis_version=analysis_version,
-            status="processing",
-            pass_threshold=criteria.pass_threshold,
-            hard_requirement_results=[],
-            strengths=[],
-            gaps=[],
-            missing_items=[],
-            interview_questions=[],
-            model_name=client.model or "unconfigured",
-            prompt_version=RESUME_MATCH_PROMPT_VERSION,
-            started_at=datetime.now(UTC),
+        result = db.scalar(
+            select(ScreeningResult).where(
+                ScreeningResult.document_id == document.id,
+                ScreeningResult.criteria_version_id == criteria.id,
+                ScreeningResult.analysis_version == resolved_analysis_version,
+            )
         )
-        db.add(result)
+        if result is not None and result.status == "completed":
+            return {
+                "status": "completed",
+                "result_id": str(result.id),
+                "analysis_version": result.analysis_version,
+                "group": result.ai_group or "",
+                "total_score": float(result.total_score or 0),
+            }
+        if result is not None and result.status == "processing":
+            return {
+                "status": "processing",
+                "result_id": str(result.id),
+                "analysis_version": result.analysis_version,
+            }
+        if result is None:
+            result = ScreeningResult(
+                document_id=document.id,
+                candidate_profile_id=profile.id if profile is not None else None,
+                criteria_version_id=criteria.id,
+                analysis_version=resolved_analysis_version,
+                status="processing",
+                pass_threshold=criteria.pass_threshold,
+                hard_requirement_results=[],
+                strengths=[],
+                gaps=[],
+                missing_items=[],
+                interview_questions=[],
+                model_name=client.model or "unconfigured",
+                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                started_at=datetime.now(UTC),
+            )
+            db.add(result)
+        else:
+            result.status = "processing"
+            result.candidate_profile_id = profile.id if profile is not None else None
+            result.pass_threshold = criteria.pass_threshold
+            result.failure_code = None
+            result.failure_message = None
+            result.completed_at = None
+            result.started_at = datetime.now(UTC)
         db.commit()
         result_id = result.id
+        resolved_criteria_id = criteria.id
+        resolved_profile_id = profile.id if profile is not None else None
 
     try:
         with session_factory() as db:
             document = _load_document(db, document_id)
             if document is None:
                 return {"status": "missing", "result_id": str(result_id)}
+            criteria = _load_criteria(db, resolved_criteria_id)
+            profile = (
+                _load_profile(db, resolved_profile_id)
+                if resolved_profile_id is not None
+                else None
+            )
+            if criteria is None:
+                return {"status": "missing", "result_id": str(result_id)}
             payload = build_resume_analysis_payload(
                 document,
-                document.batch.criteria_version,
+                criteria,
+                profile,
             )
         analysis = await client.analyze_resume(payload)
         with session_factory() as db:
@@ -278,39 +385,45 @@ async def analyze_resume_document(
             result = db.get(ScreeningResult, result_id)
             if document is None or result is None:
                 return {"status": "missing", "result_id": str(result_id)}
-            criteria = document.batch.criteria_version
-            segment_map = {segment.segment_key: segment for segment in document.text_segments}
-            _validate_analysis_contract(analysis, criteria, segment_map)
-
-            profile = CandidateProfile(
-                document_id=document.id,
-                version_number=_latest_profile_version(db, document.id),
-                source="ai",
-                model_name=client.model,
-                prompt_version=RESUME_MATCH_PROMPT_VERSION,
-                education=[
-                    item.model_dump(mode="json")
-                    for item in analysis.candidate_profile.education
-                ],
-                work_experiences=[
-                    item.model_dump(mode="json")
-                    for item in analysis.candidate_profile.work_experiences
-                ],
-                projects=[
-                    item.model_dump(mode="json")
-                    for item in analysis.candidate_profile.projects
-                ],
-                skills=[item.model_dump(mode="json") for item in analysis.candidate_profile.skills],
-                certifications=[
-                    item.model_dump(mode="json")
-                    for item in analysis.candidate_profile.certifications
-                ],
-                languages=[
-                    item.model_dump(mode="json")
-                    for item in analysis.candidate_profile.languages
-                ],
+            criteria = _load_criteria(db, resolved_criteria_id)
+            profile = (
+                _load_profile(db, resolved_profile_id)
+                if resolved_profile_id is not None
+                else None
             )
-            db.add(profile)
+            if criteria is None:
+                return {"status": "missing", "result_id": str(result_id)}
+            segment_map = {segment.segment_key: segment for segment in document.text_segments}
+            profile_data = _profile_draft(profile) if profile else analysis.candidate_profile
+            _validate_analysis_contract(analysis, criteria, segment_map, profile_data)
+
+            if profile is None:
+                profile = CandidateProfile(
+                    document_id=document.id,
+                    version_number=_latest_profile_version(db, document.id),
+                    source="ai",
+                    model_name=client.model,
+                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    education=[
+                        item.model_dump(mode="json") for item in profile_data.education
+                    ],
+                    work_experiences=[
+                        item.model_dump(mode="json")
+                        for item in profile_data.work_experiences
+                    ],
+                    projects=[
+                        item.model_dump(mode="json") for item in profile_data.projects
+                    ],
+                    skills=[item.model_dump(mode="json") for item in profile_data.skills],
+                    certifications=[
+                        item.model_dump(mode="json")
+                        for item in profile_data.certifications
+                    ],
+                    languages=[
+                        item.model_dump(mode="json") for item in profile_data.languages
+                    ],
+                )
+                db.add(profile)
             result.candidate_profile = profile
 
             requirement_map = {item.id: item for item in criteria.hard_requirements}
@@ -375,7 +488,7 @@ async def analyze_resume_document(
             result.interview_questions = analysis.interview_questions
 
             next_sort_order = [0]
-            for subject_key, evidence in _profile_evidence(analysis):
+            for subject_key, evidence in _profile_evidence(profile_data):
                 _add_citations(
                     result,
                     subject_type="profile",

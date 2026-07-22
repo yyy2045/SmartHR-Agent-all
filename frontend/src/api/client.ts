@@ -225,6 +225,41 @@ export interface CandidateProfileRecord {
   created_at: string
 }
 
+export interface CandidateProfileInput {
+  education: Record<string, unknown>[]
+  work_experiences: Record<string, unknown>[]
+  projects: Record<string, unknown>[]
+  skills: Record<string, unknown>[]
+  certifications: Record<string, unknown>[]
+  languages: Record<string, unknown>[]
+}
+
+export interface ReanalysisTaskRecord {
+  status: 'queued' | 'enqueue_failed' | 'skipped'
+  document_id: string
+  criteria_version_id: string
+  analysis_version: number
+  candidate_profile_id: string | null
+  task_id: string | null
+  message: string | null
+}
+
+export interface CandidateProfileCorrectionRecord {
+  profile: CandidateProfileRecord
+  reanalysis: ReanalysisTaskRecord
+}
+
+export interface BatchReanalysisRecord {
+  status: 'queued' | 'partial_failure' | 'enqueue_failed'
+  batch_id: string
+  criteria_version_id: string
+  analysis_version: number
+  queued_count: number
+  failed_count: number
+  skipped_count: number
+  tasks: ReanalysisTaskRecord[]
+}
+
 export interface RecruiterDecisionRecord {
   id: string
   screening_result_id: string
@@ -537,6 +572,87 @@ export function fetchResumeDocumentDetail(
 
 export function resumeFileUrl(jobId: string, batchId: string, documentId: string): string {
   return `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/file`
+}
+
+export function fetchCandidateProfiles(
+  jobId: string,
+  batchId: string,
+  documentId: string,
+): Promise<CandidateProfileRecord[]> {
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/profiles`,
+    {},
+    '无法读取候选人资料版本',
+  )
+}
+
+export function fetchCandidateAnalysisHistory(
+  jobId: string,
+  batchId: string,
+  documentId: string,
+): Promise<ScreeningResultDetail[]> {
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/analysis-history`,
+    {},
+    '无法读取候选人分析历史',
+  )
+}
+
+export function correctCandidateProfile(
+  jobId: string,
+  batchId: string,
+  documentId: string,
+  sourceProfileId: string,
+  criteriaVersionId: string,
+  profile: CandidateProfileInput,
+): Promise<CandidateProfileCorrectionRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/profile-corrections`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        source_profile_id: sourceProfileId,
+        criteria_version_id: criteriaVersionId,
+        ...profile,
+      }),
+    },
+    '修正候选人资料失败',
+  )
+}
+
+export function reanalyzeCandidate(
+  jobId: string,
+  batchId: string,
+  documentId: string,
+  criteriaVersionId: string,
+  candidateProfileId?: string,
+): Promise<ReanalysisTaskRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/reanalysis`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        criteria_version_id: criteriaVersionId,
+        candidate_profile_id: candidateProfileId,
+      }),
+    },
+    '重新分析候选人失败',
+  )
+}
+
+export function reanalyzeBatch(
+  jobId: string,
+  batchId: string,
+  criteriaVersionId: string,
+): Promise<BatchReanalysisRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}/reanalysis`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ criteria_version_id: criteriaVersionId }),
+    },
+    '整批重新分析失败',
+  )
 }
 
 export function fetchScreeningResults(
