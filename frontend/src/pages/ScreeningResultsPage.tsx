@@ -6,6 +6,7 @@ import {
   EyeOutlined,
   FileSearchOutlined,
   ReloadOutlined,
+  SwapOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -31,7 +32,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import {
@@ -129,6 +130,7 @@ export function ScreeningResultsPage() {
   const [minScore, setMinScore] = useState<number>()
   const [maxScore, setMaxScore] = useState<number>()
   const [selectedResultId, setSelectedResultId] = useState<string>()
+  const [selectedResultIds, setSelectedResultIds] = useState<string[]>([])
   const [decisionAction, setDecisionAction] = useState<DecisionAction>()
   const [decisionReason, setDecisionReason] = useState('')
   const [evidenceTarget, setEvidenceTarget] = useState<{
@@ -208,6 +210,20 @@ export function ScreeningResultsPage() {
       decisionAction &&
       ['shortlisted', 'pending'].includes(decisionAction),
   )
+  const selectedSummaries = useMemo(
+    () =>
+      selectedResultIds.flatMap((id) => {
+        const result = results.data?.find((item) => item.id === id)
+        return result ? [result] : []
+      }),
+    [results.data, selectedResultIds],
+  )
+
+  useEffect(() => {
+    if (!results.data) return
+    const visibleIds = new Set(results.data.map((item) => item.id))
+    setSelectedResultIds((current) => current.filter((id) => visibleIds.has(id)))
+  }, [results.data])
 
   function openDecision(action: DecisionAction) {
     setDecisionAction(action)
@@ -228,6 +244,31 @@ export function ScreeningResultsPage() {
     setDecision(undefined)
     setMinScore(undefined)
     setMaxScore(undefined)
+  }
+
+  function toggleComparisonCandidate(record: ScreeningResultSummary, selected: boolean) {
+    if (!selected) {
+      setSelectedResultIds((current) => current.filter((id) => id !== record.id))
+      return
+    }
+    if (record.status !== 'completed') {
+      messageApi.warning('只能比较已完成 AI 分析的候选人')
+      return
+    }
+    const first = selectedSummaries[0]
+    if (
+      first &&
+      (first.criteria_version_id !== record.criteria_version_id ||
+        first.analysis_version !== record.analysis_version)
+    ) {
+      messageApi.warning('只能比较同一职位标准和同一分析版本的候选人')
+      return
+    }
+    if (selectedResultIds.length >= 3) {
+      messageApi.warning('一次最多比较 3 名候选人')
+      return
+    }
+    setSelectedResultIds((current) => [...current, record.id])
   }
 
   const columns = [
@@ -391,7 +432,29 @@ export function ScreeningResultsPage() {
         </div>
       </Card>
 
-      <Card className="result-table-card">
+      <Card
+        className="result-table-card"
+        title={
+          <Space direction="vertical" size={0}>
+            <Text strong>候选人结果</Text>
+            <Text type="secondary">请选择 2～3 名同版本候选人进行横向比较</Text>
+          </Space>
+        }
+        extra={
+          <Button
+            type="primary"
+            icon={<SwapOutlined />}
+            disabled={selectedResultIds.length < 2}
+            onClick={() =>
+              navigate(
+                `/jobs/${jobId}/compare?ids=${encodeURIComponent(selectedResultIds.join(','))}`,
+              )
+            }
+          >
+            对比候选人（{selectedResultIds.length}/3）
+          </Button>
+        }
+      >
         {results.isError && (
           <Alert
             type="error"
@@ -411,12 +474,39 @@ export function ScreeningResultsPage() {
           </Empty>
         )}
         {results.isSuccess && results.data.length > 0 && (
-          <Table
+          <Table<ScreeningResultSummary>
             rowKey="id"
             columns={columns}
             dataSource={results.data}
             pagination={false}
             scroll={{ x: 960 }}
+            rowSelection={{
+              selectedRowKeys: selectedResultIds,
+              hideSelectAll: true,
+              onSelect: toggleComparisonCandidate,
+              getCheckboxProps: (record) => {
+                const first = selectedSummaries[0]
+                const incompatible = Boolean(
+                  first &&
+                    first.id !== record.id &&
+                    (first.criteria_version_id !== record.criteria_version_id ||
+                      first.analysis_version !== record.analysis_version),
+                )
+                const atLimit =
+                  selectedResultIds.length >= 3 && !selectedResultIds.includes(record.id)
+                return {
+                  disabled: record.status !== 'completed' || incompatible || atLimit,
+                  title:
+                    record.status !== 'completed'
+                      ? '只能比较已完成分析的候选人'
+                      : incompatible
+                        ? '职位标准或分析版本不同'
+                        : atLimit
+                          ? '一次最多比较 3 名候选人'
+                          : undefined,
+                }
+              },
+            }}
           />
         )}
       </Card>

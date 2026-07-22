@@ -267,6 +267,18 @@ class OriginalEvidenceResponse(BaseModel):
     paragraph_index: int | None
 
 
+class CandidateComparisonRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    result_ids: list[uuid.UUID] = Field(min_length=2, max_length=3)
+
+    @model_validator(mode="after")
+    def validate_unique_results(self) -> Self:
+        if len(self.result_ids) != len(set(self.result_ids)):
+            raise ValueError("对比候选人不能重复")
+        return self
+
+
 class ScreeningResultResponse(BaseModel):
     id: uuid.UUID
     document_id: uuid.UUID
@@ -295,6 +307,14 @@ class ScreeningResultResponse(BaseModel):
     evidence: list[EvidenceCitationResponse]
     current_decision: ManualDecision = "unprocessed"
     decision_history: list[RecruiterDecisionResponse] = Field(default_factory=list)
+
+
+class CandidateComparisonResponse(BaseModel):
+    job_id: uuid.UUID
+    criteria_version_id: uuid.UUID
+    criteria_version_number: int
+    analysis_version: int
+    candidates: list[ScreeningResultResponse]
 
 
 class AnalysisQueueResponse(BaseModel):

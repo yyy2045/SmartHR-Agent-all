@@ -1151,6 +1151,54 @@ input {
   border-left: 4px solid #3984dc;
 }
 
+/* 候选人横向对比 */
+.comparison-meta-card,
+.comparison-table-card {
+  border-color: #e4e9f0;
+  border-radius: 14px;
+  box-shadow: 0 3px 14px rgb(26 45 72 / 3%);
+}
+
+.comparison-meta-card {
+  margin-bottom: 18px;
+}
+
+.comparison-table-card .ant-card-body {
+  padding: 0;
+}
+
+.comparison-table-card .ant-table-cell {
+  vertical-align: top;
+}
+
+.comparison-table-card .ant-table-thead .ant-table-cell {
+  background: #f7faff;
+}
+
+.comparison-table-card .ant-table-cell-fix-left {
+  background: #fbfcfe;
+}
+
+.comparison-score {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.comparison-detail-cell {
+  min-width: 240px;
+}
+
+.comparison-detail-cell .ant-typography {
+  margin: 8px 0;
+}
+
+.comparison-dimension-score {
+  color: #176fc1;
+  font-size: 24px;
+}
+
 .sidebar-backdrop {
   display: none;
 }

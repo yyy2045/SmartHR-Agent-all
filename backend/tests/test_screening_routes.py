@@ -7,7 +7,7 @@ from decimal import Decimal
 import fakeredis
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -471,3 +471,212 @@ async def test_auto_rejection_recovery_requires_reason(
     assert "必须填写原因" in missing_reason.text
     assert recovered.status_code == 201
     assert recovered.json()["is_auto_rejection_override"] is True
+
+
+@pytest.mark.asyncio
+async def test_candidate_comparison_enforces_count_job_and_analysis_version(
+    screening_route_dependencies: ScreeningRouteDependencies,
+) -> None:
+    dependency = screening_route_dependencies
+    with dependency.session_factory() as db:
+        batch = db.get(ScreeningBatch, dependency.batch_id)
+        assert batch is not None
+        dimension = db.scalar(
+            select(ScoringDimension).where(
+                ScoringDimension.criteria_version_id == batch.criteria_version_id
+            )
+        )
+        assert dimension is not None
+
+        second_document = ResumeDocument(
+            batch_id=batch.id,
+            original_filename="resume-second.pdf",
+            file_extension=".pdf",
+            content_type="application/pdf",
+            detected_type="pdf",
+            size_bytes=100,
+            status="completed",
+            parsed_at=datetime.now(UTC),
+            redacted_at=datetime.now(UTC),
+        )
+        db.add(second_document)
+        db.flush()
+        second_result = ScreeningResult(
+            document_id=second_document.id,
+            criteria_version_id=batch.criteria_version_id,
+            analysis_version=1,
+            status="completed",
+            ai_group="low_match",
+            total_score=Decimal("55.00"),
+            pass_threshold=60,
+            hard_requirement_results=[],
+            strengths=["学习能力"],
+            gaps=["经验较少"],
+            missing_items=["证书信息"],
+            interview_questions=[],
+            model_name="stub-model",
+            prompt_version="resume-match-v1",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        second_result.dimension_scores = [
+            DimensionScore(
+                scoring_dimension_id=dimension.id,
+                dimension_name=dimension.name,
+                score=55,
+                weight_percent=100,
+                weighted_score=Decimal("55.00"),
+                rationale="基础能力符合，但经验不足。",
+                missing_items=[],
+                sort_order=0,
+            )
+        ]
+        db.add(second_result)
+
+        version_mismatch_document = ResumeDocument(
+            batch_id=batch.id,
+            original_filename="resume-version-two.pdf",
+            file_extension=".pdf",
+            content_type="application/pdf",
+            detected_type="pdf",
+            size_bytes=100,
+            status="completed",
+            parsed_at=datetime.now(UTC),
+            redacted_at=datetime.now(UTC),
+        )
+        db.add(version_mismatch_document)
+        db.flush()
+        version_mismatch_result = ScreeningResult(
+            document_id=version_mismatch_document.id,
+            criteria_version_id=batch.criteria_version_id,
+            analysis_version=2,
+            status="completed",
+            ai_group="passed",
+            total_score=Decimal("90.00"),
+            pass_threshold=60,
+            hard_requirement_results=[],
+            strengths=[],
+            gaps=[],
+            missing_items=[],
+            interview_questions=[],
+            model_name="stub-model",
+            prompt_version="resume-match-v1",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        db.add(version_mismatch_result)
+
+        owner = db.scalar(select(User).where(User.username == "recruiter"))
+        assert owner is not None
+        foreign_job = Job(
+            owner_id=owner.id,
+            title="另一个职位",
+            department="研发",
+            original_jd="JD",
+        )
+        db.add(foreign_job)
+        db.flush()
+        foreign_criteria = JobCriteriaVersion(
+            job_id=foreign_job.id,
+            version_number=1,
+            status="confirmed",
+            pass_threshold=60,
+            confirmed_by_id=owner.id,
+        )
+        db.add(foreign_criteria)
+        db.flush()
+        foreign_batch = ScreeningBatch(
+            job_id=foreign_job.id,
+            criteria_version_id=foreign_criteria.id,
+            name="跨职位",
+            status="completed",
+        )
+        db.add(foreign_batch)
+        db.flush()
+        foreign_document = ResumeDocument(
+            batch_id=foreign_batch.id,
+            original_filename="foreign.pdf",
+            file_extension=".pdf",
+            content_type="application/pdf",
+            detected_type="pdf",
+            size_bytes=100,
+            status="completed",
+            parsed_at=datetime.now(UTC),
+            redacted_at=datetime.now(UTC),
+        )
+        db.add(foreign_document)
+        db.flush()
+        foreign_result = ScreeningResult(
+            document_id=foreign_document.id,
+            criteria_version_id=foreign_criteria.id,
+            analysis_version=1,
+            status="completed",
+            ai_group="passed",
+            total_score=Decimal("80.00"),
+            pass_threshold=60,
+            hard_requirement_results=[],
+            strengths=[],
+            gaps=[],
+            missing_items=[],
+            interview_questions=[],
+            model_name="stub-model",
+            prompt_version="resume-match-v1",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        db.add(foreign_result)
+        db.commit()
+
+        second_result_id = second_result.id
+        second_candidate_code = second_document.candidate_code
+        mismatch_result_id = version_mismatch_result.id
+        foreign_result_id = foreign_result.id
+
+    path = f"/jobs/{dependency.job_id}/screening-results/compare"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        valid = await client.post(
+            path,
+            json={"result_ids": [str(second_result_id), str(dependency.result_id)]},
+        )
+        too_few = await client.post(path, json={"result_ids": [str(dependency.result_id)]})
+        too_many = await client.post(
+            path,
+            json={
+                "result_ids": [
+                    str(dependency.result_id),
+                    str(second_result_id),
+                    str(mismatch_result_id),
+                    str(foreign_result_id),
+                ]
+            },
+        )
+        duplicate = await client.post(
+            path,
+            json={"result_ids": [str(dependency.result_id), str(dependency.result_id)]},
+        )
+        mismatch = await client.post(
+            path,
+            json={"result_ids": [str(dependency.result_id), str(mismatch_result_id)]},
+        )
+        cross_job = await client.post(
+            path,
+            json={"result_ids": [str(dependency.result_id), str(foreign_result_id)]},
+        )
+
+    assert valid.status_code == 200
+    body = valid.json()
+    assert body["criteria_version_number"] == 1
+    assert body["analysis_version"] == 1
+    assert body["candidates"][0]["candidate_code"] == second_candidate_code
+    assert body["candidates"][1]["document_id"] == str(dependency.document_id)
+    assert [item["total_score"] for item in body["candidates"]] == [55.0, 88.0]
+    assert body["candidates"][0]["dimension_scores"][0]["dimension_name"] == "工程能力"
+    assert too_few.status_code == 422
+    assert too_many.status_code == 422
+    assert duplicate.status_code == 422
+    assert mismatch.status_code == 422
+    assert "同一职位标准和同一分析版本" in mismatch.text
+    assert cross_job.status_code == 422
+    assert "同一职位" in cross_job.text

@@ -296,6 +296,14 @@ export interface OriginalEvidenceRecord {
   paragraph_index: number | null
 }
 
+export interface CandidateComparison {
+  job_id: string
+  criteria_version_id: string
+  criteria_version_number: number
+  analysis_version: number
+  candidates: ScreeningResultDetail[]
+}
+
 export interface ScreeningResultFilters {
   processingStatus?: AnalysisStatus
   aiGroup?: AIGroup
@@ -585,5 +593,19 @@ export function createRecruiterDecision(
       body: JSON.stringify({ decision, reason: reason || null }),
     },
     '保存人工结论失败',
+  )
+}
+
+export function compareScreeningResults(
+  jobId: string,
+  resultIds: string[],
+): Promise<CandidateComparison> {
+  return apiRequest(
+    `/api/jobs/${jobId}/screening-results/compare`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ result_ids: resultIds }),
+    },
+    '无法比较候选人',
   )
 }

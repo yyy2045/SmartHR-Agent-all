@@ -23,6 +23,11 @@ const ScreeningResultsPage = lazy(() =>
     default: module.ScreeningResultsPage,
   })),
 )
+const CandidateComparisonPage = lazy(() =>
+  import('./pages/CandidateComparisonPage').then((module) => ({
+    default: module.CandidateComparisonPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -43,6 +48,7 @@ function App() {
                 <Route path="/jobs/:jobId/criteria" element={<CriteriaPage />} />
                 <Route path="/jobs/:jobId/batches" element={<BatchPage />} />
                 <Route path="/jobs/:jobId/results" element={<ScreeningResultsPage />} />
+                <Route path="/jobs/:jobId/compare" element={<CandidateComparisonPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
