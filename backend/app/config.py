@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     celery_broker_url: str = "redis://redis:6379/1"
     celery_result_backend: str = "redis://redis:6379/2"
+    celery_worker_concurrency: int = Field(default=1, ge=1, le=2)
 
     file_storage_root: Path = Path("data/local/uploads")
     max_resume_file_size_mb: int = 20

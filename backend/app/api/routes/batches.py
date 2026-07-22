@@ -10,7 +10,13 @@ from app.api.dependencies.auth import CurrentUser
 from app.config import settings
 from app.database import get_db
 from app.models import Job, JobCriteriaVersion, ResumeDocument, ScreeningBatch
-from app.schemas.batch import ResumeDocumentResponse, ScreeningBatchResponse
+from app.schemas.batch import (
+    ResumeDocumentDetailResponse,
+    ResumeDocumentResponse,
+    ResumeTextSegmentResponse,
+    ScreeningBatchResponse,
+)
+from app.services.batch_status import refresh_batch_status
 from app.services.file_storage import (
     FileValidationError,
     delete_private_file,
@@ -18,6 +24,7 @@ from app.services.file_storage import (
     safe_original_filename,
     store_resume_upload,
 )
+from app.workers.dispatcher import enqueue_resume_parsing
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -97,6 +104,30 @@ def get_owned_document(
     return document
 
 
+def get_owned_document_detail(
+    db: Session,
+    job_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    document_id: uuid.UUID,
+    owner_id: uuid.UUID,
+) -> ResumeDocument:
+    document = db.scalar(
+        select(ResumeDocument)
+        .join(ScreeningBatch)
+        .join(Job)
+        .where(
+            ResumeDocument.id == document_id,
+            ResumeDocument.batch_id == batch_id,
+            ScreeningBatch.job_id == job_id,
+            Job.owner_id == owner_id,
+        )
+        .options(selectinload(ResumeDocument.text_segments))
+    )
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="简历文件不存在")
+    return document
+
+
 def is_duplicate_resume(
     db: Session,
     *,
@@ -118,18 +149,30 @@ def is_duplicate_resume(
     return existing_id is not None
 
 
-def refresh_batch_status(batch: ScreeningBatch) -> None:
-    failed_count = sum(item.status == "failed" for item in batch.documents)
-    success_count = sum(item.status in {"uploaded", "completed"} for item in batch.documents)
-    processing_count = sum(item.status in {"queued", "processing"} for item in batch.documents)
-    if processing_count:
-        batch.status = "processing"
-    elif failed_count and success_count:
-        batch.status = "partial_failure"
-    elif failed_count:
-        batch.status = "failed"
-    else:
-        batch.status = "ready"
+def document_response(document: ResumeDocument) -> ResumeDocumentResponse:
+    return ResumeDocumentResponse(
+        id=document.id,
+        batch_id=document.batch_id,
+        original_filename=document.original_filename,
+        file_extension=document.file_extension,
+        content_type=document.content_type,
+        detected_type=document.detected_type,
+        size_bytes=document.size_bytes,
+        sha256=document.sha256,
+        has_original_file=bool(document.storage_key),
+        extraction_method=document.extraction_method,
+        segment_count=document.segment_count,
+        text_character_count=document.text_character_count,
+        status=document.status,
+        failure_code=document.failure_code,
+        failure_message=document.failure_message,
+        attempt_count=document.attempt_count,
+        processing_attempt_count=document.processing_attempt_count,
+        processing_started_at=document.processing_started_at,
+        parsed_at=document.parsed_at,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+    )
 
 
 def batch_response(batch: ScreeningBatch) -> ScreeningBatchResponse:
@@ -142,13 +185,29 @@ def batch_response(batch: ScreeningBatch) -> ScreeningBatchResponse:
         name=batch.name,
         status=batch.status,
         total_count=len(documents),
-        success_count=sum(item.status in {"uploaded", "completed"} for item in documents),
+        success_count=sum(item.status == "completed" for item in documents),
         failed_count=sum(item.status == "failed" for item in documents),
         processing_count=sum(item.status in {"queued", "processing"} for item in documents),
         created_at=batch.created_at,
         updated_at=batch.updated_at,
-        documents=[ResumeDocumentResponse.model_validate(item) for item in documents],
+        documents=[document_response(item) for item in documents],
     )
+
+
+def queue_document(db: Session, document: ResumeDocument) -> None:
+    document.status = "queued"
+    document.failure_code = None
+    document.failure_message = None
+    refresh_batch_status(document.batch)
+    db.commit()
+    try:
+        document.task_id = enqueue_resume_parsing(document.id)
+    except Exception:
+        document.status = "failed"
+        document.failure_code = "task_enqueue_failed"
+        document.failure_message = "解析任务创建失败，请稍后重试"
+        refresh_batch_status(document.batch)
+    db.commit()
 
 
 async def process_upload(
@@ -272,6 +331,10 @@ async def create_batch(
 
     refresh_batch_status(batch)
     db.commit()
+    batch = get_owned_batch(db, job_id, batch.id, current_user.id)
+    for document in batch.documents:
+        if document.status == "uploaded":
+            queue_document(db, document)
     return batch_response(get_owned_batch(db, job_id, batch.id, current_user.id))
 
 
@@ -296,7 +359,7 @@ async def retry_failed_document(
     current_user: CurrentUser,
     db: DbSession,
     file: Annotated[UploadFile, File()],
-) -> ResumeDocument:
+) -> ResumeDocumentResponse:
     batch = get_owned_batch(db, job_id, batch_id, current_user.id)
     document = get_owned_document(
         db,
@@ -317,8 +380,67 @@ async def retry_failed_document(
         delete_private_file(settings.file_storage_root, previous_storage_key)
     refresh_batch_status(batch)
     db.commit()
+    if document.status == "uploaded":
+        queue_document(db, document)
     db.refresh(document)
-    return document
+    return document_response(document)
+
+
+@router.post(
+    "/{job_id}/batches/{batch_id}/documents/{document_id}/parse-retry",
+    response_model=ResumeDocumentResponse,
+)
+def retry_document_parsing(
+    job_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    document_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> ResumeDocumentResponse:
+    document = get_owned_document(
+        db,
+        job_id,
+        batch_id,
+        document_id,
+        current_user.id,
+    )
+    if document.status != "failed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有失败文件可以重试")
+    if not document.storage_key:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该文件未通过上传校验，请重新选择文件",
+        )
+    queue_document(db, document)
+    db.refresh(document)
+    return document_response(document)
+
+
+@router.get(
+    "/{job_id}/batches/{batch_id}/documents/{document_id}",
+    response_model=ResumeDocumentDetailResponse,
+)
+def get_document_detail(
+    job_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    document_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> ResumeDocumentDetailResponse:
+    document = get_owned_document_detail(
+        db,
+        job_id,
+        batch_id,
+        document_id,
+        current_user.id,
+    )
+    return ResumeDocumentDetailResponse(
+        **document_response(document).model_dump(),
+        text_segments=[
+            ResumeTextSegmentResponse.model_validate(segment)
+            for segment in document.text_segments
+        ],
+    )
 
 
 @router.get("/{job_id}/batches/{batch_id}/documents/{document_id}/file")

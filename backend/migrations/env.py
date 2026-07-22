@@ -10,6 +10,7 @@ from app.models import (  # noqa: F401
     Job,
     JobCriteriaVersion,
     ResumeDocument,
+    ResumeTextSegment,
     ScoringDimension,
     ScreeningBatch,
     User,

@@ -28,7 +28,8 @@ dev = [
   "ruff>=0.9,<1",
 ]
 ocr = [
-  "paddleocr>=2.9,<3",
+  "paddleocr>=3.0,<4",
+  "paddlepaddle>=3.0,<4",
   "pymupdf>=1.25,<2",
   "python-docx>=1.1,<2",
   "pillow>=11,<12",

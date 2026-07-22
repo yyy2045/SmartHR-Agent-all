@@ -67,7 +67,9 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
         PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-120}
-    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+        INSTALL_OCR: "true"
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn}
+    command: ["sh", "/app/worker-entrypoint.sh"]
     env_file:
       - path: .env
         required: false
@@ -77,9 +79,11 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
       FILE_STORAGE_ROOT: ${FILE_STORAGE_ROOT:-/app/data/uploads}
     volumes:
       - ./data/local/uploads:/app/data/uploads
+      - ./data/local/paddlex:/root/.paddlex
     depends_on:
       postgres:
         condition: service_healthy
