@@ -389,6 +389,7 @@ async def test_parse_retry_requires_original_and_detail_returns_segments(
 
     assert detail.status_code == 200
     assert detail.json()["extraction_method"] == "pdf_text"
+    assert detail.json()["candidate_code"] == body["documents"][0]["candidate_code"]
     assert detail.json()["text_segments"] == [
         {
             "id": detail.json()["text_segments"][0]["id"],
@@ -400,6 +401,7 @@ async def test_parse_retry_requires_original_and_detail_returns_segments(
             "paragraph_index": None,
             "raw_text": "Python Engineer",
             "normalized_text": "Python Engineer",
+            "redacted_text": None,
             "ocr_confidence": None,
             "sort_order": 0,
         }

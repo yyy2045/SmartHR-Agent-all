@@ -1,6 +1,7 @@
 import logging
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,14 +10,21 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import ResumeDocument, ResumeTextSegment, ScreeningBatch
+from app.models import ResumeDocument, ResumeRedaction, ResumeTextSegment, ScreeningBatch
 from app.services.batch_status import refresh_batch_status
 from app.services.file_storage import resolve_private_file
 from app.services.resume_parser import ParseResult, ResumeParseError, parse_resume_file
+from app.services.resume_redactor import RedactionResult, redact_resume_segments
 
 logger = logging.getLogger(__name__)
 SessionFactory = Callable[[], Session]
 Parser = Callable[[Path, str], ParseResult]
+
+
+@dataclass(frozen=True)
+class _RedactionInput:
+    segment_key: str
+    normalized_text: str
 
 
 def _load_document(db: Session, document_id: uuid.UUID) -> ResumeDocument | None:
@@ -82,6 +90,8 @@ def process_resume_document(
         document.processing_attempt_count += 1
         document.processing_started_at = datetime.now(UTC)
         document.parsed_at = None
+        document.redacted_at = None
+        document.redaction_count = 0
         if task_id:
             document.task_id = task_id
         document.failure_code = None
@@ -112,12 +122,38 @@ def process_resume_document(
             session_factory=session_factory,
         )
 
+    try:
+        redaction_result: RedactionResult = redact_resume_segments(
+            f"CAND-{document_id.hex[:12].upper()}",
+            [
+                _RedactionInput(
+                    segment_key=f"SEG-{index:04d}",
+                    normalized_text=segment.normalized_text,
+                )
+                for index, segment in enumerate(result.segments, start=1)
+            ],
+        )
+    except Exception:
+        logger.exception("简历脱敏出现未预期错误，document_id=%s", document_id)
+        return _mark_failed(
+            document_id,
+            code="redaction_failed",
+            message="简历脱敏失败，请稍后重试",
+            session_factory=session_factory,
+        )
+
     with session_factory() as db:
         document = _load_document(db, document_id)
         if document is None:
             return {"status": "missing", "document_id": str(document_id)}
-        document.text_segments = [
-            ResumeTextSegment(
+        document.text_segments.clear()
+        db.flush()
+        stored_segments: list[ResumeTextSegment] = []
+        for index, (segment, redacted_segment) in enumerate(
+            zip(result.segments, redaction_result.segments, strict=True),
+            start=1,
+        ):
+            stored_segment = ResumeTextSegment(
                 segment_key=f"SEG-{index:04d}",
                 source_type=segment.source_type,
                 source_index=segment.source_index,
@@ -125,20 +161,33 @@ def process_resume_document(
                 paragraph_index=segment.paragraph_index,
                 raw_text=segment.raw_text,
                 normalized_text=segment.normalized_text,
+                redacted_text=redacted_segment.redacted_text,
                 ocr_confidence=segment.ocr_confidence,
                 sort_order=index - 1,
             )
-            for index, segment in enumerate(result.segments, start=1)
-        ]
+            stored_segment.redactions = [
+                ResumeRedaction(
+                    entity_type=match.entity_type,
+                    original_text=match.original_text,
+                    replacement_text=match.replacement_text,
+                    start_offset=match.start_offset,
+                    end_offset=match.end_offset,
+                )
+                for match in redacted_segment.matches
+            ]
+            stored_segments.append(stored_segment)
+        document.text_segments = stored_segments
         document.extraction_method = result.extraction_method
         document.segment_count = len(result.segments)
         document.text_character_count = sum(
             len(segment.normalized_text) for segment in result.segments
         )
+        document.redaction_count = redaction_result.redaction_count
         document.status = "completed"
         document.failure_code = None
         document.failure_message = None
         document.parsed_at = datetime.now(UTC)
+        document.redacted_at = document.parsed_at
         refresh_batch_status(document.batch)
         db.commit()
         segment_count = document.segment_count

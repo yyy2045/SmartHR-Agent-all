@@ -941,6 +941,23 @@ input {
   white-space: pre-wrap;
 }
 
+.resume-original-evidence {
+  margin-top: 12px;
+  border-top: 1px solid #edf1f6;
+  padding-top: 10px;
+}
+
+.resume-original-evidence summary {
+  width: fit-content;
+  color: #2477d4;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.resume-original-evidence[open] summary {
+  margin-bottom: 8px;
+}
+
 .batch-empty {
   min-height: 260px;
 }

@@ -80,6 +80,8 @@ describe('resume batch flow', () => {
           extraction_method: 'pdf_text',
           segment_count: 1,
           text_character_count: 120,
+          candidate_code: 'CAND-0001',
+          redaction_count: 0,
           status: 'completed',
           failure_code: null,
           failure_message: null,
@@ -87,6 +89,7 @@ describe('resume batch flow', () => {
           processing_attempt_count: 1,
           processing_started_at: timestamp,
           parsed_at: timestamp,
+          redacted_at: timestamp,
           created_at: timestamp,
           updated_at: timestamp,
         },
@@ -103,6 +106,8 @@ describe('resume batch flow', () => {
           extraction_method: null,
           segment_count: 0,
           text_character_count: 0,
+          candidate_code: 'CAND-0002',
+          redaction_count: 0,
           status: 'failed',
           failure_code: 'invalid_file_signature',
           failure_message: '文件特征不完整或文件已经损坏',
@@ -110,6 +115,7 @@ describe('resume batch flow', () => {
           processing_attempt_count: 0,
           processing_started_at: null,
           parsed_at: null,
+          redacted_at: null,
           created_at: timestamp,
           updated_at: timestamp,
         },
@@ -216,6 +222,8 @@ describe('resume batch flow', () => {
       extraction_method: 'pdf_text',
       segment_count: 1,
       text_character_count: 35,
+      candidate_code: 'CAND-0003',
+      redaction_count: 1,
       status: 'completed' as const,
       failure_code: null,
       failure_message: null,
@@ -223,6 +231,7 @@ describe('resume batch flow', () => {
       processing_attempt_count: 1,
       processing_started_at: timestamp,
       parsed_at: timestamp,
+      redacted_at: timestamp,
       created_at: timestamp,
       updated_at: timestamp,
     }
@@ -238,6 +247,7 @@ describe('resume batch flow', () => {
       failure_message: '未识别到有效文本',
       processing_attempt_count: 1,
       parsed_at: null,
+      redacted_at: null,
     }
     let batch: ScreeningBatchRecord = {
       id: 'batch-parse',
@@ -279,6 +289,7 @@ describe('resume batch flow', () => {
               paragraph_index: null,
               raw_text: 'Python FastAPI PostgreSQL',
               normalized_text: 'Python FastAPI PostgreSQL',
+              redacted_text: 'Python FastAPI PostgreSQL',
               ocr_confidence: null,
               sort_order: 0,
             },
@@ -322,10 +333,13 @@ describe('resume batch flow', () => {
     expect(screen.getByText('未识别到有效文本')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /查看文本/ }))
-    expect(await screen.findByText('Python FastAPI PostgreSQL')).toBeInTheDocument()
+    expect(await screen.findAllByText('Python FastAPI PostgreSQL')).toHaveLength(2)
     expect(screen.getAllByText('PDF 文本提取')).not.toHaveLength(0)
     expect(screen.getByText('PDF 第 1 页')).toBeInTheDocument()
     expect(screen.getByText('SEG-0001')).toBeInTheDocument()
+    expect(screen.getAllByText('CAND-0003')).not.toHaveLength(0)
+    expect(screen.getByText('1 项')).toBeInTheDocument()
+    expect(screen.getByText('查看授权原文证据')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /重新处理/ }))
     await waitFor(() =>
