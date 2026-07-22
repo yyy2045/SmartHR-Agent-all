@@ -163,6 +163,8 @@ def document_response(document: ResumeDocument) -> ResumeDocumentResponse:
         extraction_method=document.extraction_method,
         segment_count=document.segment_count,
         text_character_count=document.text_character_count,
+        candidate_code=document.candidate_code,
+        redaction_count=document.redaction_count,
         status=document.status,
         failure_code=document.failure_code,
         failure_message=document.failure_message,
@@ -170,6 +172,7 @@ def document_response(document: ResumeDocument) -> ResumeDocumentResponse:
         processing_attempt_count=document.processing_attempt_count,
         processing_started_at=document.processing_started_at,
         parsed_at=document.parsed_at,
+        redacted_at=document.redacted_at,
         created_at=document.created_at,
         updated_at=document.updated_at,
     )

@@ -264,6 +264,7 @@ function BatchCard({
               title={
                 <Space wrap size="small">
                   <Text strong>{document.original_filename}</Text>
+                  <Tag>{document.candidate_code}</Tag>
                   {documentStatus(document)}
                 </Space>
               }
@@ -276,7 +277,8 @@ function BatchCard({
                   {document.status === 'completed' && (
                     <Text type="secondary">
                       {extractionMethodLabel(document.extraction_method)} · {document.segment_count}{' '}
-                      个片段 · {document.text_character_count} 个字符
+                      个片段 · {document.text_character_count} 个字符 · 已脱敏{' '}
+                      {document.redaction_count} 项
                     </Text>
                   )}
                   {document.processing_attempt_count > 0 && document.status !== 'completed' && (
@@ -319,6 +321,11 @@ function BatchCard({
               column={2}
               items={[
                 {
+                  key: 'candidate-code',
+                  label: '候选人编号',
+                  children: detail.data.candidate_code,
+                },
+                {
                   key: 'method',
                   label: '解析方式',
                   children: extractionMethodLabel(detail.data.extraction_method),
@@ -328,6 +335,11 @@ function BatchCard({
                   key: 'characters',
                   label: '字符数',
                   children: detail.data.text_character_count,
+                },
+                {
+                  key: 'redactions',
+                  label: '脱敏命中',
+                  children: `${detail.data.redaction_count} 项`,
                 },
                 {
                   key: 'parsed-at',
@@ -360,7 +372,12 @@ function BatchCard({
                         </Text>
                       )}
                     </div>
-                    <pre>{segment.normalized_text}</pre>
+                    <Text type="secondary">发送给外部模型的文本</Text>
+                    <pre>{segment.redacted_text ?? segment.normalized_text}</pre>
+                    <details className="resume-original-evidence">
+                      <summary>查看授权原文证据</summary>
+                      <pre>{segment.normalized_text}</pre>
+                    </details>
                   </article>
                 </List.Item>
               )}

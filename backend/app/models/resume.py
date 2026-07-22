@@ -100,6 +100,7 @@ class ResumeDocument(Base):
     extraction_method: Mapped[str | None] = mapped_column(String(30))
     segment_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     text_character_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    redaction_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="uploaded", index=True
     )
@@ -110,6 +111,7 @@ class ResumeDocument(Base):
     task_id: Mapped[str | None] = mapped_column(String(100), index=True)
     processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    redacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -128,6 +130,10 @@ class ResumeDocument(Base):
         cascade="all, delete-orphan",
         order_by="ResumeTextSegment.sort_order",
     )
+
+    @property
+    def candidate_code(self) -> str:
+        return f"CAND-{self.id.hex[:12].upper()}"
 
 
 class ResumeTextSegment(Base):
@@ -159,6 +165,7 @@ class ResumeTextSegment(Base):
     paragraph_index: Mapped[int | None] = mapped_column(Integer)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_text: Mapped[str] = mapped_column(Text, nullable=False)
+    redacted_text: Mapped[str | None] = mapped_column(Text)
     ocr_confidence: Mapped[float | None] = mapped_column(Float)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -168,3 +175,47 @@ class ResumeTextSegment(Base):
     )
 
     document: Mapped[ResumeDocument] = relationship(back_populates="text_segments")
+    redactions: Mapped[list[ResumeRedaction]] = relationship(
+        back_populates="segment",
+        cascade="all, delete-orphan",
+        order_by="ResumeRedaction.start_offset",
+    )
+
+
+class ResumeRedaction(Base):
+    __tablename__ = "resume_redactions"
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type IN ('name', 'phone', 'email', 'id_number', 'address', "
+            "'social_account')",
+            name="ck_resume_redactions_entity_type",
+        ),
+        CheckConstraint("start_offset >= 0", name="ck_resume_redactions_start_offset"),
+        CheckConstraint("end_offset > start_offset", name="ck_resume_redactions_end_offset"),
+        UniqueConstraint(
+            "segment_id",
+            "start_offset",
+            "end_offset",
+            "entity_type",
+            name="uq_resume_redaction_span",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("resume_text_segments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    entity_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    original_text: Mapped[str] = mapped_column(Text, nullable=False)
+    replacement_text: Mapped[str] = mapped_column(String(100), nullable=False)
+    start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    segment: Mapped[ResumeTextSegment] = relationship(back_populates="redactions")

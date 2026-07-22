@@ -74,16 +74,16 @@ def _coerce_v2_ocr_lines(value: Any) -> list[OCRLine]:
 
     def visit(item: Any) -> None:
         if (
-            isinstance(item, (list, tuple))
+            isinstance(item, list | tuple)
             and len(item) == 2
-            and isinstance(item[1], (list, tuple))
+            and isinstance(item[1], list | tuple)
             and item[1]
             and isinstance(item[1][0], str)
         ):
             confidence = float(item[1][1]) if len(item[1]) > 1 else None
             lines.append(OCRLine(text=item[1][0], confidence=confidence))
             return
-        if isinstance(item, (list, tuple)):
+        if isinstance(item, list | tuple):
             for child in item:
                 visit(child)
 
@@ -93,7 +93,7 @@ def _coerce_v2_ocr_lines(value: Any) -> list[OCRLine]:
 
 def _coerce_v3_ocr_lines(value: Any) -> list[OCRLine]:
     lines: list[OCRLine] = []
-    items = value if isinstance(value, (list, tuple)) else [value]
+    items = value if isinstance(value, list | tuple) else [value]
     for item in items:
         payload = getattr(item, "json", item)
         payload = payload() if callable(payload) else payload

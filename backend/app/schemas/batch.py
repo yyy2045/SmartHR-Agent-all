@@ -30,6 +30,8 @@ class ResumeDocumentResponse(BaseModel):
     extraction_method: str | None
     segment_count: int
     text_character_count: int
+    candidate_code: str
+    redaction_count: int
     status: DocumentStatus
     failure_code: str | None
     failure_message: str | None
@@ -37,6 +39,7 @@ class ResumeDocumentResponse(BaseModel):
     processing_attempt_count: int
     processing_started_at: datetime | None
     parsed_at: datetime | None
+    redacted_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -53,6 +56,7 @@ class ResumeTextSegmentResponse(BaseModel):
     paragraph_index: int | None
     raw_text: str
     normalized_text: str
+    redacted_text: str | None
     ocr_confidence: float | None
     sort_order: int
 

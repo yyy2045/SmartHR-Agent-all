@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.config import settings
 from app.database import Base
 from app.models import Job, JobCriteriaVersion, ResumeDocument, ScreeningBatch, User
+from app.services.model_payload import send_resume_model_payload
 from app.services.resume_parser import ParsedSegment, ParseResult, ResumeParseError
 from app.services.resume_processing import process_resume_document
 from app.services.security import hash_password
@@ -129,9 +130,15 @@ def test_processing_saves_stable_segments_and_completes_batch(
         assert document.text_character_count == 13
         assert document.processing_attempt_count == 1
         assert document.task_id == "task-1"
+        assert document.redacted_at is not None
+        assert document.redaction_count == 0
         assert [segment.segment_key for segment in document.text_segments] == [
             "SEG-0001",
             "SEG-0002",
+        ]
+        assert [segment.redacted_text for segment in document.text_segments] == [
+            "Python",
+            "FastAPI",
         ]
         assert document.batch.status == "completed"
 
@@ -141,6 +148,79 @@ def test_processing_saves_stable_segments_and_completes_batch(
         parser=lambda *_: pytest.fail("完成的文件不应重复解析"),
     )
     assert repeated["status"] == "completed"
+
+
+def test_processing_redacts_before_model_payload_and_keeps_original_evidence(
+    processing_dependencies: tuple[sessionmaker[Session], uuid.UUID],
+) -> None:
+    testing_session, document_id = processing_dependencies
+    original = (
+        "姓名：李雷\n电话：13912345678\n邮箱：li.lei@example.com\n"
+        "地址：上海市浦东新区世纪大道100号8室\n微信：lilei_hr"
+    )
+
+    def parser(_: Path, __: str) -> ParseResult:
+        return ParseResult(
+            extraction_method="pdf_text",
+            segments=[
+                ParsedSegment(
+                    source_type="pdf_page",
+                    source_index=1,
+                    page_number=1,
+                    raw_text=original,
+                    normalized_text=original,
+                )
+            ],
+        )
+
+    process_resume_document(
+        document_id,
+        session_factory=testing_session,
+        parser=parser,
+    )
+
+    with testing_session() as db:
+        document = db.scalar(select(ResumeDocument).where(ResumeDocument.id == document_id))
+        assert document is not None
+        assert document.redaction_count == 5
+        segment = document.text_segments[0]
+        assert segment.segment_key == "SEG-0001"
+        assert segment.normalized_text == original
+        assert segment.redacted_text is not None
+        assert "李雷" not in segment.redacted_text
+        assert "13912345678" not in segment.redacted_text
+        assert "li.lei@example.com" not in segment.redacted_text
+        assert {item.entity_type for item in segment.redactions} == {
+            "name",
+            "phone",
+            "email",
+            "address",
+            "social_account",
+        }
+
+        captured_payloads: list[dict[str, object]] = []
+        send_resume_model_payload(document, captured_payloads.append)
+
+        assert captured_payloads == [
+            {
+                "candidate_code": document.candidate_code,
+                "segments": [
+                    {
+                        "segment_key": "SEG-0001",
+                        "text": segment.redacted_text,
+                    }
+                ],
+            }
+        ]
+        serialized = str(captured_payloads)
+        for sensitive_value in (
+            "李雷",
+            "13912345678",
+            "li.lei@example.com",
+            "上海市浦东新区世纪大道100号8室",
+            "lilei_hr",
+        ):
+            assert sensitive_value not in serialized
 
 
 def test_processing_failure_keeps_original_file_and_marks_batch(

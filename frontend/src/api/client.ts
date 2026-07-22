@@ -112,6 +112,8 @@ export interface ResumeDocumentRecord {
   extraction_method: string | null
   segment_count: number
   text_character_count: number
+  candidate_code: string
+  redaction_count: number
   status: ResumeDocumentStatus
   failure_code: string | null
   failure_message: string | null
@@ -119,6 +121,7 @@ export interface ResumeDocumentRecord {
   processing_attempt_count: number
   processing_started_at: string | null
   parsed_at: string | null
+  redacted_at: string | null
   created_at: string
   updated_at: string
 }
@@ -133,6 +136,7 @@ export interface ResumeTextSegmentRecord {
   paragraph_index: number | null
   raw_text: string
   normalized_text: string
+  redacted_text: string | null
   ocr_confidence: number | null
   sort_order: number
 }
