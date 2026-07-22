@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = ""
     ai_timeout_seconds: int = 120
-    ai_max_concurrency: int = 3
+    ai_max_concurrency: int = Field(default=3, ge=1, le=10)
 
     @property
     def is_production(self) -> bool:

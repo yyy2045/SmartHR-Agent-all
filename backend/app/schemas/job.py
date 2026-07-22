@@ -149,6 +149,34 @@ class CriteriaDraftUpdate(BaseModel):
         return self
 
 
+class JDAIDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suggested_title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=2_000)
+    pass_threshold: int = Field(default=60, ge=0, le=100)
+    hard_requirements: list[HardRequirementInput] = Field(default_factory=list, max_length=100)
+    scoring_dimensions: list[ScoringDimensionInput] = Field(min_length=1, max_length=100)
+
+    @field_validator("suggested_title", "summary")
+    @classmethod
+    def normalize_ai_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("内容不能为空")
+        return value
+
+    @model_validator(mode="after")
+    def validate_ai_draft(self) -> Self:
+        names = [item.name.casefold() for item in self.scoring_dimensions]
+        if len(names) != len(set(names)):
+            raise ValueError("评分维度名称不能重复")
+        total_weight = sum(item.weight_percent for item in self.scoring_dimensions)
+        if total_weight != 100:
+            raise ValueError(f"评分维度权重总和必须为 100%，当前为 {total_weight}%")
+        return self
+
+
 class HardRequirementResponse(HardRequirementInput):
     model_config = ConfigDict(from_attributes=True)
 

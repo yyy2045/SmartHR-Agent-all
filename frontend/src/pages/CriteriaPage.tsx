@@ -6,6 +6,7 @@ import {
   CopyOutlined,
   DeleteOutlined,
   PlusOutlined,
+  RobotOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -37,11 +38,13 @@ import {
   confirmCriteriaVersion,
   createCriteriaVersion,
   fetchJob,
+  generateJDAIDraft,
   updateCriteriaDraft,
   type CriteriaDraftInput,
   type CriteriaVersion,
   type HardRequirementInput,
   type HardRequirementType,
+  type JDAIDraft,
   type ScoringDimensionInput,
 } from '../api/client'
 
@@ -97,6 +100,7 @@ function DraftCriteriaEditor({
   const queryClient = useQueryClient()
   const [form] = Form.useForm<CriteriaFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
+  const [aiDraft, setAiDraft] = useState<JDAIDraft | null>(null)
   const dimensions = Form.useWatch('scoring_dimensions', form) ?? []
   const totalWeight = dimensions.reduce(
     (total, item) => total + Number(item?.weight_percent ?? 0),
@@ -108,6 +112,19 @@ function DraftCriteriaEditor({
   })
   const confirmMutation = useMutation({
     mutationFn: () => confirmCriteriaVersion(jobId, version.id),
+  })
+  const aiDraftMutation = useMutation({
+    mutationFn: () => generateJDAIDraft(jobId),
+    onSuccess: (draft) => {
+      form.setFieldsValue({
+        pass_threshold: draft.pass_threshold,
+        hard_requirements: draft.hard_requirements.map((item) => ({ ...item })),
+        scoring_dimensions: draft.scoring_dimensions.map((item) => ({ ...item })),
+      })
+      setAiDraft(draft)
+      messageApi.success('AI 草稿已填入，请核对后保存或确认')
+    },
+    onError: (error) => messageApi.error(errorMessage(error, 'AI 生成筛选草稿失败')),
   })
 
   useEffect(() => {
@@ -173,6 +190,41 @@ function DraftCriteriaEditor({
         disabled={disabled}
         className="criteria-form"
       >
+        <Card className="criteria-section ai-draft-card">
+          <div className="ai-draft-heading">
+            <div>
+              <Title level={4}>AI 辅助生成筛选草稿</Title>
+              <Paragraph type="secondary">
+                AI 只会填入当前表单，不会自动保存或确认。请逐项核对硬性要求、权重和判断边界。
+              </Paragraph>
+            </div>
+            <Popconfirm
+              title="使用 AI 生成并替换当前表单？"
+              description="当前尚未保存的编辑会被 AI 草稿替换。"
+              okText="生成并替换"
+              cancelText="取消"
+              onConfirm={() => aiDraftMutation.mutate()}
+            >
+              <Button
+                type="primary"
+                ghost
+                icon={<RobotOutlined />}
+                loading={aiDraftMutation.isPending}
+              >
+                AI 生成草稿
+              </Button>
+            </Popconfirm>
+          </div>
+          {aiDraft && (
+            <Alert
+              type="info"
+              showIcon
+              message={`建议职位名称：${aiDraft.suggested_title}`}
+              description={aiDraft.summary}
+            />
+          )}
+        </Card>
+
         <Card
           title="基本评分规则"
           extra={
@@ -549,7 +601,7 @@ export function CriteriaPage() {
               disabled={archived}
               onClick={() => createMutation.mutate(undefined)}
             >
-              创建人工筛选标准
+              创建筛选标准草稿
             </Button>
           </Empty>
         </section>
