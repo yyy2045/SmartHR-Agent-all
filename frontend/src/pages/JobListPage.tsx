@@ -61,6 +61,12 @@ export function JobListPage() {
 
         <Space wrap>
           <Button
+            icon={<FileSearchOutlined />}
+            onClick={() => navigate(`/jobs/${job.id}/results`)}
+          >
+            筛选结果
+          </Button>
+          <Button
             icon={<FolderOpenOutlined />}
             onClick={() => navigate(`/jobs/${job.id}/batches`)}
           >

@@ -36,6 +36,8 @@ class ScreeningRouteDependencies:
     job_id: uuid.UUID
     batch_id: uuid.UUID
     document_id: uuid.UUID
+    result_id: uuid.UUID
+    citation_id: uuid.UUID
     session_factory: sessionmaker[Session]
     enqueued_document_ids: list[uuid.UUID]
 
@@ -204,6 +206,8 @@ def screening_route_dependencies(
         job_id=job.id,
         batch_id=batch.id,
         document_id=document.id,
+        result_id=result.id,
+        citation_id=result.evidence_citations[0].id,
         session_factory=testing_session,
         enqueued_document_ids=enqueued_document_ids,
     )
@@ -287,3 +291,183 @@ async def test_analysis_retry_queues_completed_document_and_blocks_processing_re
     assert dependency.enqueued_document_ids == [dependency.document_id]
     assert blocked.status_code == 409
     assert "正在进行" in blocked.text
+
+
+@pytest.mark.asyncio
+async def test_screening_result_list_filters_and_sorts_by_ai_group(
+    screening_route_dependencies: ScreeningRouteDependencies,
+) -> None:
+    dependency = screening_route_dependencies
+    with dependency.session_factory() as db:
+        batch = db.get(ScreeningBatch, dependency.batch_id)
+        assert batch is not None
+        for index, (ai_group, score) in enumerate(
+            (("low_match", "95.00"), ("auto_rejected", "99.00")),
+            start=2,
+        ):
+            document = ResumeDocument(
+                batch_id=batch.id,
+                original_filename=f"resume-{index}.pdf",
+                file_extension=".pdf",
+                content_type="application/pdf",
+                detected_type="pdf",
+                size_bytes=100,
+                status="completed",
+                parsed_at=datetime.now(UTC),
+                redacted_at=datetime.now(UTC),
+            )
+            db.add(document)
+            db.flush()
+            db.add(
+                ScreeningResult(
+                    document_id=document.id,
+                    criteria_version_id=batch.criteria_version_id,
+                    analysis_version=1,
+                    status="completed",
+                    ai_group=ai_group,
+                    total_score=Decimal(score),
+                    pass_threshold=60,
+                    hard_requirement_results=[],
+                    strengths=[],
+                    gaps=[],
+                    missing_items=[],
+                    interview_questions=[],
+                    model_name="stub-model",
+                    prompt_version="resume-match-v1",
+                    started_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC),
+                )
+            )
+        db.commit()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        anonymous = await client.get(f"/jobs/{dependency.job_id}/screening-results")
+        await login(client)
+        response = await client.get(f"/jobs/{dependency.job_id}/screening-results")
+        filtered = await client.get(
+            f"/jobs/{dependency.job_id}/screening-results",
+            params={"ai_group": "low_match", "min_score": 90, "max_score": 100},
+        )
+        empty = await client.get(
+            f"/jobs/{dependency.job_id}/screening-results",
+            params={"decision": "shortlisted"},
+        )
+        invalid = await client.get(
+            f"/jobs/{dependency.job_id}/screening-results",
+            params={"min_score": 90, "max_score": 80},
+        )
+
+    assert anonymous.status_code == 401
+    assert response.status_code == 200
+    assert [item["ai_group"] for item in response.json()] == [
+        "passed",
+        "low_match",
+        "auto_rejected",
+    ]
+    assert filtered.status_code == 200
+    assert [item["total_score"] for item in filtered.json()] == [95.0]
+    assert empty.json() == []
+    assert invalid.status_code == 422
+    assert "最低分" in invalid.text
+
+
+@pytest.mark.asyncio
+async def test_result_detail_exposes_original_evidence_and_decision_history(
+    screening_route_dependencies: ScreeningRouteDependencies,
+) -> None:
+    dependency = screening_route_dependencies
+    result_path = f"/jobs/{dependency.job_id}/screening-results/{dependency.result_id}"
+    evidence_path = f"{result_path}/evidence/{dependency.citation_id}"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        detail = await client.get(result_path)
+        evidence = await client.get(evidence_path)
+        foreign = await client.get(
+            f"/jobs/{uuid.uuid4()}/screening-results/{dependency.result_id}"
+        )
+
+    assert detail.status_code == 200
+    assert detail.json()["current_decision"] == "unprocessed"
+    assert detail.json()["decision_history"] == []
+    assert evidence.status_code == 200
+    assert evidence.json()["segment_key"] == "SEG-0001"
+    assert evidence.json()["original_text"] == "Python 工程经验"
+    assert evidence.json()["page_number"] == 1
+    assert foreign.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_recruiter_decisions_keep_before_after_operator_and_time(
+    screening_route_dependencies: ScreeningRouteDependencies,
+) -> None:
+    dependency = screening_route_dependencies
+    path = f"/jobs/{dependency.job_id}/screening-results/{dependency.result_id}/decisions"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        shortlisted = await client.post(
+            path,
+            json={"decision": "shortlisted", "reason": "技术能力符合当前岗位"},
+        )
+        unchanged = await client.post(path, json={"decision": "shortlisted"})
+        pending = await client.post(
+            path,
+            json={"decision": "pending", "reason": "等待业务负责人复核"},
+        )
+        rejected = await client.post(
+            path,
+            json={"decision": "rejected", "reason": "人工复核后确认不匹配"},
+        )
+        detail = await client.get(
+            f"/jobs/{dependency.job_id}/screening-results/{dependency.result_id}"
+        )
+        filtered = await client.get(
+            f"/jobs/{dependency.job_id}/screening-results",
+            params={"decision": "rejected"},
+        )
+
+    assert shortlisted.status_code == 201
+    assert shortlisted.json()["previous_decision"] == "unprocessed"
+    assert shortlisted.json()["operator_display_name"] == "招聘专员"
+    assert shortlisted.json()["created_at"]
+    assert unchanged.status_code == 409
+    assert pending.status_code == 201
+    assert pending.json()["previous_decision"] == "shortlisted"
+    assert rejected.status_code == 201
+    assert rejected.json()["previous_decision"] == "pending"
+    assert detail.json()["current_decision"] == "rejected"
+    assert [item["decision"] for item in detail.json()["decision_history"]] == [
+        "shortlisted",
+        "pending",
+        "rejected",
+    ]
+    assert len(filtered.json()) == 1
+
+
+@pytest.mark.asyncio
+async def test_auto_rejection_recovery_requires_reason(
+    screening_route_dependencies: ScreeningRouteDependencies,
+) -> None:
+    dependency = screening_route_dependencies
+    with dependency.session_factory() as db:
+        result = db.get(ScreeningResult, dependency.result_id)
+        assert result is not None
+        result.ai_group = "auto_rejected"
+        db.commit()
+
+    path = f"/jobs/{dependency.job_id}/screening-results/{dependency.result_id}/decisions"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        missing_reason = await client.post(path, json={"decision": "pending"})
+        recovered = await client.post(
+            path,
+            json={"decision": "pending", "reason": "证书信息需要面试时再次确认"},
+        )
+
+    assert missing_reason.status_code == 422
+    assert "必须填写原因" in missing_reason.text
+    assert recovered.status_code == 201
+    assert recovered.json()["is_auto_rejection_override"] is True

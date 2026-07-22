@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 RequirementStatus = Literal["passed", "failed", "unknown"]
 AIGroup = Literal["passed", "low_match", "auto_rejected"]
 AnalysisStatus = Literal["processing", "completed", "failed"]
+ManualDecision = Literal["unprocessed", "shortlisted", "pending", "rejected"]
+DecisionAction = Literal["shortlisted", "pending", "rejected"]
 
 
 class EvidenceReference(BaseModel):
@@ -209,6 +211,62 @@ class DimensionScoreResponse(BaseModel):
     evidence: list[EvidenceCitationResponse] = Field(default_factory=list)
 
 
+class RecruiterDecisionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: DecisionAction
+    reason: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class RecruiterDecisionResponse(BaseModel):
+    id: uuid.UUID
+    screening_result_id: uuid.UUID
+    sequence_number: int
+    previous_decision: ManualDecision
+    decision: DecisionAction
+    reason: str | None
+    is_auto_rejection_override: bool
+    operator_id: uuid.UUID
+    operator_display_name: str
+    created_at: datetime
+
+
+class ScreeningResultSummaryResponse(BaseModel):
+    id: uuid.UUID
+    batch_id: uuid.UUID
+    batch_name: str
+    document_id: uuid.UUID
+    candidate_code: str
+    criteria_version_id: uuid.UUID
+    criteria_version_number: int
+    analysis_version: int
+    status: AnalysisStatus
+    ai_group: AIGroup | None
+    total_score: float | None
+    pass_threshold: int
+    current_decision: ManualDecision
+    latest_decision_at: datetime | None
+    created_at: datetime
+
+
+class OriginalEvidenceResponse(BaseModel):
+    citation_id: uuid.UUID
+    segment_key: str
+    quote: str
+    original_text: str
+    source_type: str
+    page_number: int | None
+    paragraph_index: int | None
+
+
 class ScreeningResultResponse(BaseModel):
     id: uuid.UUID
     document_id: uuid.UUID
@@ -235,6 +293,8 @@ class ScreeningResultResponse(BaseModel):
     candidate_profile: CandidateProfileResponse | None
     dimension_scores: list[DimensionScoreResponse]
     evidence: list[EvidenceCitationResponse]
+    current_decision: ManualDecision = "unprocessed"
+    decision_history: list[RecruiterDecisionResponse] = Field(default_factory=list)
 
 
 class AnalysisQueueResponse(BaseModel):
