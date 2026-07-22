@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchLiveHealth } from './client'
+import { ApiError, fetchCurrentUser, fetchLiveHealth, login, logout } from './client'
 
-describe('fetchLiveHealth', () => {
+describe('API client', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -17,14 +17,65 @@ describe('fetchLiveHealth', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(fetchLiveHealth()).resolves.toEqual({ status: 'ok' })
-    expect(fetchMock).toHaveBeenCalledWith('/api/health/live', {
-      credentials: 'include',
-    })
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/health/live')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'include' })
   })
 
-  it('在后端不可用时抛出可读错误', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 503 })))
+  it('将未登录状态转换为空用户', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: '请先登录' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
 
-    await expect(fetchLiveHealth()).rejects.toThrow('后端服务暂不可用')
+    await expect(fetchCurrentUser()).resolves.toBeNull()
+  })
+
+  it('提交登录凭据并返回用户', async () => {
+    const user = { id: 'user-1', username: 'recruiter', display_name: '招聘专员' }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(user), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(login({ username: 'recruiter', password: 'example-password' })).resolves.toEqual(
+      user,
+    )
+    const request = fetchMock.mock.calls[0]
+    expect(request[0]).toBe('/api/auth/login')
+    expect(request[1]).toMatchObject({ method: 'POST', credentials: 'include' })
+    expect(request[1]?.body).toBe(
+      JSON.stringify({ username: 'recruiter', password: 'example-password' }),
+    )
+  })
+
+  it('显示后端返回的登录错误', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: '用户名或密码错误' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+
+    await expect(login({ username: 'recruiter', password: 'wrong-password' })).rejects.toEqual(
+      new ApiError(401, '用户名或密码错误'),
+    )
+  })
+
+  it('退出登录时接受 204 响应', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+
+    await expect(logout()).resolves.toBeUndefined()
   })
 })
