@@ -40,6 +40,9 @@ function pageMeta(pathname: string) {
   if (pathname.endsWith('/results')) {
     return { title: '筛选结果', subtitle: '查看 AI 依据并记录招聘专员的最终判断' }
   }
+  if (pathname.endsWith('/compare')) {
+    return { title: '候选人对比', subtitle: '在同一职位标准下横向比较候选人' }
+  }
   return { title: '职位管理', subtitle: '管理招聘职位与版本化筛选标准' }
 }
 

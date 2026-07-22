@@ -19,6 +19,8 @@ from app.models import (
 from app.schemas.screening import (
     AIGroup,
     AnalysisStatus,
+    CandidateComparisonRequest,
+    CandidateComparisonResponse,
     ManualDecision,
     OriginalEvidenceResponse,
     RecruiterDecisionCreate,
@@ -193,6 +195,68 @@ def list_screening_results(
         )
         for item in results
     ]
+
+
+@router.post(
+    "/{job_id}/screening-results/compare",
+    response_model=CandidateComparisonResponse,
+)
+def compare_screening_results(
+    job_id: uuid.UUID,
+    payload: CandidateComparisonRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> CandidateComparisonResponse:
+    results = list(
+        db.scalars(
+            select(ScreeningResult)
+            .join(ResumeDocument)
+            .join(ScreeningBatch)
+            .join(Job)
+            .where(
+                ScreeningResult.id.in_(payload.result_ids),
+                Job.owner_id == current_user.id,
+            )
+            .options(*_result_options())
+        )
+        .unique()
+        .all()
+    )
+    if len(results) != len(payload.result_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="筛选结果不存在")
+
+    by_id = {item.id: item for item in results}
+    ordered_results = [by_id[result_id] for result_id in payload.result_ids]
+    if any(item.document.batch.job_id != job_id for item in ordered_results):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="只能比较同一职位的候选人",
+        )
+    if any(item.status != "completed" for item in ordered_results):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="只能比较已完成 AI 分析的候选人",
+        )
+
+    criteria_version_ids = {item.criteria_version_id for item in ordered_results}
+    analysis_versions = {item.analysis_version for item in ordered_results}
+    if len(criteria_version_ids) != 1 or len(analysis_versions) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="只能比较同一职位标准和同一分析版本的候选人",
+        )
+
+    first = ordered_results[0]
+    return CandidateComparisonResponse(
+        job_id=job_id,
+        criteria_version_id=first.criteria_version_id,
+        criteria_version_number=first.criteria_version.version_number,
+        analysis_version=first.analysis_version,
+        candidates=[
+            screening_result_response(item, item.document.candidate_code)
+            for item in ordered_results
+        ],
+    )
 
 
 @router.get(
