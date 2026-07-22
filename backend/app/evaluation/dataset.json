@@ -1,0 +1,78 @@
+{
+  "version": "mvp-v1",
+  "jobs": [
+    {
+      "key": "backend",
+      "title": "后端平台工程师",
+      "department": "研发中心",
+      "hard_requirement_title": "至少三年相关经验",
+      "hard_requirement_value": "3 年",
+      "dimensions": [
+        {"name": "技术深度", "description": "后端与系统设计能力", "weight_percent": 60},
+        {"name": "工程质量", "description": "测试、稳定性和交付能力", "weight_percent": 40}
+      ],
+      "evidence_zh": "Python 微服务与自动化测试",
+      "evidence_en": "Python microservices and automated testing"
+    },
+    {
+      "key": "data",
+      "title": "数据分析师",
+      "department": "数据中心",
+      "hard_requirement_title": "至少三年数据工作经验",
+      "hard_requirement_value": "3 年",
+      "dimensions": [
+        {"name": "数据分析", "description": "SQL、统计与数据建模能力", "weight_percent": 70},
+        {"name": "业务洞察", "description": "指标设计与业务解释能力", "weight_percent": 30}
+      ],
+      "evidence_zh": "SQL 分析与指标体系建设",
+      "evidence_en": "SQL analytics and metric system design"
+    },
+    {
+      "key": "product",
+      "title": "B2B 产品经理",
+      "department": "产品中心",
+      "hard_requirement_title": "至少三年产品工作经验",
+      "hard_requirement_value": "3 年",
+      "dimensions": [
+        {"name": "产品规划", "description": "需求分析与产品路线规划能力", "weight_percent": 60},
+        {"name": "用户研究", "description": "客户访谈与问题验证能力", "weight_percent": 40}
+      ],
+      "evidence_zh": "B2B 产品规划与用户研究",
+      "evidence_en": "B2B product planning and user research"
+    }
+  ],
+  "resumes": [
+    {"id": "BE-01", "job_key": "backend", "language": "zh-CN", "format": "pdf", "scenario": "high_match", "hard_status": "passed", "score": 94, "expected_group": "passed"},
+    {"id": "BE-02", "job_key": "backend", "language": "en-US", "format": "docx", "scenario": "high_match", "hard_status": "passed", "score": 86, "expected_group": "passed"},
+    {"id": "BE-03", "job_key": "backend", "language": "zh-CN", "format": "scanned_pdf", "scenario": "low_match", "hard_status": "passed", "score": 45, "expected_group": "low_match"},
+    {"id": "BE-04", "job_key": "backend", "language": "en-US", "format": "jpg", "scenario": "low_match", "hard_status": "unknown", "score": 52, "expected_group": "low_match"},
+    {"id": "BE-05", "job_key": "backend", "language": "zh-CN", "format": "png", "scenario": "hard_failure", "hard_status": "failed", "score": 90, "expected_group": "auto_rejected"},
+    {"id": "BE-06", "job_key": "backend", "language": "en-US", "format": "pdf", "scenario": "hard_failure", "hard_status": "failed", "score": 40, "expected_group": "auto_rejected"},
+    {"id": "BE-07", "job_key": "backend", "language": "zh-CN", "format": "docx", "scenario": "missing_information", "hard_status": "unknown", "score": 78, "expected_group": "passed"},
+    {"id": "BE-08", "job_key": "backend", "language": "en-US", "format": "scanned_pdf", "scenario": "missing_information", "hard_status": "unknown", "score": 55, "expected_group": "low_match"},
+    {"id": "BE-09", "job_key": "backend", "language": "zh-CN", "format": "jpg", "scenario": "ambiguous_context", "hard_status": "unknown", "score": 72, "expected_group": "passed"},
+    {"id": "BE-10", "job_key": "backend", "language": "en-US", "format": "png", "scenario": "ambiguous_context", "hard_status": "passed", "score": 64, "expected_group": "low_match"},
+
+    {"id": "DA-01", "job_key": "data", "language": "zh-CN", "format": "pdf", "scenario": "high_match", "hard_status": "passed", "score": 93, "expected_group": "passed"},
+    {"id": "DA-02", "job_key": "data", "language": "en-US", "format": "docx", "scenario": "high_match", "hard_status": "passed", "score": 85, "expected_group": "passed"},
+    {"id": "DA-03", "job_key": "data", "language": "zh-CN", "format": "scanned_pdf", "scenario": "low_match", "hard_status": "passed", "score": 48, "expected_group": "low_match"},
+    {"id": "DA-04", "job_key": "data", "language": "en-US", "format": "jpg", "scenario": "low_match", "hard_status": "unknown", "score": 50, "expected_group": "low_match"},
+    {"id": "DA-05", "job_key": "data", "language": "zh-CN", "format": "png", "scenario": "hard_failure", "hard_status": "failed", "score": 91, "expected_group": "auto_rejected"},
+    {"id": "DA-06", "job_key": "data", "language": "en-US", "format": "pdf", "scenario": "hard_failure", "hard_status": "failed", "score": 42, "expected_group": "auto_rejected"},
+    {"id": "DA-07", "job_key": "data", "language": "zh-CN", "format": "docx", "scenario": "missing_information", "hard_status": "unknown", "score": 80, "expected_group": "passed"},
+    {"id": "DA-08", "job_key": "data", "language": "en-US", "format": "scanned_pdf", "scenario": "missing_information", "hard_status": "unknown", "score": 54, "expected_group": "low_match"},
+    {"id": "DA-09", "job_key": "data", "language": "zh-CN", "format": "jpg", "scenario": "ambiguous_context", "hard_status": "unknown", "score": 74, "expected_group": "passed"},
+    {"id": "DA-10", "job_key": "data", "language": "en-US", "format": "png", "scenario": "ambiguous_context", "hard_status": "passed", "score": 66, "expected_group": "low_match"},
+
+    {"id": "PM-01", "job_key": "product", "language": "zh-CN", "format": "pdf", "scenario": "high_match", "hard_status": "passed", "score": 95, "expected_group": "passed"},
+    {"id": "PM-02", "job_key": "product", "language": "en-US", "format": "docx", "scenario": "high_match", "hard_status": "passed", "score": 87, "expected_group": "passed"},
+    {"id": "PM-03", "job_key": "product", "language": "zh-CN", "format": "scanned_pdf", "scenario": "low_match", "hard_status": "passed", "score": 46, "expected_group": "low_match"},
+    {"id": "PM-04", "job_key": "product", "language": "en-US", "format": "jpg", "scenario": "low_match", "hard_status": "unknown", "score": 51, "expected_group": "low_match"},
+    {"id": "PM-05", "job_key": "product", "language": "zh-CN", "format": "png", "scenario": "hard_failure", "hard_status": "failed", "score": 92, "expected_group": "auto_rejected"},
+    {"id": "PM-06", "job_key": "product", "language": "en-US", "format": "pdf", "scenario": "hard_failure", "hard_status": "failed", "score": 41, "expected_group": "auto_rejected"},
+    {"id": "PM-07", "job_key": "product", "language": "zh-CN", "format": "docx", "scenario": "missing_information", "hard_status": "unknown", "score": 79, "expected_group": "passed"},
+    {"id": "PM-08", "job_key": "product", "language": "en-US", "format": "scanned_pdf", "scenario": "missing_information", "hard_status": "unknown", "score": 53, "expected_group": "low_match"},
+    {"id": "PM-09", "job_key": "product", "language": "zh-CN", "format": "jpg", "scenario": "ambiguous_context", "hard_status": "unknown", "score": 73, "expected_group": "passed"},
+    {"id": "PM-10", "job_key": "product", "language": "en-US", "format": "png", "scenario": "ambiguous_context", "hard_status": "passed", "score": 65, "expected_group": "low_match"}
+  ]
+}
