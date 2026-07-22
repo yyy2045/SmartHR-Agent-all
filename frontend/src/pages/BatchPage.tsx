@@ -1,6 +1,7 @@
 import {
   ArrowLeftOutlined,
   CloudUploadOutlined,
+  DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
   FileDoneOutlined,
@@ -42,6 +43,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   ApiError,
   createScreeningBatch,
+  deleteScreeningBatch,
   fetchJob,
   fetchResumeDocumentDetail,
   fetchScreeningBatches,
@@ -135,6 +137,8 @@ function BatchCard({
   const [reanalysisOpen, setReanalysisOpen] = useState(false)
   const [reanalysisCriteriaVersionId, setReanalysisCriteriaVersionId] = useState<string>()
   const [lastReanalysis, setLastReanalysis] = useState<BatchReanalysisRecord>()
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteConfirmation, setDeleteConfirmation] = useState('')
   const retryMutation = useMutation({
     mutationFn: ({ documentId, file }: { documentId: string; file: File }) =>
       retryResumeDocument(jobId, batch.id, documentId, file),
@@ -177,6 +181,26 @@ function BatchCard({
     },
     onError: (error) =>
       messageApi.error(error instanceof ApiError ? error.message : '整批重新分析失败'),
+  })
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteScreeningBatch(jobId, batch.id, deleteConfirmation),
+    onSuccess: async (response) => {
+      setDeleteOpen(false)
+      setDeleteConfirmation('')
+      if (response.status === 'cleanup_pending') {
+        messageApi.warning(response.message ?? '批次已删除，私有暂存文件等待继续清理')
+      } else {
+        messageApi.success(
+          `批次已永久删除，共清理 ${response.deleted_document_count} 份简历`,
+        )
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['batches', jobId] }),
+        queryClient.invalidateQueries({ queryKey: ['screening-results', jobId] }),
+      ])
+    },
+    onError: (error) =>
+      messageApi.error(error instanceof ApiError ? error.message : '永久删除批次失败'),
   })
   const detail = useQuery({
     queryKey: ['resume-document', jobId, batch.id, selectedDocumentId],
@@ -303,6 +327,13 @@ function BatchCard({
             }}
           >
             整批重新分析
+          </Button>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => setDeleteOpen(true)}
+          >
+            永久删除
           </Button>
         </div>
       </div>
@@ -494,6 +525,44 @@ function BatchCard({
                 value: version.id,
                 label: `标准 V${version.version_number} · 通过线 ${version.pass_threshold}`,
               }))}
+            />
+          </div>
+        </Space>
+      </Modal>
+
+      <Modal
+        title={`永久删除批次 · ${batch.name}`}
+        open={deleteOpen}
+        okText="确认永久删除"
+        okButtonProps={{
+          danger: true,
+          disabled: deleteConfirmation !== '永久删除',
+        }}
+        cancelText="取消"
+        confirmLoading={deleteMutation.isPending}
+        onOk={() => deleteMutation.mutate()}
+        onCancel={() => {
+          setDeleteOpen(false)
+          setDeleteConfirmation('')
+        }}
+      >
+        <Space direction="vertical" size="middle" className="full-width-space">
+          <Alert
+            type="error"
+            showIcon
+            message="该操作不可撤销"
+            description={`将永久删除批次中的 ${batch.total_count} 份原始文件、解析文本、脱敏记录、候选人档案、分析结果和人工决策。`}
+          />
+          <div>
+            <label htmlFor={`batch-delete-confirmation-${batch.id}`}>
+              请输入“永久删除”确认操作
+            </label>
+            <Input
+              id={`batch-delete-confirmation-${batch.id}`}
+              value={deleteConfirmation}
+              autoComplete="off"
+              placeholder="永久删除"
+              onChange={(event) => setDeleteConfirmation(event.target.value)}
             />
           </div>
         </Space>

@@ -27,6 +27,7 @@ from app.services.ai_client import (
     OpenAICompatibleClient,
     get_ai_client,
 )
+from app.services.audit import record_audit
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -324,5 +325,18 @@ def confirm_criteria_version(
     version.status = "confirmed"
     version.confirmed_by_id = current_user.id
     version.confirmed_at = datetime.now(UTC)
+    record_audit(
+        db,
+        action="criteria.confirmed",
+        target_type="job_criteria_version",
+        target_id=version.id,
+        job_id=job.id,
+        result="success",
+        actor=current_user,
+        details={
+            "version_number": version.version_number,
+            "pass_threshold": version.pass_threshold,
+        },
+    )
     db.commit()
     return get_owned_version(db, job_id, version_id, current_user.id)

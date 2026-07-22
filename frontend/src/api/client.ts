@@ -166,6 +166,14 @@ export interface ScreeningBatchRecord {
   documents: ResumeDocumentRecord[]
 }
 
+export interface BatchDeletionRecord {
+  status: 'deleted' | 'cleanup_pending'
+  batch_id: string
+  deleted_document_count: number
+  deleted_file_count: number
+  message: string | null
+}
+
 export type AnalysisStatus = 'processing' | 'completed' | 'failed'
 export type AIGroup = 'passed' | 'low_match' | 'auto_rejected'
 export type RequirementStatus = 'passed' | 'failed' | 'unknown'
@@ -567,6 +575,21 @@ export function fetchResumeDocumentDetail(
     `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}`,
     {},
     '无法读取简历文本',
+  )
+}
+
+export function deleteScreeningBatch(
+  jobId: string,
+  batchId: string,
+  confirmation: string,
+): Promise<BatchDeletionRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}`,
+    {
+      method: 'DELETE',
+      body: JSON.stringify({ confirmation }),
+    },
+    '永久删除简历批次失败',
   )
 }
 

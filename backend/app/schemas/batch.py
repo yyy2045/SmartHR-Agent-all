@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 BatchStatus = Literal[
     "uploading",
@@ -81,3 +81,17 @@ class ScreeningBatchResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     documents: list[ResumeDocumentResponse]
+
+
+class BatchDeletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: str = Field(min_length=1, max_length=200)
+
+
+class BatchDeletionResponse(BaseModel):
+    status: Literal["deleted", "cleanup_pending"]
+    batch_id: uuid.UUID
+    deleted_document_count: int
+    deleted_file_count: int
+    message: str | None = None

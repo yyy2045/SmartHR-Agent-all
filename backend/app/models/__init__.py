@@ -1,3 +1,4 @@
+from app.models.audit import AuditLog
 from app.models.job import HardRequirement, Job, JobCriteriaVersion, ScoringDimension
 from app.models.resume import (
     CandidateProfile,
@@ -13,6 +14,7 @@ from app.models.resume import (
 from app.models.user import User
 
 __all__ = [
+    "AuditLog",
     "CandidateProfile",
     "DimensionScore",
     "EvidenceCitation",

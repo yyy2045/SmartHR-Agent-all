@@ -355,4 +355,136 @@ describe('resume batch flow', () => {
     )
     expect(await screen.findByText('等待解析')).toBeInTheDocument()
   })
+
+  it('要求输入永久删除后删除批次并刷新列表', async () => {
+    const batch: ScreeningBatchRecord = {
+      id: 'batch-delete',
+      job_id: 'job-1',
+      criteria_version_id: 'version-1',
+      criteria_version_number: 1,
+      name: '待删除批次',
+      status: 'completed',
+      total_count: 1,
+      success_count: 1,
+      failed_count: 0,
+      processing_count: 0,
+      created_at: timestamp,
+      updated_at: timestamp,
+      documents: [],
+    }
+    let batches = [batch]
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      if (path === '/api/auth/me') return jsonResponse(user)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') return jsonResponse(job)
+      if (path === '/api/jobs/job-1/batches' && method === 'GET') {
+        return jsonResponse(batches)
+      }
+      if (path === '/api/jobs/job-1/batches/batch-delete' && method === 'DELETE') {
+        expect(JSON.parse(String(init?.body))).toEqual({ confirmation: '永久删除' })
+        batches = []
+        return jsonResponse({
+          status: 'deleted',
+          batch_id: 'batch-delete',
+          deleted_document_count: 1,
+          deleted_file_count: 1,
+          message: null,
+        })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState({}, '', '/jobs/job-1/batches')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '待删除批次' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /永久删除/ }))
+    const confirmButton = await screen.findByRole('button', { name: '确认永久删除' })
+    expect(confirmButton).toBeDisabled()
+    const confirmation = screen.getByLabelText('请输入“永久删除”确认操作')
+    fireEvent.change(confirmation, { target: { value: '确认' } })
+    expect(confirmButton).toBeDisabled()
+    fireEvent.change(confirmation, { target: { value: '永久删除' } })
+    expect(confirmButton).toBeEnabled()
+    fireEvent.click(confirmButton)
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([path, init]) =>
+            path === '/api/jobs/job-1/batches/batch-delete' && init?.method === 'DELETE',
+        ),
+      ).toBe(true),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '待删除批次' })).toBeNull(),
+    )
+    expect(await screen.findByText('还没有简历批次')).toBeInTheDocument()
+  })
+
+  it('永久删除失败时保留批次并展示错误', async () => {
+    const batch: ScreeningBatchRecord = {
+      id: 'batch-delete-failure',
+      job_id: 'job-1',
+      criteria_version_id: 'version-1',
+      criteria_version_number: 1,
+      name: '删除失败批次',
+      status: 'completed',
+      total_count: 1,
+      success_count: 1,
+      failed_count: 0,
+      processing_count: 0,
+      created_at: timestamp,
+      updated_at: timestamp,
+      documents: [],
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      if (path === '/api/auth/me') return jsonResponse(user)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') return jsonResponse(job)
+      if (path === '/api/jobs/job-1/batches' && method === 'GET') {
+        return jsonResponse([batch])
+      }
+      if (
+        path === '/api/jobs/job-1/batches/batch-delete-failure' &&
+        method === 'DELETE'
+      ) {
+        return jsonResponse({ detail: '原始文件删除准备失败，批次数据未删除' }, 500)
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState({}, '', '/jobs/job-1/batches')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '删除失败批次' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /永久删除/ }))
+    fireEvent.change(screen.getByLabelText('请输入“永久删除”确认操作'), {
+      target: { value: '永久删除' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认永久删除' }))
+
+    expect(
+      await screen.findByText('原始文件删除准备失败，批次数据未删除'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '删除失败批次' })).toBeInTheDocument()
+  })
 })

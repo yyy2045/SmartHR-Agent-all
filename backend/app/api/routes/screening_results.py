@@ -28,6 +28,7 @@ from app.schemas.screening import (
     ScreeningResultResponse,
     ScreeningResultSummaryResponse,
 )
+from app.services.audit import record_audit
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -315,6 +316,18 @@ def get_original_evidence(
     )
     if citation is None or citation.segment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原文证据不存在")
+    record_audit(
+        db,
+        action="resume.original_evidence_viewed",
+        target_type="evidence_citation",
+        target_id=citation.id,
+        job_id=job_id,
+        batch_id=result.document.batch_id,
+        result="success",
+        actor=current_user,
+        details={"screening_result_id": str(result.id)},
+    )
+    db.commit()
     return OriginalEvidenceResponse(
         citation_id=citation.id,
         segment_key=citation.segment_key,
@@ -375,6 +388,34 @@ def create_recruiter_decision(
         is_auto_rejection_override=overrides_auto_rejection,
     )
     db.add(decision)
+    record_audit(
+        db,
+        action="screening.decision_changed",
+        target_type="screening_result",
+        target_id=result.id,
+        job_id=job_id,
+        batch_id=result.document.batch_id,
+        result="success",
+        actor=current_user,
+        details={
+            "previous_decision": previous_decision,
+            "decision": payload.decision,
+            "has_reason": bool(payload.reason),
+            "overrides_auto_rejection": overrides_auto_rejection,
+        },
+    )
+    if overrides_auto_rejection:
+        record_audit(
+            db,
+            action="screening.auto_rejection_overridden",
+            target_type="screening_result",
+            target_id=result.id,
+            job_id=job_id,
+            batch_id=result.document.batch_id,
+            result="success",
+            actor=current_user,
+            details={"decision": payload.decision},
+        )
     db.commit()
     db.refresh(decision)
     return _decision_response(decision, operator_display_name=current_user.display_name)

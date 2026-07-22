@@ -30,6 +30,7 @@ from app.services.ai_client import (
     OpenAICompatibleClient,
     get_ai_client,
 )
+from app.services.audit import record_audit
 from app.services.model_payload import (
     ModelPayloadSecurityError,
     build_resume_analysis_payload,
@@ -523,6 +524,21 @@ async def analyze_resume_document(
             result.failure_code = None
             result.failure_message = None
             result.completed_at = datetime.now(UTC)
+            if result.ai_group == "auto_rejected":
+                record_audit(
+                    db,
+                    action="screening.auto_rejected",
+                    target_type="screening_result",
+                    target_id=result.id,
+                    job_id=document.batch.job_id,
+                    batch_id=document.batch_id,
+                    result="success",
+                    actor_username="system",
+                    details={
+                        "analysis_version": result.analysis_version,
+                        "criteria_version_id": str(result.criteria_version_id),
+                    },
+                )
             db.commit()
             return {
                 "status": "completed",

@@ -3,12 +3,14 @@ import uuid
 import zipfile
 from collections.abc import Generator
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import fakeredis
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -16,14 +18,25 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    AuditLog,
+    CandidateProfile,
     Job,
     JobCriteriaVersion,
+    RecruiterDecision,
     ResumeDocument,
+    ResumeRedaction,
     ResumeTextSegment,
     ScreeningBatch,
+    ScreeningResult,
     User,
 )
 from app.redis_client import get_session_store
+from app.services.batch_deletion import (
+    BatchDeletionError,
+    StagedBatchFiles,
+    reconcile_deletion_staging,
+)
+from app.services.file_storage import resolve_private_file
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
 
@@ -138,6 +151,29 @@ async def login(client: httpx.AsyncClient) -> None:
         json={"username": "recruiter", "password": "correct-password"},
     )
     assert response.status_code == 200
+
+
+async def upload_single_resume(
+    client: httpx.AsyncClient,
+    dependencies: BatchDependencies,
+    *,
+    filename: str,
+    marker: bytes,
+) -> tuple[dict[str, object], Path]:
+    response = await client.post(
+        f"/jobs/{dependencies.job_id}/batches",
+        data={"criteria_version_id": dependencies.criteria_version_id},
+        files={"files": (filename, VALID_PDF + marker, "application/pdf")},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    document_id = uuid.UUID(body["documents"][0]["id"])
+    with dependencies.session_factory() as db:
+        document = db.get(ResumeDocument, document_id)
+        assert document is not None and document.storage_key is not None
+        file_path = resolve_private_file(settings.file_storage_root, document.storage_key)
+    assert file_path.is_file()
+    return body, file_path
 
 
 @pytest.mark.asyncio
@@ -264,6 +300,14 @@ async def test_partial_failure_download_duplicate_and_retry(
     stored_files = [path for path in settings.file_storage_root.rglob("*") if path.is_file()]
     assert len(stored_files) == 2
     assert all(path.name not in {"private.pdf", "replacement.png"} for path in stored_files)
+    with batch_dependencies.session_factory() as db:
+        audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "resume.file_viewed")
+        )
+    assert audit is not None
+    assert audit.actor_username == "recruiter"
+    assert str(audit.target_id) == valid_document["id"]
+    assert str(audit.batch_id) == body["id"]
 
 
 @pytest.mark.asyncio
@@ -470,3 +514,361 @@ async def test_document_detail_respects_job_ownership(
         response = await client.get(path)
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_batch_permanent_delete_cascades_database_and_private_file(
+    batch_dependencies: BatchDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        body, file_path = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="delete-success.pdf",
+            marker=b"delete-success",
+        )
+        batch_id = uuid.UUID(body["id"])
+        document_id = uuid.UUID(body["documents"][0]["id"])
+        with batch_dependencies.session_factory() as db:
+            document = db.get(ResumeDocument, document_id)
+            user = db.scalar(select(User).where(User.username == "recruiter"))
+            assert document is not None and user is not None
+            document.status = "completed"
+            segment = ResumeTextSegment(
+                document=document,
+                segment_key="SEG-0001",
+                source_type="pdf_page",
+                source_index=1,
+                page_number=1,
+                raw_text="姓名：测试候选人，Python 工程经验",
+                normalized_text="姓名：测试候选人，Python 工程经验",
+                redacted_text="姓名：[姓名]，Python 工程经验",
+                sort_order=0,
+            )
+            segment.redactions = [
+                ResumeRedaction(
+                    entity_type="name",
+                    original_text="测试候选人",
+                    replacement_text="[姓名]",
+                    start_offset=3,
+                    end_offset=8,
+                )
+            ]
+            profile = CandidateProfile(
+                document=document,
+                version_number=1,
+                source="ai",
+                model_name="stub-model",
+                prompt_version="resume-match-v1",
+                education=[],
+                work_experiences=[],
+                projects=[],
+                skills=[],
+                certifications=[],
+                languages=[],
+            )
+            result = ScreeningResult(
+                document=document,
+                candidate_profile=profile,
+                criteria_version_id=uuid.UUID(batch_dependencies.criteria_version_id),
+                analysis_version=1,
+                status="completed",
+                ai_group="passed",
+                total_score=Decimal("88.00"),
+                pass_threshold=60,
+                hard_requirement_results=[],
+                strengths=[],
+                gaps=[],
+                missing_items=[],
+                interview_questions=[],
+                model_name="stub-model",
+                prompt_version="resume-match-v1",
+                started_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+            )
+            result.recruiter_decisions = [
+                RecruiterDecision(
+                    operator_id=user.id,
+                    sequence_number=1,
+                    previous_decision="unprocessed",
+                    decision="shortlisted",
+                    reason="测试级联删除",
+                    is_auto_rejection_override=False,
+                )
+            ]
+            db.add_all([segment, result])
+            db.commit()
+
+        deleted = await client.request(
+            "DELETE",
+            f"/jobs/{batch_dependencies.job_id}/batches/{body['id']}",
+            json={"confirmation": "永久删除"},
+        )
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {
+        "status": "deleted",
+        "batch_id": str(batch_id),
+        "deleted_document_count": 1,
+        "deleted_file_count": 1,
+        "message": None,
+    }
+    assert not file_path.exists()
+    staging_root = settings.file_storage_root / ".deletions"
+    assert not staging_root.exists() or not any(staging_root.iterdir())
+    with batch_dependencies.session_factory() as db:
+        assert db.get(ScreeningBatch, batch_id) is None
+        assert db.get(ResumeDocument, document_id) is None
+        for model in (
+            ResumeTextSegment,
+            ResumeRedaction,
+            CandidateProfile,
+            ScreeningResult,
+            RecruiterDecision,
+        ):
+            assert db.scalar(select(func.count()).select_from(model)) == 0
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "batch.permanent_delete",
+                AuditLog.result == "success",
+            )
+        )
+    assert audit is not None
+    assert audit.actor_username == "recruiter"
+    assert audit.target_id == batch_id
+    assert audit.details == {"document_count": 1, "file_count": 1}
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_requires_confirmation_and_preserves_data(
+    batch_dependencies: BatchDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        body, file_path = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="delete-confirmation.pdf",
+            marker=b"delete-confirmation",
+        )
+        response = await client.request(
+            "DELETE",
+            f"/jobs/{batch_dependencies.job_id}/batches/{body['id']}",
+            json={"confirmation": "确认"},
+        )
+
+    assert response.status_code == 422
+    assert "永久删除" in response.text
+    assert file_path.is_file()
+    batch_id = uuid.UUID(body["id"])
+    with batch_dependencies.session_factory() as db:
+        assert db.get(ScreeningBatch, batch_id) is not None
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "batch.permanent_delete",
+                AuditLog.result == "failure",
+            )
+        )
+    assert audit is not None
+    assert audit.details == {"reason": "confirmation_mismatch"}
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_staging_failure_preserves_database_and_file(
+    batch_dependencies: BatchDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        body, file_path = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="delete-stage-failure.pdf",
+            marker=b"delete-stage-failure",
+        )
+
+        def fail_staging(*_: object, **__: object) -> None:
+            raise BatchDeletionError("原始文件删除准备失败，批次数据未删除")
+
+        monkeypatch.setattr("app.api.routes.batches.stage_batch_files", fail_staging)
+        response = await client.request(
+            "DELETE",
+            f"/jobs/{batch_dependencies.job_id}/batches/{body['id']}",
+            json={"confirmation": "永久删除"},
+        )
+
+    assert response.status_code == 500
+    assert "批次数据未删除" in response.text
+    assert file_path.is_file()
+    with batch_dependencies.session_factory() as db:
+        assert db.get(ScreeningBatch, uuid.UUID(body["id"])) is not None
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "batch.permanent_delete",
+                AuditLog.result == "failure",
+            )
+        )
+    assert audit is not None
+    assert audit.details == {"reason": "file_staging_failed"}
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_database_failure_restores_private_file(
+    batch_dependencies: BatchDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        body, file_path = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="delete-database-failure.pdf",
+            marker=b"delete-database-failure",
+        )
+        original_commit = Session.commit
+        failed_once = False
+
+        def fail_batch_delete_commit(session: Session) -> None:
+            nonlocal failed_once
+            if not failed_once and any(
+                isinstance(item, ScreeningBatch) for item in session.deleted
+            ):
+                failed_once = True
+                raise RuntimeError("simulated database failure")
+            original_commit(session)
+
+        monkeypatch.setattr(Session, "commit", fail_batch_delete_commit)
+        response = await client.request(
+            "DELETE",
+            f"/jobs/{batch_dependencies.job_id}/batches/{body['id']}",
+            json={"confirmation": "永久删除"},
+        )
+
+    assert failed_once is True
+    assert response.status_code == 500
+    assert "原始文件已恢复" in response.text
+    assert file_path.is_file()
+    staging_root = settings.file_storage_root / ".deletions"
+    assert not staging_root.exists() or not any(staging_root.iterdir())
+    with batch_dependencies.session_factory() as db:
+        assert db.get(ScreeningBatch, uuid.UUID(body["id"])) is not None
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "batch.permanent_delete",
+                AuditLog.result == "failure",
+            )
+        )
+    assert audit is not None
+    assert audit.details == {"reason": "database_delete_failed"}
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_reports_cleanup_pending_and_startup_finishes_cleanup(
+    batch_dependencies: BatchDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        body, file_path = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="delete-cleanup-pending.pdf",
+            marker=b"delete-cleanup-pending",
+        )
+
+        def fail_purge(_: StagedBatchFiles) -> None:
+            raise OSError("simulated cleanup failure")
+
+        monkeypatch.setattr(StagedBatchFiles, "purge", fail_purge)
+        response = await client.request(
+            "DELETE",
+            f"/jobs/{batch_dependencies.job_id}/batches/{body['id']}",
+            json={"confirmation": "永久删除"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cleanup_pending"
+    assert response.json()["deleted_file_count"] == 0
+    assert "服务重启" in response.json()["message"]
+    assert not file_path.exists()
+    batch_id = uuid.UUID(body["id"])
+    with batch_dependencies.session_factory() as db:
+        assert db.get(ScreeningBatch, batch_id) is None
+        audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "batch.file_cleanup_pending")
+        )
+    assert audit is not None
+    assert audit.result == "failure"
+    staging_root = settings.file_storage_root / ".deletions"
+    assert staging_root.is_dir() and any(staging_root.iterdir())
+
+    monkeypatch.undo()
+    reconcile_deletion_staging(
+        settings.file_storage_root,
+        batch_dependencies.session_factory,
+    )
+    assert not staging_root.exists() or not any(staging_root.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_batch_delete_blocks_anonymous_and_foreign_owner(
+    batch_dependencies: BatchDependencies,
+) -> None:
+    with batch_dependencies.session_factory() as db:
+        other_user = User(
+            username="foreign-owner",
+            password_hash=hash_password("foreign-password"),
+            display_name="其他招聘专员",
+        )
+        db.add(other_user)
+        db.flush()
+        job = Job(
+            owner_id=other_user.id,
+            title="其他职位",
+            department="其他部门",
+            original_jd="私有职位",
+        )
+        db.add(job)
+        db.flush()
+        criteria = JobCriteriaVersion(
+            job_id=job.id,
+            version_number=1,
+            status="confirmed",
+            confirmed_by_id=other_user.id,
+        )
+        db.add(criteria)
+        db.flush()
+        batch = ScreeningBatch(
+            job_id=job.id,
+            criteria_version_id=criteria.id,
+            name="私有批次",
+        )
+        db.add(batch)
+        db.commit()
+        path = f"/jobs/{job.id}/batches/{batch.id}"
+        batch_id = batch.id
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        anonymous = await client.request(
+            "DELETE",
+            path,
+            json={"confirmation": "永久删除"},
+        )
+        await login(client)
+        foreign = await client.request(
+            "DELETE",
+            path,
+            json={"confirmation": "永久删除"},
+        )
+
+    assert anonymous.status_code == 401
+    assert foreign.status_code == 404
+    with batch_dependencies.session_factory() as db:
+        assert db.get(ScreeningBatch, batch_id) is not None
