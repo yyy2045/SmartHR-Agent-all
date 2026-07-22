@@ -3,20 +3,20 @@ from collections.abc import Generator
 import fakeredis
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import User
+from app.models import AuditLog, User
 from app.redis_client import get_session_store
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
 
 
 @pytest.fixture
-def auth_dependencies() -> Generator[None, None, None]:
+def auth_dependencies() -> Generator[sessionmaker[Session], None, None]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -47,14 +47,16 @@ def auth_dependencies() -> Generator[None, None, None]:
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_session_store] = override_session_store
-    yield
+    yield testing_session
     app.dependency_overrides.clear()
     Base.metadata.drop_all(engine)
     engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_login_me_and_logout(auth_dependencies: None) -> None:
+async def test_login_me_and_logout(
+    auth_dependencies: sessionmaker[Session],
+) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         login_response = await client.post(
@@ -76,9 +78,19 @@ async def test_login_me_and_logout(auth_dependencies: None) -> None:
         assert unauthorized_response.status_code == 401
         assert unauthorized_response.json() == {"detail": "请先登录"}
 
+    with auth_dependencies() as db:
+        logs = list(db.scalars(select(AuditLog).order_by(AuditLog.created_at)))
+    assert [(item.action, item.result) for item in logs] == [
+        ("auth.login", "success"),
+        ("auth.logout", "success"),
+    ]
+    assert all(item.actor_username == "recruiter" for item in logs)
+
 
 @pytest.mark.asyncio
-async def test_login_rejects_wrong_password(auth_dependencies: None) -> None:
+async def test_login_rejects_wrong_password(
+    auth_dependencies: sessionmaker[Session],
+) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
@@ -88,3 +100,9 @@ async def test_login_rejects_wrong_password(auth_dependencies: None) -> None:
 
     assert response.status_code == 401
     assert response.json() == {"detail": "用户名或密码错误"}
+    with auth_dependencies() as db:
+        log = db.scalar(select(AuditLog).where(AuditLog.action == "auth.login"))
+    assert log is not None
+    assert log.result == "failure"
+    assert log.actor_username == "recruiter"
+    assert log.details == {"reason": "invalid_credentials"}

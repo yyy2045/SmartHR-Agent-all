@@ -30,6 +30,7 @@ from app.schemas.screening import (
     ReanalysisTaskResponse,
     ScreeningResultResponse,
 )
+from app.services.audit import record_audit
 from app.services.model_payload import (
     ModelPayloadSecurityError,
     validate_candidate_profile_payload,
@@ -373,6 +374,36 @@ def correct_candidate_profile(
         candidate_profile_id=profile.id,
         analysis_version=analysis_version,
     )
+    record_audit(
+        db,
+        action="candidate.profile_corrected",
+        target_type="candidate_profile",
+        target_id=profile.id,
+        job_id=job_id,
+        batch_id=batch_id,
+        result="success",
+        actor=current_user,
+        details={
+            "source_profile_id": str(source.id),
+            "version_number": profile.version_number,
+        },
+    )
+    record_audit(
+        db,
+        action="screening.reanalysis_requested",
+        target_type="resume_document",
+        target_id=document.id,
+        job_id=job_id,
+        batch_id=batch_id,
+        result="success" if reanalysis.status == "queued" else "failure",
+        actor=current_user,
+        details={
+            "scope": "candidate_after_correction",
+            "criteria_version_id": str(criteria.id),
+            "analysis_version": analysis_version,
+        },
+    )
+    db.commit()
     return CandidateProfileCorrectionResponse(profile=profile, reanalysis=reanalysis)
 
 
@@ -426,6 +457,23 @@ def reanalyze_candidate(
         candidate_profile_id=profile.id if profile is not None else None,
         analysis_version=analysis_version,
     )
+    record_audit(
+        db,
+        action="screening.reanalysis_requested",
+        target_type="resume_document",
+        target_id=document.id,
+        job_id=job_id,
+        batch_id=batch_id,
+        result="success" if task.status == "queued" else "failure",
+        actor=current_user,
+        details={
+            "scope": "candidate",
+            "criteria_version_id": str(criteria.id),
+            "analysis_version": analysis_version,
+            "candidate_profile_id": str(profile.id) if profile is not None else None,
+        },
+    )
+    db.commit()
     if task.status == "enqueue_failed":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -511,6 +559,25 @@ def reanalyze_batch(
         response_status = "partial_failure"
     else:
         response_status = "queued"
+    record_audit(
+        db,
+        action="screening.reanalysis_requested",
+        target_type="screening_batch",
+        target_id=batch.id,
+        job_id=job_id,
+        batch_id=batch.id,
+        result="success" if queued_count else "failure",
+        actor=current_user,
+        details={
+            "scope": "batch",
+            "criteria_version_id": str(criteria.id),
+            "analysis_version": analysis_version,
+            "queued_count": queued_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
+        },
+    )
+    db.commit()
     return BatchReanalysisResponse(
         status=response_status,
         batch_id=batch.id,

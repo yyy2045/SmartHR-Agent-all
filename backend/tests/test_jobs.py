@@ -3,13 +3,13 @@ from collections.abc import Generator
 import fakeredis
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import User
+from app.models import AuditLog, User
 from app.redis_client import get_session_store
 from app.schemas.job import JDAIDraft
 from app.services.ai_client import AIUpstreamError, get_ai_client
@@ -18,7 +18,7 @@ from app.services.session_store import SessionStore
 
 
 @pytest.fixture
-def job_dependencies() -> Generator[None, None, None]:
+def job_dependencies() -> Generator[sessionmaker[Session], None, None]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -51,7 +51,7 @@ def job_dependencies() -> Generator[None, None, None]:
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_session_store] = override_session_store
-    yield
+    yield testing_session
     app.dependency_overrides.clear()
     Base.metadata.drop_all(engine)
     engine.dispose()
@@ -205,7 +205,9 @@ async def test_create_update_list_and_archive_job(job_dependencies: None) -> Non
 
 
 @pytest.mark.asyncio
-async def test_confirmed_criteria_are_immutable_and_versioned(job_dependencies: None) -> None:
+async def test_confirmed_criteria_are_immutable_and_versioned(
+    job_dependencies: sessionmaker[Session],
+) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         await login(client)
@@ -291,6 +293,15 @@ async def test_confirmed_criteria_are_immutable_and_versioned(job_dependencies: 
         versions = versions_response.json()
         assert [item["version_number"] for item in versions] == [2, 1]
         assert versions[1]["status"] == "confirmed"
+
+    with job_dependencies() as db:
+        audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "criteria.confirmed")
+        )
+    assert audit is not None
+    assert str(audit.target_id) == version_id
+    assert str(audit.job_id) == job_id
+    assert audit.details == {"version_number": 1, "pass_threshold": 65}
 
 
 @pytest.mark.asyncio

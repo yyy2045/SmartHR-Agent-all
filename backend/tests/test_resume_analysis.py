@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import (
+    AuditLog,
     CandidateProfile,
     HardRequirement,
     Job,
@@ -415,6 +416,19 @@ async def test_explicit_objective_failure_auto_rejects_but_other_failure_does_no
     assert rejected["group"] == "auto_rejected"
     assert rejected["total_score"] == 95.0
     assert rejected["analysis_version"] == 2
+    with analysis_dependencies.session_factory() as db:
+        audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "screening.auto_rejected")
+        )
+    assert audit is not None
+    assert audit.actor_user_id is None
+    assert audit.actor_username == "system"
+    assert audit.target_id is not None
+    assert audit.result == "success"
+    assert audit.details == {
+        "analysis_version": 2,
+        "criteria_version_id": str(analysis_dependencies.criteria_version_id),
+    }
 
 
 @pytest.mark.asyncio

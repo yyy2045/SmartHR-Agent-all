@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models import User
 from app.redis_client import get_session_store
 from app.schemas.auth import LoginRequest, UserResponse
+from app.services.audit import record_audit
 from app.services.security import verify_password
 from app.services.session_store import SessionStore
 
@@ -29,6 +30,16 @@ def login(
     password = payload.password.get_secret_value()
 
     if user is None or not user.is_active or not verify_password(password, user.password_hash):
+        record_audit(
+            db,
+            action="auth.login",
+            target_type="session",
+            result="failure",
+            actor=user,
+            actor_username=username,
+            details={"reason": "invalid_credentials"},
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
@@ -38,7 +49,31 @@ def login(
     if existing_token:
         session_store.delete(existing_token)
 
-    token = session_store.create(user.id)
+    try:
+        token = session_store.create(user.id)
+    except Exception:
+        record_audit(
+            db,
+            action="auth.login",
+            target_type="session",
+            result="failure",
+            actor=user,
+            details={"reason": "session_unavailable"},
+        )
+        db.commit()
+        raise
+    record_audit(
+        db,
+        action="auth.login",
+        target_type="session",
+        result="success",
+        actor=user,
+    )
+    try:
+        db.commit()
+    except Exception:
+        session_store.delete(token)
+        raise
     response.set_cookie(
         key=settings.app_session_cookie,
         value=token,
@@ -55,11 +90,23 @@ def login(
 def logout(
     request: Request,
     response: Response,
+    db: Annotated[Session, Depends(get_db)],
     session_store: Annotated[SessionStore, Depends(get_session_store)],
 ) -> None:
     token = request.cookies.get(settings.app_session_cookie)
+    user_id = session_store.get_user_id(token) if token else None
+    user = db.get(User, user_id) if user_id else None
     if token:
         session_store.delete(token)
+    record_audit(
+        db,
+        action="auth.logout",
+        target_type="session",
+        result="success",
+        actor=user,
+        details={"had_session": token is not None},
+    )
+    db.commit()
     response.delete_cookie(
         key=settings.app_session_cookie,
         path="/",

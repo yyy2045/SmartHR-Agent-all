@@ -20,6 +20,8 @@ from app.models import (
     ScreeningResult,
 )
 from app.schemas.batch import (
+    BatchDeletionRequest,
+    BatchDeletionResponse,
     ResumeDocumentDetailResponse,
     ResumeDocumentResponse,
     ResumeTextSegmentResponse,
@@ -34,6 +36,8 @@ from app.schemas.screening import (
     RecruiterDecisionResponse,
     ScreeningResultResponse,
 )
+from app.services.audit import record_audit
+from app.services.batch_deletion import BatchDeletionError, stage_batch_files
 from app.services.batch_status import refresh_batch_status
 from app.services.file_storage import (
     FileValidationError,
@@ -509,6 +513,17 @@ async def retry_failed_document(
     if document.status == "uploaded" and previous_storage_key != document.storage_key:
         delete_private_file(settings.file_storage_root, previous_storage_key)
     refresh_batch_status(batch)
+    record_audit(
+        db,
+        action="resume.upload_retried",
+        target_type="resume_document",
+        target_id=document.id,
+        job_id=job_id,
+        batch_id=batch_id,
+        result="success" if document.status == "uploaded" else "failure",
+        actor=current_user,
+        details={"attempt_count": document.attempt_count},
+    )
     db.commit()
     if document.status == "uploaded":
         queue_document(db, document)
@@ -542,6 +557,18 @@ def retry_document_parsing(
             detail="该文件未通过上传校验，请重新选择文件",
         )
     queue_document(db, document)
+    record_audit(
+        db,
+        action="resume.parse_retried",
+        target_type="resume_document",
+        target_id=document.id,
+        job_id=job_id,
+        batch_id=batch_id,
+        result="success" if document.status == "queued" else "failure",
+        actor=current_user,
+        details={"task_id_created": document.task_id is not None},
+    )
+    db.commit()
     db.refresh(document)
     return document_response(document)
 
@@ -650,10 +677,38 @@ def retry_document_analysis(
             analysis_version=(latest_version or 0) + 1,
         )
     except Exception as error:
+        record_audit(
+            db,
+            action="screening.reanalysis_requested",
+            target_type="resume_document",
+            target_id=document.id,
+            job_id=job_id,
+            batch_id=batch_id,
+            result="failure",
+            actor=current_user,
+            details={"scope": "candidate", "reason": "enqueue_failed"},
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI 分析任务创建失败，请稍后重试",
         ) from error
+    record_audit(
+        db,
+        action="screening.reanalysis_requested",
+        target_type="resume_document",
+        target_id=document.id,
+        job_id=job_id,
+        batch_id=batch_id,
+        result="success",
+        actor=current_user,
+        details={
+            "scope": "candidate",
+            "criteria_version_id": str(document.batch.criteria_version_id),
+            "analysis_version": (latest_version or 0) + 1,
+        },
+    )
+    db.commit()
     return AnalysisQueueResponse(status="queued", task_id=task_id)
 
 
@@ -677,8 +732,153 @@ def download_resume_file(
     path = resolve_private_file(settings.file_storage_root, document.storage_key)
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原始文件不存在")
+    record_audit(
+        db,
+        action="resume.file_viewed",
+        target_type="resume_document",
+        target_id=document.id,
+        job_id=job_id,
+        batch_id=batch_id,
+        result="success",
+        actor=current_user,
+    )
+    db.commit()
     return FileResponse(
         path,
         media_type=document.content_type or "application/octet-stream",
         filename=document.original_filename,
+    )
+
+
+@router.delete(
+    "/{job_id}/batches/{batch_id}",
+    response_model=BatchDeletionResponse,
+)
+def delete_screening_batch(
+    job_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    payload: BatchDeletionRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> BatchDeletionResponse:
+    batch = get_owned_batch(db, job_id, batch_id, current_user.id)
+    if payload.confirmation != "永久删除":
+        record_audit(
+            db,
+            action="batch.permanent_delete",
+            target_type="screening_batch",
+            target_id=batch.id,
+            job_id=job_id,
+            batch_id=batch.id,
+            result="failure",
+            actor=current_user,
+            details={"reason": "confirmation_mismatch"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="请输入“永久删除”以确认该操作",
+        )
+
+    storage_keys = [
+        document.storage_key
+        for document in batch.documents
+        if document.storage_key is not None
+    ]
+    try:
+        staged_files = stage_batch_files(
+            settings.file_storage_root,
+            batch_id=batch.id,
+            storage_keys=storage_keys,
+        )
+    except BatchDeletionError as error:
+        record_audit(
+            db,
+            action="batch.permanent_delete",
+            target_type="screening_batch",
+            target_id=batch.id,
+            job_id=job_id,
+            batch_id=batch.id,
+            result="failure",
+            actor=current_user,
+            details={"reason": "file_staging_failed"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(error),
+        ) from error
+
+    document_count = len(batch.documents)
+    file_count = len(staged_files.files)
+    try:
+        db.delete(batch)
+        record_audit(
+            db,
+            action="batch.permanent_delete",
+            target_type="screening_batch",
+            target_id=batch.id,
+            job_id=job_id,
+            batch_id=batch.id,
+            result="success",
+            actor=current_user,
+            details={
+                "document_count": document_count,
+                "file_count": file_count,
+            },
+        )
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        try:
+            staged_files.restore()
+        except BatchDeletionError as restore_error:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(restore_error),
+            ) from restore_error
+        record_audit(
+            db,
+            action="batch.permanent_delete",
+            target_type="screening_batch",
+            target_id=batch_id,
+            job_id=job_id,
+            batch_id=batch_id,
+            result="failure",
+            actor=current_user,
+            details={"reason": "database_delete_failed"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="批次数据库删除失败，原始文件已恢复",
+        ) from error
+
+    try:
+        staged_files.purge()
+    except OSError:
+        record_audit(
+            db,
+            action="batch.file_cleanup_pending",
+            target_type="screening_batch",
+            target_id=batch_id,
+            job_id=job_id,
+            batch_id=batch_id,
+            result="failure",
+            actor=current_user,
+            details={"file_count": file_count},
+        )
+        db.commit()
+        return BatchDeletionResponse(
+            status="cleanup_pending",
+            batch_id=batch_id,
+            deleted_document_count=document_count,
+            deleted_file_count=0,
+            message="批次数据已删除，私有暂存文件将在服务重启时继续清理",
+        )
+    return BatchDeletionResponse(
+        status="deleted",
+        batch_id=batch_id,
+        deleted_document_count=document_count,
+        deleted_file_count=file_count,
     )

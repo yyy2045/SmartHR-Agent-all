@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    AuditLog,
     CandidateProfile,
     DimensionScore,
     EvidenceCitation,
@@ -396,6 +397,18 @@ async def test_result_detail_exposes_original_evidence_and_decision_history(
     assert evidence.json()["original_text"] == "Python 工程经验"
     assert evidence.json()["page_number"] == 1
     assert foreign.status_code == 404
+    with dependency.session_factory() as db:
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "resume.original_evidence_viewed"
+            )
+        )
+    assert audit is not None
+    assert audit.actor_username == "recruiter"
+    assert audit.target_id == dependency.citation_id
+    assert audit.job_id == dependency.job_id
+    assert audit.batch_id == dependency.batch_id
+    assert audit.details == {"screening_result_id": str(dependency.result_id)}
 
 
 @pytest.mark.asyncio
@@ -444,6 +457,25 @@ async def test_recruiter_decisions_keep_before_after_operator_and_time(
         "rejected",
     ]
     assert len(filtered.json()) == 1
+    with dependency.session_factory() as db:
+        audits = list(
+            db.scalars(
+                select(AuditLog)
+                .where(AuditLog.action == "screening.decision_changed")
+                .order_by(AuditLog.created_at)
+            )
+        )
+    assert [item.details["decision"] for item in audits] == [
+        "shortlisted",
+        "pending",
+        "rejected",
+    ]
+    assert [item.details["previous_decision"] for item in audits] == [
+        "unprocessed",
+        "shortlisted",
+        "pending",
+    ]
+    assert all(item.actor_username == "recruiter" for item in audits)
 
 
 @pytest.mark.asyncio
@@ -471,6 +503,16 @@ async def test_auto_rejection_recovery_requires_reason(
     assert "必须填写原因" in missing_reason.text
     assert recovered.status_code == 201
     assert recovered.json()["is_auto_rejection_override"] is True
+    with dependency.session_factory() as db:
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "screening.auto_rejection_overridden"
+            )
+        )
+    assert audit is not None
+    assert audit.actor_username == "recruiter"
+    assert audit.target_id == dependency.result_id
+    assert audit.details == {"decision": "pending"}
 
 
 @pytest.mark.asyncio
@@ -757,6 +799,28 @@ async def test_profile_correction_creates_version_and_queues_only_target_candida
     assert [item["version_number"] for item in profiles.json()] == [2, 1]
     assert history.status_code == 200
     assert [item["analysis_version"] for item in history.json()] == [1]
+    with dependency.session_factory() as db:
+        audits = list(
+            db.scalars(
+                select(AuditLog).where(
+                    AuditLog.action.in_(
+                        [
+                            "candidate.profile_corrected",
+                            "screening.reanalysis_requested",
+                        ]
+                    )
+                )
+            )
+        )
+    assert {item.action for item in audits} == {
+        "candidate.profile_corrected",
+        "screening.reanalysis_requested",
+    }
+    rerun_audit = next(
+        item for item in audits if item.action == "screening.reanalysis_requested"
+    )
+    assert rerun_audit.details["scope"] == "candidate_after_correction"
+    assert rerun_audit.details["analysis_version"] == 2
 
 
 @pytest.mark.asyncio
@@ -892,4 +956,22 @@ async def test_batch_reanalysis_uses_shared_version_and_latest_profiles(
     assert {item[1]["candidate_profile_id"] for item in enqueued} == {
         first_profile_id,
         second_profile_id,
+    }
+    with dependency.session_factory() as db:
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "screening.reanalysis_requested",
+                AuditLog.target_type == "screening_batch",
+            )
+        )
+    assert audit is not None
+    assert audit.target_id == dependency.batch_id
+    assert audit.result == "success"
+    assert audit.details == {
+        "scope": "batch",
+        "criteria_version_id": str(criteria_id),
+        "analysis_version": 2,
+        "queued_count": 2,
+        "failed_count": 0,
+        "skipped_count": 0,
     }
