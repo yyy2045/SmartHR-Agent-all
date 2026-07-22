@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
@@ -40,6 +40,12 @@ describe('authentication flow', () => {
           headers: { 'Content-Type': 'application/json' },
         })
       }
+      if (path === '/api/jobs') {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
       return new Response(null, { status: 404 })
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -64,6 +70,8 @@ describe('authentication flow', () => {
     expect(screen.getByText('招聘专员')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
+    await waitFor(() => expect(queryClient.getQueryData(['auth', 'current-user'])).toBeNull())
+    await waitFor(() => expect(window.location.pathname).toBe('/login'))
     expect(await screen.findByRole('heading', { name: '登录' })).toBeInTheDocument()
   })
 })

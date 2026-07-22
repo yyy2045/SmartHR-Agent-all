@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, fetchCurrentUser, fetchLiveHealth, login, logout } from './client'
+import {
+  ApiError,
+  AUTH_UNAUTHORIZED_EVENT,
+  fetchCurrentUser,
+  fetchJobs,
+  fetchLiveHealth,
+  login,
+  logout,
+} from './client'
 
 describe('API client', () => {
   afterEach(() => {
@@ -77,5 +85,24 @@ describe('API client', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
 
     await expect(logout()).resolves.toBeUndefined()
+  })
+
+  it('业务请求会话失效时通知认证状态清理', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: '请先登录' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    const unauthorizedListener = vi.fn()
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, unauthorizedListener)
+
+    await expect(fetchJobs()).rejects.toEqual(new ApiError(401, '请先登录'))
+    expect(unauthorizedListener).toHaveBeenCalledOnce()
+
+    window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, unauthorizedListener)
   })
 })

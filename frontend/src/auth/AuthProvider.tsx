@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 
 import {
   fetchCurrentUser,
   login as loginRequest,
   logout as logoutRequest,
+  AUTH_UNAUTHORIZED_EVENT,
   type AuthUser,
   type LoginCredentials,
 } from '../api/client'
@@ -22,6 +23,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
   const loginMutation = useMutation({ mutationFn: loginRequest })
   const logoutMutation = useMutation({ mutationFn: logoutRequest })
+
+  useEffect(() => {
+    function handleUnauthorized() {
+      queryClient.setQueryData(currentUserQueryKey, null)
+    }
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized)
+    return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized)
+  }, [queryClient])
 
   async function login(credentials: LoginCredentials): Promise<AuthUser> {
     const user = await loginMutation.mutateAsync(credentials)

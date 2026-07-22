@@ -1,4 +1,9 @@
-import { LockOutlined, UserOutlined } from '@ant-design/icons'
+import {
+  LockOutlined,
+  SafetyCertificateOutlined,
+  SolutionOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
 import { Alert, Button, Form, Input, Typography } from 'antd'
 import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
@@ -38,14 +43,23 @@ export function LoginPage() {
       <aside className="login-brand-panel">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true">
-            S
+            <SolutionOutlined />
           </div>
           <div>
             <Text className="brand-name">SmartHR</Text>
             <Text className="brand-subtitle">AI 简历筛选工作台</Text>
           </div>
         </div>
-        <Text className="login-brand-footer">企业招聘工作台</Text>
+        <div className="login-brand-copy">
+          <span className="login-eyebrow">AI RECRUITING WORKSPACE</span>
+          <Title level={1}>让每一次筛选，都有清晰依据。</Title>
+          <Text>
+            统一管理职位标准、简历解析与候选人评估，在保留人工决策权的前提下提高招聘效率。
+          </Text>
+        </div>
+        <Text className="login-brand-footer">
+          <SafetyCertificateOutlined /> 企业招聘工作台
+        </Text>
       </aside>
 
       <main className="login-main">
@@ -53,7 +67,7 @@ export function LoginPage() {
           <Title id="login-title" level={2}>
             登录
           </Title>
-          <Text type="secondary">使用招聘专员账号继续</Text>
+          <Text type="secondary">登录 SmartHR 招聘工作台</Text>
 
           {formError && <Alert type="error" showIcon message={formError} className="form-alert" />}
 
