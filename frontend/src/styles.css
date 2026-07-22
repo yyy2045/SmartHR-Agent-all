@@ -600,6 +600,22 @@ input {
   box-shadow: 0 3px 14px rgb(26 45 72 / 3%);
 }
 
+.ai-draft-card {
+  background: linear-gradient(135deg, #f7fbff 0%, #f4f7ff 100%);
+  border-color: #d7e7fb;
+}
+
+.ai-draft-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.ai-draft-heading .ant-typography {
+  margin-bottom: 4px;
+}
+
 .criteria-section > .ant-card-head {
   min-height: 54px;
   background: #fbfcfe;
@@ -1074,7 +1090,8 @@ input {
 
   .page-heading,
   .job-card-heading,
-  .criteria-version-heading {
+  .criteria-version-heading,
+  .ai-draft-heading {
     align-items: flex-start;
     flex-direction: column;
   }

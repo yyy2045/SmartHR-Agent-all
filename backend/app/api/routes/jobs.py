@@ -13,14 +13,24 @@ from app.schemas.job import (
     CriteriaDraftUpdate,
     CriteriaVersionCreate,
     CriteriaVersionResponse,
+    JDAIDraft,
     JobCreate,
     JobDetailResponse,
     JobResponse,
     JobUpdate,
 )
+from app.services.ai_client import (
+    AIConfigurationError,
+    AIRequestTimeout,
+    AIResponseValidationError,
+    AIUpstreamError,
+    OpenAICompatibleClient,
+    get_ai_client,
+)
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
+AIClient = Annotated[OpenAICompatibleClient, Depends(get_ai_client)]
 
 
 def get_owned_job(db: Session, job_id: uuid.UUID, owner_id: uuid.UUID) -> Job:
@@ -128,6 +138,35 @@ def archive_job(job_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> 
         db.commit()
         db.refresh(job)
     return job
+
+
+@router.post("/{job_id}/criteria/ai-draft", response_model=JDAIDraft)
+async def generate_ai_criteria_draft(
+    job_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+    ai_client: AIClient,
+) -> JDAIDraft:
+    job = get_owned_job(db, job_id, current_user.id)
+    ensure_job_active(job)
+    try:
+        return await ai_client.structure_jd(
+            title=job.title,
+            department=job.department,
+            jd=job.original_jd,
+        )
+    except AIConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except AIRequestTimeout as error:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=str(error),
+        ) from error
+    except (AIResponseValidationError, AIUpstreamError) as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
 
 @router.get("/{job_id}/criteria/versions", response_model=list[CriteriaVersionResponse])

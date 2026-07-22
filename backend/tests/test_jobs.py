@@ -11,6 +11,8 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import User
 from app.redis_client import get_session_store
+from app.schemas.job import JDAIDraft
+from app.services.ai_client import AIUpstreamError, get_ai_client
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
 
@@ -63,6 +65,33 @@ async def login(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200
 
 
+class StubAIClient:
+    def __init__(self, *, failure: Exception | None = None) -> None:
+        self.failure = failure
+        self.calls: list[dict[str, str]] = []
+
+    async def structure_jd(self, *, title: str, department: str, jd: str) -> JDAIDraft:
+        self.calls.append({"title": title, "department": department, "jd": jd})
+        if self.failure is not None:
+            raise self.failure
+        return JDAIDraft.model_validate(
+            {
+                "suggested_title": "高级数据分析师",
+                "summary": "负责业务数据分析与洞察。",
+                "pass_threshold": 60,
+                "hard_requirements": [],
+                "scoring_dimensions": [
+                    {
+                        "name": "数据分析能力",
+                        "description": "关注 SQL 和业务分析",
+                        "weight_percent": 100,
+                        "sort_order": 0,
+                    }
+                ],
+            }
+        )
+
+
 @pytest.mark.asyncio
 async def test_jobs_require_authentication(job_dependencies: None) -> None:
     transport = httpx.ASGITransport(app=app)
@@ -70,6 +99,66 @@ async def test_jobs_require_authentication(job_dependencies: None) -> None:
         response = await client.get("/jobs")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ai_draft_is_validated_and_does_not_modify_saved_job(
+    job_dependencies: None,
+) -> None:
+    stub = StubAIClient()
+    app.dependency_overrides[get_ai_client] = lambda: stub
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        created = await client.post(
+            "/jobs",
+            json={
+                "title": "数据分析师",
+                "department": "数据部",
+                "original_jd": "负责 SQL 分析和经营洞察。",
+            },
+        )
+        job_id = created.json()["id"]
+        response = await client.post(f"/jobs/{job_id}/criteria/ai-draft")
+        detail = await client.get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert response.json()["suggested_title"] == "高级数据分析师"
+    assert response.json()["scoring_dimensions"][0]["weight_percent"] == 100
+    assert stub.calls == [
+        {
+            "title": "数据分析师",
+            "department": "数据部",
+            "jd": "负责 SQL 分析和经营洞察。",
+        }
+    ]
+    assert detail.json()["title"] == "数据分析师"
+    assert detail.json()["original_jd"] == "负责 SQL 分析和经营洞察。"
+    assert detail.json()["criteria_versions"] == []
+
+
+@pytest.mark.asyncio
+async def test_ai_draft_failure_is_readable_and_archived_job_is_blocked(
+    job_dependencies: None,
+) -> None:
+    stub = StubAIClient(failure=AIUpstreamError("模型服务暂不可用"))
+    app.dependency_overrides[get_ai_client] = lambda: stub
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        created = await client.post(
+            "/jobs",
+            json={"title": "工程师", "department": "研发", "original_jd": "开发服务。"},
+        )
+        job_id = created.json()["id"]
+        failed = await client.post(f"/jobs/{job_id}/criteria/ai-draft")
+        await client.post(f"/jobs/{job_id}/archive")
+        blocked = await client.post(f"/jobs/{job_id}/criteria/ai-draft")
+
+    assert failed.status_code == 502
+    assert failed.json()["detail"] == "模型服务暂不可用"
+    assert blocked.status_code == 409
+    assert len(stub.calls) == 1
 
 
 @pytest.mark.asyncio

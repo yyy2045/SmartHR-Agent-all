@@ -8,6 +8,7 @@ import {
   fetchJobs,
   fetchLiveHealth,
   fetchResumeDocumentDetail,
+  generateJDAIDraft,
   login,
   logout,
   retryResumeParsing,
@@ -181,6 +182,37 @@ describe('API client', () => {
       '/api/jobs/job-1/batches/batch-1/documents/document-1/parse-retry',
     )
     expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+    })
+  })
+
+  it('通过 POST 请求 AI 结构化 JD 草稿', async () => {
+    const draft = {
+      suggested_title: '高级后端工程师',
+      summary: '负责核心服务设计与开发。',
+      pass_threshold: 60,
+      hard_requirements: [],
+      scoring_dimensions: [
+        {
+          name: '系统设计',
+          description: '关注可扩展架构',
+          weight_percent: 100,
+          sort_order: 0,
+        },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(draft), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(generateJDAIDraft('job-1')).resolves.toEqual(draft)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/jobs/job-1/criteria/ai-draft')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: 'POST',
       credentials: 'include',
     })

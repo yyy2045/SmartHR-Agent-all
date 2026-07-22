@@ -81,6 +81,11 @@ export interface CriteriaDraftInput {
   scoring_dimensions: ScoringDimensionInput[]
 }
 
+export interface JDAIDraft extends CriteriaDraftInput {
+  suggested_title: string
+  summary: string
+}
+
 export interface JobDetail extends JobRecord {
   criteria_versions: CriteriaVersion[]
 }
@@ -313,6 +318,14 @@ export function confirmCriteriaVersion(
     `/api/jobs/${jobId}/criteria/versions/${versionId}/confirm`,
     { method: 'POST' },
     '确认筛选标准失败',
+  )
+}
+
+export function generateJDAIDraft(jobId: string): Promise<JDAIDraft> {
+  return apiRequest(
+    `/api/jobs/${jobId}/criteria/ai-draft`,
+    { method: 'POST' },
+    'AI 生成筛选草稿失败',
   )
 }
 
