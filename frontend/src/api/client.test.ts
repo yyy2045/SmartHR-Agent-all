@@ -7,8 +7,10 @@ import {
   fetchCurrentUser,
   fetchJobs,
   fetchLiveHealth,
+  fetchResumeDocumentDetail,
   login,
   logout,
+  retryResumeParsing,
 } from './client'
 
 describe('API client', () => {
@@ -143,5 +145,44 @@ describe('API client', () => {
     const body = request[1]?.body as FormData
     expect(body.get('criteria_version_id')).toBe('version-1')
     expect(body.getAll('files')).toHaveLength(1)
+  })
+
+  it('读取解析详情并通过 POST 重新处理原文件', async () => {
+    const detail = { id: 'document-1', text_segments: [] }
+    const queued = { id: 'document-1', status: 'queued' }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(detail), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(queued), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      fetchResumeDocumentDetail('job-1', 'batch-1', 'document-1'),
+    ).resolves.toEqual(detail)
+    await expect(retryResumeParsing('job-1', 'batch-1', 'document-1')).resolves.toEqual(
+      queued,
+    )
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/jobs/job-1/batches/batch-1/documents/document-1',
+    )
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'include' })
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      '/api/jobs/job-1/batches/batch-1/documents/document-1/parse-retry',
+    )
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+    })
   })
 })

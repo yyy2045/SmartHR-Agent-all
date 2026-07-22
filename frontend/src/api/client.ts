@@ -108,12 +108,37 @@ export interface ResumeDocumentRecord {
   detected_type: string
   size_bytes: number
   sha256: string | null
+  has_original_file: boolean
+  extraction_method: string | null
+  segment_count: number
+  text_character_count: number
   status: ResumeDocumentStatus
   failure_code: string | null
   failure_message: string | null
   attempt_count: number
+  processing_attempt_count: number
+  processing_started_at: string | null
+  parsed_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface ResumeTextSegmentRecord {
+  id: string
+  document_id: string
+  segment_key: string
+  source_type: 'pdf_page' | 'docx_paragraph' | 'image_ocr'
+  source_index: number
+  page_number: number | null
+  paragraph_index: number | null
+  raw_text: string
+  normalized_text: string
+  ocr_confidence: number | null
+  sort_order: number
+}
+
+export interface ResumeDocumentDetail extends ResumeDocumentRecord {
+  text_segments: ResumeTextSegmentRecord[]
 }
 
 export interface ScreeningBatchRecord {
@@ -320,6 +345,30 @@ export function retryResumeDocument(
     `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/retry`,
     { method: 'PUT', body },
     '重新上传简历失败',
+  )
+}
+
+export function retryResumeParsing(
+  jobId: string,
+  batchId: string,
+  documentId: string,
+): Promise<ResumeDocumentRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}/parse-retry`,
+    { method: 'POST' },
+    '重新处理简历失败',
+  )
+}
+
+export function fetchResumeDocumentDetail(
+  jobId: string,
+  batchId: string,
+  documentId: string,
+): Promise<ResumeDocumentDetail> {
+  return apiRequest(
+    `/api/jobs/${jobId}/batches/${batchId}/documents/${documentId}`,
+    {},
+    '无法读取简历文本',
   )
 }
 

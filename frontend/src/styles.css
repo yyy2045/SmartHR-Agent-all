@@ -858,6 +858,21 @@ input {
   padding: 15px 2px;
 }
 
+.document-list .ant-list-item-action {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.document-list .ant-list-item-action > li {
+  padding: 0;
+}
+
+.document-list .ant-list-item-action-split {
+  display: none;
+}
+
 .document-icon {
   display: grid;
   width: 40px;
@@ -872,6 +887,58 @@ input {
 .document-icon.is-error {
   color: #c43f48;
   background: #fff1f1;
+}
+
+.resume-text-drawer .ant-drawer-header {
+  border-bottom-color: #e8edf3;
+}
+
+.resume-text-drawer .ant-drawer-body {
+  background: #f7f9fc;
+}
+
+.resume-text-summary {
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #fff;
+  border: 1px solid #e4e9f0;
+  border-radius: 12px;
+}
+
+.resume-segment-list .ant-list-item {
+  padding: 0 0 12px;
+  border: 0;
+}
+
+.resume-segment-card {
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e4e9f0;
+  border-radius: 12px;
+  box-shadow: 0 3px 12px rgb(26 45 72 / 3%);
+}
+
+.resume-segment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #fbfcfe;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.resume-segment-card pre {
+  padding: 16px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #344054;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.75;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .batch-empty {
@@ -1038,7 +1105,21 @@ input {
   }
 
   .document-list .ant-list-item-action {
+    justify-content: flex-start;
     margin-inline-start: 8px;
+  }
+
+  .resume-text-drawer .ant-drawer-content-wrapper {
+    width: 100% !important;
+  }
+
+  .resume-text-summary .ant-descriptions-view table {
+    table-layout: fixed;
+  }
+
+  .resume-segment-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .dimension-progress {

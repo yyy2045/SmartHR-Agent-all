@@ -2,6 +2,13 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
 
+const getComputedStyle = window.getComputedStyle.bind(window)
+
+Object.defineProperty(window, 'getComputedStyle', {
+  writable: true,
+  value: (element: Element) => getComputedStyle(element),
+})
+
 afterEach(() => {
   cleanup()
 })

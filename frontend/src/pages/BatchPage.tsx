@@ -2,9 +2,11 @@ import {
   ArrowLeftOutlined,
   CloudUploadOutlined,
   DownloadOutlined,
+  EyeOutlined,
   FileDoneOutlined,
   FileExcelOutlined,
   FileOutlined,
+  RedoOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
@@ -14,6 +16,8 @@ import {
   Alert,
   Button,
   Card,
+  Descriptions,
+  Drawer,
   Empty,
   Input,
   List,
@@ -29,15 +33,18 @@ import {
   type UploadFile,
 } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import {
   ApiError,
   createScreeningBatch,
   fetchJob,
+  fetchResumeDocumentDetail,
   fetchScreeningBatches,
   resumeFileUrl,
   retryResumeDocument,
+  retryResumeParsing,
   type BatchStatus,
   type ResumeDocumentRecord,
   type ScreeningBatchRecord,
@@ -72,11 +79,35 @@ function formatSize(bytes: number) {
 }
 
 function documentStatus(document: ResumeDocumentRecord) {
-  if (document.status === 'failed') return <Tag color="error">上传失败</Tag>
+  if (document.status === 'failed') {
+    return <Tag color="error">{document.has_original_file ? '解析失败' : '上传失败'}</Tag>
+  }
   if (document.status === 'processing') return <Tag color="processing">处理中</Tag>
-  if (document.status === 'queued') return <Tag color="blue">等待处理</Tag>
-  if (document.status === 'completed') return <Tag color="success">处理完成</Tag>
+  if (document.status === 'queued') return <Tag color="blue">等待解析</Tag>
+  if (document.status === 'completed') return <Tag color="success">解析完成</Tag>
   return <Tag color="cyan">已安全保存</Tag>
+}
+
+const extractionMethodLabels: Record<string, string> = {
+  pdf_text: 'PDF 文本提取',
+  pdf_ocr: 'PDF OCR',
+  docx_text: 'DOCX 文本提取',
+  image_ocr: '图片 OCR',
+}
+
+function extractionMethodLabel(method: string | null) {
+  if (!method) return '尚未解析'
+  return extractionMethodLabels[method] ?? method
+}
+
+function segmentLocation(
+  sourceType: 'pdf_page' | 'docx_paragraph' | 'image_ocr',
+  pageNumber: number | null,
+  paragraphIndex: number | null,
+) {
+  if (sourceType === 'pdf_page') return `PDF 第 ${pageNumber ?? '-'} 页`
+  if (sourceType === 'docx_paragraph') return `DOCX 第 ${paragraphIndex ?? '-'} 段`
+  return '图片 OCR'
 }
 
 function BatchCard({
@@ -90,20 +121,106 @@ function BatchCard({
 }) {
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string>()
   const retryMutation = useMutation({
     mutationFn: ({ documentId, file }: { documentId: string; file: File }) =>
       retryResumeDocument(jobId, batch.id, documentId, file),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['batches', jobId] })
-      messageApi.success('失败文件已重新上传')
+      messageApi.success('文件已重新上传并进入解析队列')
     },
     onError: (error) =>
       messageApi.error(error instanceof ApiError ? error.message : '重新上传失败'),
   })
+  const parseRetryMutation = useMutation({
+    mutationFn: (documentId: string) =>
+      retryResumeParsing(jobId, batch.id, documentId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['batches', jobId] })
+      messageApi.success('文件已重新进入解析队列')
+    },
+    onError: (error) =>
+      messageApi.error(error instanceof ApiError ? error.message : '重新处理失败'),
+  })
+  const detail = useQuery({
+    queryKey: ['resume-document', jobId, batch.id, selectedDocumentId],
+    queryFn: () =>
+      fetchResumeDocumentDetail(jobId, batch.id, selectedDocumentId!),
+    enabled: Boolean(selectedDocumentId),
+  })
   const status = batchStatusMeta[batch.status]
-  const completedPercent = batch.total_count
-    ? Math.round((batch.success_count / batch.total_count) * 100)
+  const processedPercent = batch.total_count
+    ? Math.round(((batch.success_count + batch.failed_count) / batch.total_count) * 100)
     : 0
+  const selectedDocument = batch.documents.find(
+    (document) => document.id === selectedDocumentId,
+  )
+
+  const documentActions = (document: ResumeDocumentRecord): ReactNode[] => {
+    const actions: ReactNode[] = []
+    if (document.status === 'completed') {
+      actions.push(
+        <Button
+          key="detail"
+          type="link"
+          icon={<EyeOutlined />}
+          onClick={() => setSelectedDocumentId(document.id)}
+        >
+          查看文本
+        </Button>,
+      )
+    }
+    if (document.status === 'failed' && document.has_original_file) {
+      actions.push(
+        <Button
+          key="parse-retry"
+          type="link"
+          icon={<RedoOutlined />}
+          disabled={archived}
+          loading={parseRetryMutation.isPending}
+          onClick={() => parseRetryMutation.mutate(document.id)}
+        >
+          重新处理
+        </Button>,
+      )
+    }
+    if (document.status === 'failed' && !document.has_original_file) {
+      actions.push(
+        <Upload
+          key="upload-retry"
+          accept=".pdf,.docx,.jpg,.jpeg,.png"
+          maxCount={1}
+          showUploadList={false}
+          disabled={archived || retryMutation.isPending}
+          beforeUpload={(file) => {
+            retryMutation.mutate({ documentId: document.id, file })
+            return Upload.LIST_IGNORE
+          }}
+        >
+          <Button
+            type="link"
+            icon={<ReloadOutlined />}
+            loading={retryMutation.isPending}
+          >
+            重新选择文件
+          </Button>
+        </Upload>,
+      )
+    }
+    if (document.has_original_file) {
+      actions.push(
+        <Button
+          key="download"
+          type="link"
+          icon={<DownloadOutlined />}
+          href={resumeFileUrl(jobId, batch.id, document.id)}
+        >
+          下载原文件
+        </Button>,
+      )
+    }
+    return actions
+  }
 
   return (
     <Card className="batch-card">
@@ -118,8 +235,8 @@ function BatchCard({
           <Text type="secondary">创建于 {formatDate(batch.created_at)}</Text>
         </div>
         <div className="batch-progress-summary">
-          <Text type="secondary">安全接收进度</Text>
-          <Progress percent={completedPercent} size="small" />
+          <Text type="secondary">批次处理进度</Text>
+          <Progress percent={processedPercent} size="small" />
         </div>
       </div>
 
@@ -136,38 +253,7 @@ function BatchCard({
         locale={{ emptyText: '批次中没有文件' }}
         renderItem={(document) => (
           <List.Item
-            actions={[
-              document.status !== 'failed' ? (
-                <Button
-                  key="download"
-                  type="link"
-                  icon={<DownloadOutlined />}
-                  href={resumeFileUrl(jobId, batch.id, document.id)}
-                >
-                  下载原文件
-                </Button>
-              ) : (
-                <Upload
-                  key="retry"
-                  accept=".pdf,.docx,.jpg,.jpeg,.png"
-                  maxCount={1}
-                  showUploadList={false}
-                  disabled={archived || retryMutation.isPending}
-                  beforeUpload={(file) => {
-                    retryMutation.mutate({ documentId: document.id, file })
-                    return Upload.LIST_IGNORE
-                  }}
-                >
-                  <Button
-                    type="link"
-                    icon={<ReloadOutlined />}
-                    loading={retryMutation.isPending}
-                  >
-                    重新选择文件
-                  </Button>
-                </Upload>
-              ),
-            ]}
+            actions={documentActions(document)}
           >
             <List.Item.Meta
               avatar={
@@ -187,6 +273,17 @@ function BatchCard({
                     {document.detected_type ? document.detected_type.toUpperCase() : '未识别'} ·{' '}
                     {formatSize(document.size_bytes)} · 第 {document.attempt_count} 次尝试
                   </Text>
+                  {document.status === 'completed' && (
+                    <Text type="secondary">
+                      {extractionMethodLabel(document.extraction_method)} · {document.segment_count}{' '}
+                      个片段 · {document.text_character_count} 个字符
+                    </Text>
+                  )}
+                  {document.processing_attempt_count > 0 && document.status !== 'completed' && (
+                    <Text type="secondary">
+                      已进行 {document.processing_attempt_count} 次解析
+                    </Text>
+                  )}
                   {document.failure_message && (
                     <Text type="danger">{document.failure_message}</Text>
                   )}
@@ -196,6 +293,81 @@ function BatchCard({
           </List.Item>
         )}
       />
+
+      <Drawer
+        className="resume-text-drawer"
+        width={720}
+        open={Boolean(selectedDocumentId)}
+        title={selectedDocument ? `解析文本 · ${selectedDocument.original_filename}` : '解析文本'}
+        onClose={() => setSelectedDocumentId(undefined)}
+      >
+        {detail.isPending && <Skeleton active paragraph={{ rows: 10 }} />}
+        {detail.isError && (
+          <Alert
+            type="error"
+            showIcon
+            message="无法读取解析文本"
+            description={detail.error.message}
+            action={<Button onClick={() => void detail.refetch()}>重试</Button>}
+          />
+        )}
+        {detail.isSuccess && (
+          <>
+            <Descriptions
+              className="resume-text-summary"
+              size="small"
+              column={2}
+              items={[
+                {
+                  key: 'method',
+                  label: '解析方式',
+                  children: extractionMethodLabel(detail.data.extraction_method),
+                },
+                { key: 'segments', label: '片段数', children: detail.data.segment_count },
+                {
+                  key: 'characters',
+                  label: '字符数',
+                  children: detail.data.text_character_count,
+                },
+                {
+                  key: 'parsed-at',
+                  label: '完成时间',
+                  children: detail.data.parsed_at ? formatDate(detail.data.parsed_at) : '-',
+                },
+              ]}
+            />
+            <List
+              className="resume-segment-list"
+              dataSource={detail.data.text_segments}
+              locale={{ emptyText: '没有可展示的文本片段' }}
+              renderItem={(segment) => (
+                <List.Item>
+                  <article className="resume-segment-card">
+                    <div className="resume-segment-heading">
+                      <Space wrap size="small">
+                        <Tag color="blue">{segment.segment_key}</Tag>
+                        <Text strong>
+                          {segmentLocation(
+                            segment.source_type,
+                            segment.page_number,
+                            segment.paragraph_index,
+                          )}
+                        </Text>
+                      </Space>
+                      {segment.ocr_confidence !== null && (
+                        <Text type="secondary">
+                          OCR 置信度 {(segment.ocr_confidence * 100).toFixed(1)}%
+                        </Text>
+                      )}
+                    </div>
+                    <pre>{segment.normalized_text}</pre>
+                  </article>
+                </List.Item>
+              )}
+            />
+          </>
+        )}
+      </Drawer>
     </Card>
   )
 }
