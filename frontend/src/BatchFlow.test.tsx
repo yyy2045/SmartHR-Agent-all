@@ -184,7 +184,8 @@ describe('resume batch flow', () => {
     const invalidFile = new File(['broken'], 'broken.png', { type: 'image/png' })
     fireEvent.change(uploadInput!, { target: { files: [validFile, invalidFile] } })
 
-    expect(await screen.findByText('已选择 2 / 50 份')).toBeInTheDocument()
+    expect(await screen.findByText('单批最多 2 份，单文件不超过 20 MB')).toBeInTheDocument()
+    expect(await screen.findByText('已选择 2 / 2 份')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /开始上传/ }))
 
     expect(await screen.findByRole('heading', { name: '7 月校招第一批' })).toBeInTheDocument()

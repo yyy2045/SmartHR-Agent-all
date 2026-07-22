@@ -52,6 +52,7 @@ import {
 
 const { Title, Text } = Typography
 const { Dragger } = Upload
+const MAX_BATCH_FILE_COUNT = 2
 
 const batchStatusMeta: Record<BatchStatus, { color: string; label: string }> = {
   uploading: { color: 'processing', label: '上传中' },
@@ -533,7 +534,9 @@ export function BatchPage() {
                 <FileOutlined />
                 <div>
                   <Text strong>安全上传规则</Text>
-                  <Text type="secondary">单批最多 50 份，单文件不超过 20 MB</Text>
+                  <Text type="secondary">
+                    单批最多 {MAX_BATCH_FILE_COUNT} 份，单文件不超过 20 MB
+                  </Text>
                   <Text type="secondary">支持 PDF、DOCX、JPG、PNG</Text>
                 </div>
               </div>
@@ -546,7 +549,9 @@ export function BatchPage() {
                 fileList={fileList}
                 disabled={archived || uploadMutation.isPending}
                 beforeUpload={() => false}
-                onChange={({ fileList: nextList }) => setFileList(nextList.slice(0, 50))}
+                onChange={({ fileList: nextList }) =>
+                  setFileList(nextList.slice(0, MAX_BATCH_FILE_COUNT))
+                }
                 onRemove={(file) => {
                   setFileList((current) => current.filter((item) => item.uid !== file.uid))
                   return true
@@ -559,7 +564,9 @@ export function BatchPage() {
                 <p className="ant-upload-hint">系统会逐文件校验，单个失败不会影响整个批次</p>
               </Dragger>
               <div className="upload-submit-row">
-                <Text type="secondary">已选择 {selectedFiles.length} / 50 份</Text>
+                <Text type="secondary">
+                  已选择 {selectedFiles.length} / {MAX_BATCH_FILE_COUNT} 份
+                </Text>
                 <Button
                   type="primary"
                   icon={<CloudUploadOutlined />}
