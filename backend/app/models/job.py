@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
-    from app.models.resume import ScreeningBatch
+    from app.models.resume import ScreeningBatch, ScreeningResult
 
 
 class Job(Base):
@@ -116,6 +116,9 @@ class JobCriteriaVersion(Base):
         order_by="ScoringDimension.sort_order",
     )
     screening_batches: Mapped[list[ScreeningBatch]] = relationship(
+        back_populates="criteria_version"
+    )
+    screening_results: Mapped[list[ScreeningResult]] = relationship(
         back_populates="criteria_version"
     )
 

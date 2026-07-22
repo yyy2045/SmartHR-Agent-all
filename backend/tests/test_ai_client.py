@@ -56,6 +56,62 @@ def make_client(transport: httpx.AsyncBaseTransport) -> OpenAICompatibleClient:
     )
 
 
+def resume_payload() -> dict[str, object]:
+    return {
+        "candidate_code": "CAND-TEST",
+        "segments": [{"segment_key": "SEG-0001", "text": "5 年 Python 经验"}],
+        "criteria": {
+            "criteria_version_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "pass_threshold": 60,
+            "hard_requirements": [],
+            "scoring_dimensions": [
+                {
+                    "dimension_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                    "name": "工程能力",
+                    "description": "Python 工程能力",
+                }
+            ],
+        },
+    }
+
+
+def valid_resume_analysis() -> dict[str, object]:
+    return {
+        "candidate_profile": {
+            "education": [],
+            "work_experiences": [],
+            "projects": [],
+            "skills": [
+                {
+                    "name": "Python",
+                    "level": "熟练",
+                    "evidence": [
+                        {"segment_key": "SEG-0001", "quote": "Python"}
+                    ],
+                }
+            ],
+            "certifications": [],
+            "languages": [],
+        },
+        "hard_requirements": [],
+        "dimension_scores": [
+            {
+                "dimension_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "score": 80,
+                "rationale": "具有明确经验。",
+                "missing_items": [],
+                "evidence": [
+                    {"segment_key": "SEG-0001", "quote": "5 年 Python 经验"}
+                ],
+            }
+        ],
+        "strengths": ["Python 经验"],
+        "gaps": [],
+        "missing_items": [],
+        "interview_questions": [],
+    }
+
+
 @pytest.mark.asyncio
 async def test_openai_client_sends_json_schema_and_returns_validated_draft() -> None:
     requests: list[httpx.Request] = []
@@ -86,6 +142,60 @@ async def test_openai_client_sends_json_schema_and_returns_validated_draft() -> 
     assert request_body["response_format"]["json_schema"]["strict"] is True
     assert "负责 Python 与 FastAPI 服务开发" in request_body["messages"][1]["content"]
     assert requests[0].headers["authorization"] == "Bearer test-api-key"
+
+
+@pytest.mark.asyncio
+async def test_openai_client_requests_resume_scores_without_model_total() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                valid_resume_analysis(), ensure_ascii=False
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    result = await make_client(httpx.MockTransport(handler)).analyze_resume(
+        resume_payload()
+    )
+
+    assert result.dimension_scores[0].score == 80
+    request_body = json.loads(requests[0].content)
+    schema = request_body["response_format"]["json_schema"]["schema"]
+    assert request_body["response_format"]["json_schema"]["strict"] is True
+    assert "total_score" not in schema["properties"]
+    assert "ai_group" not in schema["properties"]
+    user_payload = json.loads(request_body["messages"][1]["content"])
+    assert user_payload == resume_payload()
+    assert "private.pdf" not in request_body["messages"][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_resume_analysis_retries_twice() -> None:
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "{}"}}]},
+        )
+
+    with pytest.raises(AIResponseValidationError):
+        await make_client(httpx.MockTransport(handler)).analyze_resume(resume_payload())
+
+    assert attempts == 3
 
 
 @pytest.mark.asyncio

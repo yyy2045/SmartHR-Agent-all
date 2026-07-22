@@ -4,16 +4,19 @@ import asyncio
 import json
 import logging
 from functools import lru_cache
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
 from pydantic import ValidationError
 
 from app.config import settings
 from app.schemas.job import JDAIDraft
+from app.schemas.screening import ResumeAnalysisDraft
 
 logger = logging.getLogger(__name__)
 MAX_MODEL_RETRIES = 2
+RESUME_MATCH_PROMPT_VERSION = "resume-match-v1"
+StructuredResponse = TypeVar("StructuredResponse", JDAIDraft, ResumeAnalysisDraft)
 
 
 class AIClientError(RuntimeError):
@@ -108,14 +111,44 @@ class OpenAICompatibleClient:
             return content
         raise AIResponseValidationError("模型响应内容类型无效")
 
-    async def structure_jd(self, *, title: str, department: str, jd: str) -> JDAIDraft:
-        self._validate_configuration()
-        payload = self._request_payload(
-            title=title,
-            department=department,
-            jd=jd,
-            model=self.model,
+    @staticmethod
+    def _resume_request_payload(*, payload: dict[str, Any], model: str) -> dict[str, Any]:
+        system_prompt = (
+            "你是企业招聘的人岗匹配助手。候选人文本已经本地脱敏。"
+            "你只能依据给定文本片段和已确认职位标准进行判断，不得猜测缺失信息。"
+            "最低经验、最低学历、必需证书和明确语言等级必须返回 passed、failed 或 unknown；"
+            "简历未提及时必须返回 unknown。技能、行业和项目质量不能作为客观自动淘汰条件。"
+            "每个评分维度只返回 0 到 100 的分数、说明、缺失项和证据；不要返回总分或最终分组。"
+            "所有明确判断必须引用真实存在的片段编号，引用原文必须来自对应脱敏片段。"
+            "输出必须符合给定 JSON Schema。"
         )
+        return {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(payload, ensure_ascii=False),
+                },
+            ],
+            "temperature": 0,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "resume_match_analysis",
+                    "strict": True,
+                    "schema": ResumeAnalysisDraft.model_json_schema(),
+                },
+            },
+        }
+
+    async def _request_structured(
+        self,
+        *,
+        payload: dict[str, Any],
+        response_type: type[StructuredResponse],
+        operation_name: str,
+    ) -> StructuredResponse:
         last_error: AIClientError | None = None
 
         async with self._semaphore:
@@ -135,7 +168,7 @@ class OpenAICompatibleClient:
                         )
                         response.raise_for_status()
                         content = self._extract_content(response.json())
-                        return JDAIDraft.model_validate(content)
+                        return response_type.model_validate(content)
                     except httpx.TimeoutException:
                         last_error = AIRequestTimeout("AI 服务响应超时")
                     except httpx.HTTPStatusError as error:
@@ -148,14 +181,40 @@ class OpenAICompatibleClient:
                     except (httpx.RequestError, json.JSONDecodeError):
                         last_error = AIUpstreamError("无法连接 AI 服务")
                     except (AIResponseValidationError, ValidationError):
-                        last_error = AIResponseValidationError("AI 返回的筛选草稿格式不合法")
+                        last_error = AIResponseValidationError("AI 返回的结构化结果格式不合法")
 
                     if attempt < MAX_MODEL_RETRIES:
-                        logger.warning("AI 结构化 JD 第 %s 次调用失败，准备重试", attempt + 1)
+                        logger.warning(
+                            "%s 第 %s 次调用失败，准备重试",
+                            operation_name,
+                            attempt + 1,
+                        )
 
         if last_error is not None:
             raise last_error
         raise AIUpstreamError("AI 服务调用失败")
+
+    async def structure_jd(self, *, title: str, department: str, jd: str) -> JDAIDraft:
+        self._validate_configuration()
+        payload = self._request_payload(
+            title=title,
+            department=department,
+            jd=jd,
+            model=self.model,
+        )
+        return await self._request_structured(
+            payload=payload,
+            response_type=JDAIDraft,
+            operation_name="AI 结构化 JD",
+        )
+
+    async def analyze_resume(self, payload: dict[str, Any]) -> ResumeAnalysisDraft:
+        self._validate_configuration()
+        return await self._request_structured(
+            payload=self._resume_request_payload(payload=payload, model=self.model),
+            response_type=ResumeAnalysisDraft,
+            operation_name="AI 简历匹配",
+        )
 
 
 @lru_cache
