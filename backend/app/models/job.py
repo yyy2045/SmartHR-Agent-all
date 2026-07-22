@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -18,6 +19,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.resume import ScreeningBatch
 
 
 class Job(Base):
@@ -53,6 +57,11 @@ class Job(Base):
         back_populates="job",
         cascade="all, delete-orphan",
         order_by="JobCriteriaVersion.version_number",
+    )
+    screening_batches: Mapped[list[ScreeningBatch]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="ScreeningBatch.created_at",
     )
 
 
@@ -105,6 +114,9 @@ class JobCriteriaVersion(Base):
         back_populates="criteria_version",
         cascade="all, delete-orphan",
         order_by="ScoringDimension.sort_order",
+    )
+    screening_batches: Mapped[list[ScreeningBatch]] = relationship(
+        back_populates="criteria_version"
     )
 
 

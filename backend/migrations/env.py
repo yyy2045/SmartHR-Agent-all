@@ -9,7 +9,9 @@ from app.models import (  # noqa: F401
     HardRequirement,
     Job,
     JobCriteriaVersion,
+    ResumeDocument,
     ScoringDimension,
+    ScreeningBatch,
     User,
 )
 
