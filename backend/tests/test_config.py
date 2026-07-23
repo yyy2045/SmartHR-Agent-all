@@ -4,16 +4,16 @@ from pydantic import ValidationError
 from app.config import Settings
 
 
-def test_celery_worker_concurrency_defaults_to_one_and_accepts_two(
+def test_celery_worker_concurrency_defaults_to_two_and_accepts_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("CELERY_WORKER_CONCURRENCY", raising=False)
 
-    assert Settings(_env_file=None).celery_worker_concurrency == 1
+    assert Settings(_env_file=None).celery_worker_concurrency == 2
     assert Settings(
         _env_file=None,
-        celery_worker_concurrency=2,
-    ).celery_worker_concurrency == 2
+        celery_worker_concurrency=1,
+    ).celery_worker_concurrency == 1
 
 
 @pytest.mark.parametrize("value", [0, 3])
@@ -22,13 +22,14 @@ def test_celery_worker_concurrency_rejects_values_outside_limit(value: int) -> N
         Settings(_env_file=None, celery_worker_concurrency=value)
 
 
-def test_batch_file_count_defaults_to_two_and_cannot_exceed_limit() -> None:
-    assert Settings(_env_file=None).max_batch_file_count == 2
+def test_batch_file_count_defaults_to_fifty_and_cannot_exceed_limit() -> None:
+    assert Settings(_env_file=None).max_batch_file_count == 50
     assert Settings(_env_file=None, max_batch_file_count=1).max_batch_file_count == 1
+    assert Settings(_env_file=None, max_batch_file_count=50).max_batch_file_count == 50
     with pytest.raises(ValidationError):
         Settings(_env_file=None, max_batch_file_count=0)
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, max_batch_file_count=3)
+        Settings(_env_file=None, max_batch_file_count=51)
 
 
 def test_ai_concurrency_has_safe_bounds() -> None:

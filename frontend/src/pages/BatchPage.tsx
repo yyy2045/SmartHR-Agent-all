@@ -60,7 +60,7 @@ import {
 
 const { Title, Text } = Typography
 const { Dragger } = Upload
-const MAX_BATCH_FILE_COUNT = 2
+const MAX_BATCH_FILE_COUNT = 50
 
 const batchStatusMeta: Record<BatchStatus, { color: string; label: string }> = {
   uploading: { color: 'processing', label: '上传中' },

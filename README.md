@@ -6,7 +6,7 @@
 
 - 单招聘专员账号登录、HttpOnly Cookie 会话和前端路由保护。
 - 职位管理、人工筛选标准、AI JD 草稿和不可变标准版本。
-- 单批最多 2 份 PDF、DOCX、JPG、PNG 简历上传与逐文件状态。
+- 单批最多 50 份 PDF、DOCX、JPG、PNG 简历上传与逐文件状态。
 - PDF/DOCX 文本提取、扫描件和图片 OCR、失败隔离与重试。
 - 姓名、电话、邮箱、证件、精确地址和社交账号本地脱敏。
 - 硬条件三态判断、自动淘汰、分维度评分、证据引用与人工改判。
@@ -87,7 +87,7 @@ AI_MAX_CONCURRENCY
 
 未配置真实模型时，职位和简历 AI 功能会返回可读错误，人工职位标准、历史数据和已有结果不受影响。
 
-简历解析和分析由 Celery Worker 执行。默认并发为 1，可通过 `CELERY_WORKER_CONCURRENCY` 配置为 2；其他值会被拒绝。单批简历上限由 `MAX_BATCH_FILE_COUNT` 配置，MVP 最大值为 2。
+简历解析和分析由 Celery Worker 执行。默认并发为 2，可通过 `CELERY_WORKER_CONCURRENCY` 配置为 1 或 2；其他值会被拒绝。单批简历上限由 `MAX_BATCH_FILE_COUNT` 配置，最大值为 50。
 
 ## 项目结构
 

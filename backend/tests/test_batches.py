@@ -119,7 +119,7 @@ def batch_dependencies(
     previous_max_count = settings.max_batch_file_count
     settings.file_storage_root = tmp_path
     settings.max_resume_file_size_mb = 20
-    settings.max_batch_file_count = 2
+    settings.max_batch_file_count = 50
     enqueued_document_ids: list[str] = []
 
     def enqueue(document_id: object) -> str:
@@ -324,11 +324,22 @@ async def test_batch_limits_and_mime_validation(
             data={"criteria_version_id": criteria_version_id},
             files=[
                 ("files", (f"resume-{index}.pdf", VALID_PDF, "application/pdf"))
-                for index in range(3)
+                for index in range(51)
             ],
         )
         assert too_many.status_code == 422
-        assert "最多上传 2 份" in too_many.text
+        assert "最多上传 50 份" in too_many.text
+
+        maximum_allowed = await client.post(
+            f"/jobs/{job_id}/batches",
+            data={"criteria_version_id": criteria_version_id},
+            files=[
+                ("files", (f"allowed-{index}.pdf", VALID_PDF, "application/pdf"))
+                for index in range(50)
+            ],
+        )
+        assert maximum_allowed.status_code == 201
+        assert len(maximum_allowed.json()["documents"]) == 50
 
         settings.max_resume_file_size_mb = 1
         large_pdf = b"%PDF-1.4\n" + (b"0" * (1024 * 1024)) + b"%%EOF"

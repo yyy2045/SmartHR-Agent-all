@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-concurrency="${CELERY_WORKER_CONCURRENCY:-1}"
+concurrency="${CELERY_WORKER_CONCURRENCY:-2}"
 case "$concurrency" in
   1|2) ;;
   *)
