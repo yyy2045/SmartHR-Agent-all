@@ -184,8 +184,8 @@ describe('resume batch flow', () => {
     const invalidFile = new File(['broken'], 'broken.png', { type: 'image/png' })
     fireEvent.change(uploadInput!, { target: { files: [validFile, invalidFile] } })
 
-    expect(await screen.findByText('单批最多 2 份，单文件不超过 20 MB')).toBeInTheDocument()
-    expect(await screen.findByText('已选择 2 / 2 份')).toBeInTheDocument()
+    expect(await screen.findByText('单批最多 50 份，单文件不超过 20 MB')).toBeInTheDocument()
+    expect(await screen.findByText('已选择 2 / 50 份')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /开始上传/ }))
 
     expect(await screen.findByRole('heading', { name: '7 月校招第一批' })).toBeInTheDocument()
@@ -207,6 +207,38 @@ describe('resume batch flow', () => {
     await waitFor(() => expect(screen.queryByText('文件特征不完整或文件已经损坏')).toBeNull())
     expect(await screen.findByText('replacement.png')).toBeInTheDocument()
     expect(screen.getByText(/第 2 次尝试/)).toBeInTheDocument()
+  })
+
+  it('单批选择超过 50 份时只保留前 50 份', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(user)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') return jsonResponse(job)
+      if (path === '/api/jobs/job-1/batches') return jsonResponse([])
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState({}, '', '/jobs/job-1/batches')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '平台工程师' })).toBeInTheDocument()
+    const uploadInput = container.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(uploadInput).not.toBeNull()
+    const tooManyFiles = Array.from(
+      { length: 51 },
+      (_, index) => new File(['pdf'], `resume-${index}.pdf`, { type: 'application/pdf' }),
+    )
+    fireEvent.change(uploadInput!, { target: { files: tooManyFiles } })
+
+    expect(await screen.findByText('已选择 50 / 50 份')).toBeInTheDocument()
   })
 
   it('展示解析片段并支持保留原文件的失败任务重新处理', async () => {

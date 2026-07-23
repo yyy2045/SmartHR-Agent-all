@@ -48,7 +48,7 @@ services:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
       FILE_STORAGE_ROOT: ${FILE_STORAGE_ROOT:-/app/data/uploads}
-      MAX_BATCH_FILE_COUNT: ${MAX_BATCH_FILE_COUNT:-2}
+      MAX_BATCH_FILE_COUNT: ${MAX_BATCH_FILE_COUNT:-50}
     volumes:
       - ./data/local/uploads:/app/data/uploads
     depends_on:
@@ -80,7 +80,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
-      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-1}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
       FILE_STORAGE_ROOT: ${FILE_STORAGE_ROOT:-/app/data/uploads}
     volumes:
       - ./data/local/uploads:/app/data/uploads
