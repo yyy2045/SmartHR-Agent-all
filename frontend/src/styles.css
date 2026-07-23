@@ -770,6 +770,10 @@ input {
   width: 100%;
 }
 
+.upload-dropzone .ant-upload-wrapper {
+  display: block;
+}
+
 .upload-dropzone .ant-upload-drag {
   min-height: 220px;
   background: #fafcff;

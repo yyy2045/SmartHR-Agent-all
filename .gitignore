@@ -161,6 +161,7 @@ lcov.info
 playwright-report/
 test-results/
 .playwright-mcp/
+.playwright-cli/
 allure-results/
 allure-report/
 
