@@ -87,6 +87,7 @@ def screening_route_dependencies(
             criteria_version_id=criteria.id,
             name="结果测试",
             status="completed",
+            ai_input_mode="redacted",
         )
         db.add(batch)
         db.flush()

@@ -294,6 +294,7 @@ describe('candidate profile versions and reanalysis flow', () => {
       criteria_version_id: 'criteria-1',
       criteria_version_number: 1,
       name: '历史候选人批次',
+      ai_input_mode: 'raw',
       status: 'processing',
       total_count: 2,
       success_count: 1,

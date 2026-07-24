@@ -355,7 +355,7 @@ async def test_analysis_saves_profile_weighted_score_and_low_match_group(
     payload = client.payloads[0]
     assert payload["candidate_code"].startswith("CAND-")
     assert "private.pdf" not in str(payload)
-    assert "李雷" not in str(payload)
+    assert "李雷" in str(payload)
     assert "total_score" not in str(payload)
 
     with analysis_dependencies.session_factory() as db:

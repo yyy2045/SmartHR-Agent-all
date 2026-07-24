@@ -3,14 +3,20 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.models import ResumeDocument, ResumeTextSegment
+from app.models import ResumeDocument, ResumeTextSegment, ScreeningBatch
 from app.services.model_payload import ModelPayloadSecurityError, build_resume_model_payload
 
 
-def make_document(redacted_text: str | None) -> ResumeDocument:
+def make_document(
+    redacted_text: str | None,
+    *,
+    ai_input_mode: str = "redacted",
+) -> ResumeDocument:
+    batch = ScreeningBatch(ai_input_mode=ai_input_mode)
     document = ResumeDocument(
         id=uuid.UUID("11111111-2222-3333-4444-555555555555"),
         batch_id=uuid.uuid4(),
+        batch=batch,
         original_filename="李雷的简历.pdf",
         status="completed",
         redacted_at=datetime.now(UTC),
@@ -50,3 +56,19 @@ def test_model_payload_rejects_missing_or_residual_redaction() -> None:
 
     with pytest.raises(ModelPayloadSecurityError, match="发现敏感信息"):
         build_resume_model_payload(make_document("电话：13912345678"))
+
+
+def test_raw_model_payload_uses_normalized_text() -> None:
+    payload = build_resume_model_payload(
+        make_document("电话：[PHONE]", ai_input_mode="raw")
+    )
+
+    assert payload == {
+        "candidate_code": "CAND-111111112222",
+        "segments": [{"segment_key": "SEG-0001", "text": "电话：13912345678"}],
+    }
+    serialized = str(payload)
+    assert "13912345678" in serialized
+    assert "李雷" not in serialized
+    assert "raw_text" not in serialized
+    assert "image" not in serialized

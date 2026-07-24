@@ -159,10 +159,14 @@ async def upload_single_resume(
     *,
     filename: str,
     marker: bytes,
+    ai_input_mode: str | None = None,
 ) -> tuple[dict[str, object], Path]:
+    data = {"criteria_version_id": dependencies.criteria_version_id}
+    if ai_input_mode is not None:
+        data["ai_input_mode"] = ai_input_mode
     response = await client.post(
         f"/jobs/{dependencies.job_id}/batches",
-        data={"criteria_version_id": dependencies.criteria_version_id},
+        data=data,
         files={"files": (filename, VALID_PDF + marker, "application/pdf")},
     )
     assert response.status_code == 201
@@ -186,6 +190,38 @@ async def test_batch_routes_require_authentication(
         response = await client.get(f"/jobs/{job_id}/batches")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_batch_ai_input_mode_defaults_to_raw_and_accepts_redacted(
+    batch_dependencies: BatchDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        raw_batch, _ = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="raw.pdf",
+            marker=b"raw-mode",
+        )
+        redacted_batch, _ = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="redacted.pdf",
+            marker=b"redacted-mode",
+            ai_input_mode="redacted",
+        )
+
+        listed = await client.get(f"/jobs/{batch_dependencies.job_id}/batches")
+
+    assert raw_batch["ai_input_mode"] == "raw"
+    assert redacted_batch["ai_input_mode"] == "redacted"
+    assert listed.status_code == 200
+    assert {item["id"]: item["ai_input_mode"] for item in listed.json()} == {
+        raw_batch["id"]: "raw",
+        redacted_batch["id"]: "redacted",
+    }
 
 
 @pytest.mark.asyncio

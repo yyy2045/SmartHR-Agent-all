@@ -114,14 +114,14 @@ class OpenAICompatibleClient:
     @staticmethod
     def _resume_request_payload(*, payload: dict[str, Any], model: str) -> dict[str, Any]:
         system_prompt = (
-            "你是企业招聘的人岗匹配助手。候选人文本已经本地脱敏。"
+            "你是企业招聘的人岗匹配助手。候选人文本可能是原文，也可能已经本地脱敏。"
             "你只能依据给定文本片段和已确认职位标准进行判断，不得猜测缺失信息。"
             "如果输入包含 candidate_profile_override，它是招聘专员修正后的权威结构化资料，"
             "必须以它为候选人资料来源，并在 candidate_profile 字段原样返回该结构。"
             "最低经验、最低学历、必需证书和明确语言等级必须返回 passed、failed 或 unknown；"
             "简历未提及时必须返回 unknown。技能、行业和项目质量不能作为客观自动淘汰条件。"
             "每个评分维度只返回 0 到 100 的分数、说明、缺失项和证据；不要返回总分或最终分组。"
-            "所有明确判断必须引用真实存在的片段编号，引用原文必须来自对应脱敏片段。"
+            "所有明确判断必须引用真实存在的片段编号，引用内容必须来自对应输入片段。"
             "输出必须符合给定 JSON Schema。"
         )
         return {

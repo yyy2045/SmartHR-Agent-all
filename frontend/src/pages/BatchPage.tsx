@@ -53,6 +53,7 @@ import {
   retryResumeParsing,
   type BatchReanalysisRecord,
   type BatchStatus,
+  type AIInputMode,
   type CriteriaVersion,
   type ResumeDocumentRecord,
   type ScreeningBatchRecord,
@@ -305,6 +306,9 @@ function BatchCard({
             <Title level={4}>{batch.name}</Title>
             <Tag color={status.color}>{status.label}</Tag>
             <Tag>标准 V{batch.criteria_version_number}</Tag>
+            <Tag color={batch.ai_input_mode === 'raw' ? 'orange' : 'blue'}>
+              {batch.ai_input_mode === 'raw' ? '原文发送' : '脱敏后发送'}
+            </Tag>
           </Space>
           <Text type="secondary">创建于 {formatDate(batch.created_at)}</Text>
         </div>
@@ -578,6 +582,7 @@ export function BatchPage() {
   const [messageApi, contextHolder] = message.useMessage()
   const [fileList, setFileList] = useState<UploadFile[]>([])
   const [batchName, setBatchName] = useState('')
+  const [aiInputMode, setAIInputMode] = useState<AIInputMode>('raw')
   const [criteriaVersionId, setCriteriaVersionId] = useState<string>()
   const job = useQuery({
     queryKey: ['job', jobId],
@@ -605,10 +610,12 @@ export function BatchPage() {
         criteriaVersionId!,
         fileList.flatMap((item) => (item.originFileObj ? [item.originFileObj] : [])),
         batchName,
+        aiInputMode,
       ),
     onSuccess: async (batch) => {
       setFileList([])
       setBatchName('')
+      setAIInputMode('raw')
       await queryClient.invalidateQueries({ queryKey: ['batches', jobId] })
       if (batch.failed_count) {
         messageApi.warning(`批次已创建，其中 ${batch.failed_count} 个文件需要处理`)
@@ -718,6 +725,28 @@ export function BatchPage() {
                 disabled={archived}
                 onChange={(event) => setBatchName(event.target.value)}
               />
+              <label htmlFor="ai-input-mode">AI 输入方式</label>
+              <Select
+                id="ai-input-mode"
+                value={aiInputMode}
+                onChange={setAIInputMode}
+                disabled={archived}
+                options={[
+                  {
+                    value: 'raw',
+                    label: '发送原文（默认）',
+                  },
+                  {
+                    value: 'redacted',
+                    label: '脱敏后发送',
+                  },
+                ]}
+              />
+              <Text type="secondary">
+                {aiInputMode === 'raw'
+                  ? 'AI 将接收解析后的简历原文，可能包含个人信息。'
+                  : 'AI 仅接收本地脱敏后的文本；发现残留敏感信息时会停止分析。'}
+              </Text>
               <div className="upload-policy-card">
                 <FileOutlined />
                 <div>

@@ -673,6 +673,7 @@ def _seed_jobs(
                 criteria_version=criteria,
                 name=f"{job_spec.title} 固定评测批次",
                 status="completed",
+                ai_input_mode="redacted",
             )
             db.add(batch)
             db.flush()

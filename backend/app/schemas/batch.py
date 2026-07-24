@@ -13,6 +13,7 @@ BatchStatus = Literal[
     "completed",
 ]
 DocumentStatus = Literal["uploaded", "queued", "processing", "completed", "failed"]
+AIInputMode = Literal["raw", "redacted"]
 
 
 class ResumeDocumentResponse(BaseModel):
@@ -73,6 +74,7 @@ class ScreeningBatchResponse(BaseModel):
     criteria_version_id: uuid.UUID
     criteria_version_number: int
     name: str
+    ai_input_mode: AIInputMode
     status: BatchStatus
     total_count: int
     success_count: int

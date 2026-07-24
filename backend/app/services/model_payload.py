@@ -41,35 +41,44 @@ def validate_candidate_profile_payload(
 
 
 def build_resume_model_payload(document: ResumeDocument) -> dict[str, Any]:
-    if document.status != "completed" or document.redacted_at is None:
-        raise ModelPayloadSecurityError("简历尚未完成本地脱敏")
+    if document.status != "completed":
+        raise ModelPayloadSecurityError("简历尚未完成解析")
 
     segments = []
     original_values: set[str] = set()
+    use_redacted_text = document.batch.ai_input_mode == "redacted"
+    if use_redacted_text and document.redacted_at is None:
+        raise ModelPayloadSecurityError("简历尚未完成本地脱敏")
     for segment in sorted(document.text_segments, key=lambda item: item.sort_order):
-        if segment.redacted_text is None:
+        if use_redacted_text and segment.redacted_text is None:
             raise ModelPayloadSecurityError(f"片段 {segment.segment_key} 缺少脱敏文本")
         segments.append(
             {
                 "segment_key": segment.segment_key,
-                "text": segment.redacted_text,
+                "text": (
+                    segment.redacted_text
+                    if use_redacted_text
+                    else segment.normalized_text
+                ),
             }
         )
-        original_values.update(
-            redaction.original_text
-            for redaction in segment.redactions
-            if redaction.original_text
-        )
+        if use_redacted_text:
+            original_values.update(
+                redaction.original_text
+                for redaction in segment.redactions
+                if redaction.original_text
+            )
 
     payload: dict[str, Any] = {
         "candidate_code": document.candidate_code,
         "segments": segments,
     }
-    serialized = json.dumps(payload, ensure_ascii=False)
-    if any(value in serialized for value in original_values):
-        raise ModelPayloadSecurityError("模型载荷仍包含已识别的原始敏感信息")
-    if contains_detectable_sensitive_data("\n".join(item["text"] for item in segments)):
-        raise ModelPayloadSecurityError("模型载荷通过发送前检查时发现敏感信息")
+    if use_redacted_text:
+        serialized = json.dumps(payload, ensure_ascii=False)
+        if any(value in serialized for value in original_values):
+            raise ModelPayloadSecurityError("模型载荷仍包含已识别的原始敏感信息")
+        if contains_detectable_sensitive_data("\n".join(item["text"] for item in segments)):
+            raise ModelPayloadSecurityError("模型载荷通过发送前检查时发现敏感信息")
     return payload
 
 
@@ -120,6 +129,7 @@ def build_resume_analysis_payload(
     }
     if candidate_profile is not None:
         profile_payload = _candidate_profile_payload(candidate_profile)
-        validate_candidate_profile_payload(document, profile_payload)
+        if document.batch.ai_input_mode == "redacted":
+            validate_candidate_profile_payload(document, profile_payload)
         payload["candidate_profile_override"] = profile_payload
     return payload

@@ -1,5 +1,5 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -235,6 +235,7 @@ def batch_response(batch: ScreeningBatch) -> ScreeningBatchResponse:
         criteria_version_id=batch.criteria_version_id,
         criteria_version_number=batch.criteria_version.version_number,
         name=batch.name,
+        ai_input_mode=batch.ai_input_mode,
         status=batch.status,
         total_count=len(documents),
         success_count=sum(item.status == "completed" for item in documents),
@@ -429,6 +430,7 @@ async def create_batch(
     criteria_version_id: Annotated[uuid.UUID, Form()],
     files: Annotated[list[UploadFile], File()],
     name: Annotated[str, Form(max_length=200)] = "",
+    ai_input_mode: Annotated[Literal["raw", "redacted"], Form()] = "raw",
 ) -> ScreeningBatchResponse:
     if len(files) > settings.max_batch_file_count:
         raise HTTPException(
@@ -445,6 +447,7 @@ async def create_batch(
         job_id=job_id,
         criteria_version_id=criteria_version_id,
         name=name.strip() or "简历筛选批次",
+        ai_input_mode=ai_input_mode,
     )
     db.add(batch)
     db.flush()

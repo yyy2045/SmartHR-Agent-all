@@ -59,6 +59,7 @@ describe('resume batch flow', () => {
       criteria_version_id: 'version-1',
       criteria_version_number: 1,
       name: '7 月校招第一批',
+      ai_input_mode: 'raw',
       status: 'partial_failure',
       total_count: 2,
       success_count: 1,
@@ -185,6 +186,11 @@ describe('resume batch flow', () => {
     fireEvent.change(uploadInput!, { target: { files: [validFile, invalidFile] } })
 
     expect(await screen.findByText('单批最多 50 份，单文件不超过 20 MB')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'AI 输入方式' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(screen.getByText('发送原文（默认）')).toBeInTheDocument()
     expect(await screen.findByText('已选择 2 / 50 份')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /开始上传/ }))
 
@@ -195,6 +201,7 @@ describe('resume batch flow', () => {
     )
     expect(postCall?.[1]?.body).toBeInstanceOf(FormData)
     expect((postCall?.[1]?.body as FormData).getAll('files')).toHaveLength(2)
+    expect((postCall?.[1]?.body as FormData).get('ai_input_mode')).toBe('raw')
 
     const fileInputs = container.querySelectorAll<HTMLInputElement>('input[type="file"]')
     expect(fileInputs.length).toBeGreaterThan(1)
@@ -207,6 +214,68 @@ describe('resume batch flow', () => {
     await waitFor(() => expect(screen.queryByText('文件特征不完整或文件已经损坏')).toBeNull())
     expect(await screen.findByText('replacement.png')).toBeInTheDocument()
     expect(screen.getByText(/第 2 次尝试/)).toBeInTheDocument()
+  })
+
+  it('创建批次时可以选择脱敏后发送', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      if (path === '/api/auth/me') return jsonResponse(user)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') return jsonResponse(job)
+      if (path === '/api/jobs/job-1/batches' && method === 'GET') return jsonResponse([])
+      if (path === '/api/jobs/job-1/batches' && method === 'POST') {
+        expect((init?.body as FormData).get('ai_input_mode')).toBe('redacted')
+        return jsonResponse(
+          {
+            id: 'batch-redacted',
+            job_id: 'job-1',
+            criteria_version_id: 'version-1',
+            criteria_version_number: 1,
+            name: '简历筛选批次',
+            ai_input_mode: 'redacted',
+            status: 'processing',
+            total_count: 1,
+            success_count: 0,
+            failed_count: 0,
+            processing_count: 1,
+            created_at: timestamp,
+            updated_at: timestamp,
+            documents: [],
+          },
+          201,
+        )
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState({}, '', '/jobs/job-1/batches')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '平台工程师' })).toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'AI 输入方式' }))
+    fireEvent.click(await screen.findByRole('option', { name: '脱敏后发送' }))
+    const uploadInput = container.querySelector<HTMLInputElement>('input[type="file"]')
+    fireEvent.change(uploadInput!, {
+      target: { files: [new File(['pdf'], 'resume.pdf', { type: 'application/pdf' })] },
+    })
+    expect(await screen.findByText('已选择 1 / 50 份')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /开始上传/ }))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([path, init]) => path === '/api/jobs/job-1/batches' && init?.method === 'POST',
+        ),
+      ).toBe(true),
+    )
   })
 
   it('单批选择超过 50 份时只保留前 50 份', async () => {
@@ -288,6 +357,7 @@ describe('resume batch flow', () => {
       criteria_version_id: 'version-1',
       criteria_version_number: 1,
       name: '解析验证批次',
+      ai_input_mode: 'raw',
       status: 'partial_failure',
       total_count: 2,
       success_count: 1,
@@ -395,6 +465,7 @@ describe('resume batch flow', () => {
       criteria_version_id: 'version-1',
       criteria_version_number: 1,
       name: '待删除批次',
+      ai_input_mode: 'raw',
       status: 'completed',
       total_count: 1,
       success_count: 1,
@@ -470,6 +541,7 @@ describe('resume batch flow', () => {
       criteria_version_id: 'version-1',
       criteria_version_number: 1,
       name: '删除失败批次',
+      ai_input_mode: 'raw',
       status: 'completed',
       total_count: 1,
       success_count: 1,

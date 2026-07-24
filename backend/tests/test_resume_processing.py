@@ -150,7 +150,7 @@ def test_processing_saves_stable_segments_and_completes_batch(
     assert repeated["status"] == "completed"
 
 
-def test_processing_redacts_before_model_payload_and_keeps_original_evidence(
+def test_processing_keeps_redaction_but_raw_batch_sends_original_text(
     processing_dependencies: tuple[sessionmaker[Session], uuid.UUID],
 ) -> None:
     testing_session, document_id = processing_dependencies
@@ -207,7 +207,7 @@ def test_processing_redacts_before_model_payload_and_keeps_original_evidence(
                 "segments": [
                     {
                         "segment_key": "SEG-0001",
-                        "text": segment.redacted_text,
+                        "text": segment.normalized_text,
                     }
                 ],
             }
@@ -220,7 +220,7 @@ def test_processing_redacts_before_model_payload_and_keeps_original_evidence(
             "上海市浦东新区世纪大道100号8室",
             "lilei_hr",
         ):
-            assert sensitive_value not in serialized
+            assert sensitive_value in serialized
 
 
 def test_processing_failure_keeps_original_file_and_marks_batch(

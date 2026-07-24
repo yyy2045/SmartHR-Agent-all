@@ -37,6 +37,10 @@ class ScreeningBatch(Base):
             "'processing', 'completed')",
             name="ck_screening_batches_status",
         ),
+        CheckConstraint(
+            "ai_input_mode IN ('raw', 'redacted')",
+            name="ck_screening_batches_ai_input_mode",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -51,6 +55,9 @@ class ScreeningBatch(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    ai_input_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="raw", server_default="raw"
+    )
     status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="uploading", index=True
     )

@@ -343,7 +343,8 @@ def correct_candidate_profile(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="修正内容未发生变化")
     profile_draft = CandidateProfileDraft.model_validate(profile_payload)
     try:
-        validate_candidate_profile_payload(document, profile_payload)
+        if document.batch.ai_input_mode == "redacted":
+            validate_candidate_profile_payload(document, profile_payload)
         validate_profile_evidence(document, profile_draft)
     except (ModelPayloadSecurityError, AnalysisContractError) as error:
         raise HTTPException(

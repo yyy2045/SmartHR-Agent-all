@@ -97,6 +97,7 @@ export type BatchStatus =
   | 'failed'
   | 'processing'
   | 'completed'
+export type AIInputMode = 'raw' | 'redacted'
 export type ResumeDocumentStatus =
   | 'uploaded'
   | 'queued'
@@ -156,6 +157,7 @@ export interface ScreeningBatchRecord {
   criteria_version_id: string
   criteria_version_number: number
   name: string
+  ai_input_mode: AIInputMode
   status: BatchStatus
   total_count: number
   success_count: number
@@ -527,10 +529,12 @@ export function createScreeningBatch(
   criteriaVersionId: string,
   files: File[],
   name = '',
+  aiInputMode: AIInputMode = 'raw',
 ): Promise<ScreeningBatchRecord> {
   const body = new FormData()
   body.append('criteria_version_id', criteriaVersionId)
   body.append('name', name)
+  body.append('ai_input_mode', aiInputMode)
   files.forEach((file) => body.append('files', file))
   return apiRequest(
     `/api/jobs/${jobId}/batches`,

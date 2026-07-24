@@ -123,16 +123,23 @@ def _validate_evidence(
 ) -> None:
     for citation in evidence:
         segment = segment_map.get(citation.segment_key)
-        if segment is None or segment.redacted_text is None:
+        if segment is None:
+            raise AnalysisContractError(f"证据片段不存在：{citation.segment_key}")
+        segment_text = (
+            segment.redacted_text
+            if segment.document.batch.ai_input_mode == "redacted"
+            else segment.normalized_text
+        )
+        if segment_text is None:
             raise AnalysisContractError(f"证据片段不存在：{citation.segment_key}")
         quote = citation.quote.strip()
-        if quote in segment.redacted_text:
+        if quote in segment_text:
             continue
         normalized_quote = " ".join(quote.split())
-        normalized_segment = " ".join(segment.redacted_text.split())
+        normalized_segment = " ".join(segment_text.split())
         if normalized_quote not in normalized_segment:
             raise AnalysisContractError(
-                f"证据引用不属于对应脱敏片段：{citation.segment_key}"
+                f"证据引用不属于对应简历片段：{citation.segment_key}"
             )
 
 
