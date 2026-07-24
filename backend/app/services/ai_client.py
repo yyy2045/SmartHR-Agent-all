@@ -19,6 +19,17 @@ RESUME_MATCH_PROMPT_VERSION = "resume-match-v1"
 StructuredResponse = TypeVar("StructuredResponse", JDAIDraft, ResumeAnalysisDraft)
 
 
+def _schema_instruction(
+    response_type: type[JDAIDraft] | type[ResumeAnalysisDraft],
+) -> str:
+    schema = json.dumps(
+        response_type.model_json_schema(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"必须只返回一个符合以下 JSON Schema 的 JSON 对象：{schema}"
+
+
 class AIClientError(RuntimeError):
     pass
 
@@ -72,6 +83,7 @@ class OpenAICompatibleClient:
             "客观硬性要求类型仅允许 min_experience_years、min_education、"
             "required_certification、language_level、other。只有前四类可设置 auto_reject=true。"
             "评分维度权重必须为整数且总和严格等于 100。输出必须符合给定 JSON Schema。"
+            f"{_schema_instruction(JDAIDraft)}"
         )
         user_prompt = (
             f"当前职位名称：{title}\n"
@@ -86,14 +98,7 @@ class OpenAICompatibleClient:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.1,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "job_criteria_draft",
-                    "strict": True,
-                    "schema": JDAIDraft.model_json_schema(),
-                },
-            },
+            "response_format": {"type": "json_object"},
         }
 
     @staticmethod
@@ -123,6 +128,7 @@ class OpenAICompatibleClient:
             "每个评分维度只返回 0 到 100 的分数、说明、缺失项和证据；不要返回总分或最终分组。"
             "所有明确判断必须引用真实存在的片段编号，引用内容必须来自对应输入片段。"
             "输出必须符合给定 JSON Schema。"
+            f"{_schema_instruction(ResumeAnalysisDraft)}"
         )
         return {
             "model": model,
@@ -134,14 +140,7 @@ class OpenAICompatibleClient:
                 },
             ],
             "temperature": 0,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "resume_match_analysis",
-                    "strict": True,
-                    "schema": ResumeAnalysisDraft.model_json_schema(),
-                },
-            },
+            "response_format": {"type": "json_object"},
         }
 
     async def _request_structured(

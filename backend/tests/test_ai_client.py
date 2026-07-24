@@ -113,7 +113,7 @@ def valid_resume_analysis() -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_openai_client_sends_json_schema_and_returns_validated_draft() -> None:
+async def test_openai_client_sends_json_object_with_schema_and_validates_draft() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -138,8 +138,10 @@ async def test_openai_client_sends_json_schema_and_returns_validated_draft() -> 
     assert len(requests) == 1
     request_body = json.loads(requests[0].content)
     assert request_body["model"] == "test-model"
-    assert request_body["response_format"]["type"] == "json_schema"
-    assert request_body["response_format"]["json_schema"]["strict"] is True
+    assert request_body["response_format"] == {"type": "json_object"}
+    system_prompt = request_body["messages"][0]["content"]
+    assert '"suggested_title"' in system_prompt
+    assert '"scoring_dimensions"' in system_prompt
     assert "负责 Python 与 FastAPI 服务开发" in request_body["messages"][1]["content"]
     assert requests[0].headers["authorization"] == "Bearer test-api-key"
 
@@ -171,10 +173,12 @@ async def test_openai_client_requests_resume_scores_without_model_total() -> Non
 
     assert result.dimension_scores[0].score == 80
     request_body = json.loads(requests[0].content)
-    schema = request_body["response_format"]["json_schema"]["schema"]
-    assert request_body["response_format"]["json_schema"]["strict"] is True
-    assert "total_score" not in schema["properties"]
-    assert "ai_group" not in schema["properties"]
+    assert request_body["response_format"] == {"type": "json_object"}
+    system_prompt = request_body["messages"][0]["content"]
+    assert '"candidate_profile"' in system_prompt
+    assert '"dimension_scores"' in system_prompt
+    assert '"total_score"' not in system_prompt
+    assert '"ai_group"' not in system_prompt
     user_payload = json.loads(request_body["messages"][1]["content"])
     assert user_payload == resume_payload()
     assert "private.pdf" not in request_body["messages"][1]["content"]
