@@ -179,9 +179,47 @@ async def test_openai_client_requests_resume_scores_without_model_total() -> Non
     assert '"dimension_scores"' in system_prompt
     assert '"total_score"' not in system_prompt
     assert '"ai_group"' not in system_prompt
+    assert "逐字复制一段连续原文" in system_prompt
     user_payload = json.loads(request_body["messages"][1]["content"])
     assert user_payload == resume_payload()
     assert "private.pdf" not in request_body["messages"][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_resume_contract_feedback_requests_one_corrected_response() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                valid_resume_analysis(), ensure_ascii=False
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    await make_client(httpx.MockTransport(handler)).analyze_resume(
+        resume_payload(),
+        validation_feedback="证据引用不属于对应简历片段：SEG-0001",
+        previous_analysis=valid_resume_analysis(),
+    )
+
+    request_body = json.loads(requests[0].content)
+    system_prompt = request_body["messages"][0]["content"]
+    assert "上一次输出未通过后端合同校验" in system_prompt
+    assert "SEG-0001" in system_prompt
+    user_payload = json.loads(request_body["messages"][1]["content"])
+    assert user_payload["resume_input"] == resume_payload()
+    assert user_payload["previous_analysis"] == valid_resume_analysis()
+    assert user_payload["repair_task"].startswith("只纠正证据引用")
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ from app.schemas.screening import ResumeAnalysisDraft
 
 logger = logging.getLogger(__name__)
 MAX_MODEL_RETRIES = 2
-RESUME_MATCH_PROMPT_VERSION = "resume-match-v1"
+RESUME_MATCH_PROMPT_VERSION = "resume-match-v2"
 StructuredResponse = TypeVar("StructuredResponse", JDAIDraft, ResumeAnalysisDraft)
 
 
@@ -117,7 +117,13 @@ class OpenAICompatibleClient:
         raise AIResponseValidationError("模型响应内容类型无效")
 
     @staticmethod
-    def _resume_request_payload(*, payload: dict[str, Any], model: str) -> dict[str, Any]:
+    def _resume_request_payload(
+        *,
+        payload: dict[str, Any],
+        model: str,
+        validation_feedback: str | None = None,
+        previous_analysis: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         system_prompt = (
             "你是企业招聘的人岗匹配助手。候选人文本可能是原文，也可能已经本地脱敏。"
             "你只能依据给定文本片段和已确认职位标准进行判断，不得猜测缺失信息。"
@@ -126,17 +132,33 @@ class OpenAICompatibleClient:
             "最低经验、最低学历、必需证书和明确语言等级必须返回 passed、failed 或 unknown；"
             "简历未提及时必须返回 unknown。技能、行业和项目质量不能作为客观自动淘汰条件。"
             "每个评分维度只返回 0 到 100 的分数、说明、缺失项和证据；不要返回总分或最终分组。"
-            "所有明确判断必须引用真实存在的片段编号，引用内容必须来自对应输入片段。"
+            "所有明确判断必须引用真实存在的片段编号。每个 evidence.quote 必须从对应片段中"
+            "逐字复制一段连续原文，禁止概括、改写、纠正错别字、修改数字、修改标点或拼接"
+            "不连续文本；没有可逐字引用的内容时不得编造证据。"
             "输出必须符合给定 JSON Schema。"
             f"{_schema_instruction(ResumeAnalysisDraft)}"
         )
+        if validation_feedback:
+            system_prompt += (
+                "上一次输出未通过后端合同校验。保持上一次分析的事实、状态、分数和 ID 不变，"
+                "逐项检查 previous_analysis 中的全部 evidence.quote，只将不合法引用替换为对应"
+                "输入片段中的连续逐字原文，然后返回完整 JSON 对象。"
+                f"校验反馈：{validation_feedback}"
+            )
+        user_content: dict[str, Any] | list[Any] | str = payload
+        if previous_analysis is not None:
+            user_content = {
+                "resume_input": payload,
+                "previous_analysis": previous_analysis,
+                "repair_task": "只纠正证据引用并返回完整分析，禁止改写引用原文。",
+            }
         return {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
-                    "content": json.dumps(payload, ensure_ascii=False),
+                    "content": json.dumps(user_content, ensure_ascii=False),
                 },
             ],
             "temperature": 0,
@@ -209,10 +231,21 @@ class OpenAICompatibleClient:
             operation_name="AI 结构化 JD",
         )
 
-    async def analyze_resume(self, payload: dict[str, Any]) -> ResumeAnalysisDraft:
+    async def analyze_resume(
+        self,
+        payload: dict[str, Any],
+        *,
+        validation_feedback: str | None = None,
+        previous_analysis: dict[str, Any] | None = None,
+    ) -> ResumeAnalysisDraft:
         self._validate_configuration()
         return await self._request_structured(
-            payload=self._resume_request_payload(payload=payload, model=self.model),
+            payload=self._resume_request_payload(
+                payload=payload,
+                model=self.model,
+                validation_feedback=validation_feedback,
+                previous_analysis=previous_analysis,
+            ),
             response_type=ResumeAnalysisDraft,
             operation_name="AI 简历匹配",
         )

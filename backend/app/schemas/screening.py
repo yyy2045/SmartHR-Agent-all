@@ -15,7 +15,11 @@ class EvidenceReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     segment_key: str = Field(pattern=r"^SEG-\d{4}$")
-    quote: str = Field(min_length=1, max_length=1_000)
+    quote: str = Field(
+        min_length=1,
+        max_length=1_000,
+        description="从对应 segment_key 文本中逐字复制的连续原文，不得概括或改写",
+    )
 
     @field_validator("quote")
     @classmethod

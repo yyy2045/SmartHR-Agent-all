@@ -25,7 +25,11 @@ from app.models import (
 )
 from app.schemas.screening import ResumeAnalysisDraft
 from app.services.ai_client import AIConfigurationError
-from app.services.resume_analysis import analyze_resume_document, screening_result_sort_key
+from app.services.resume_analysis import (
+    _find_source_quote,
+    analyze_resume_document,
+    screening_result_sort_key,
+)
 from app.services.security import hash_password
 
 
@@ -43,16 +47,30 @@ class StubAnalysisClient:
         self,
         analysis: ResumeAnalysisDraft | None = None,
         error: Exception | None = None,
+        repair_analysis: ResumeAnalysisDraft | None = None,
     ) -> None:
         self.model = "stub-resume-model"
         self.analysis = analysis
         self.error = error
+        self.repair_analysis = repair_analysis
         self.payloads: list[dict[str, object]] = []
+        self.validation_feedback: list[str | None] = []
 
-    async def analyze_resume(self, payload: dict[str, object]) -> ResumeAnalysisDraft:
+    async def analyze_resume(
+        self,
+        payload: dict[str, object],
+        *,
+        validation_feedback: str | None = None,
+        previous_analysis: dict[str, object] | None = None,
+    ) -> ResumeAnalysisDraft:
         self.payloads.append(payload)
+        self.validation_feedback.append(validation_feedback)
+        if validation_feedback is not None:
+            assert previous_analysis is not None
         if self.error is not None:
             raise self.error
+        if validation_feedback is not None and self.repair_analysis is not None:
+            return self.repair_analysis
         assert self.analysis is not None
         return self.analysis
 
@@ -432,18 +450,79 @@ async def test_explicit_objective_failure_auto_rejects_but_other_failure_does_no
 
 
 @pytest.mark.asyncio
+async def test_evidence_format_differences_are_canonicalized_to_source_text(
+    analysis_dependencies: AnalysisDependencies,
+) -> None:
+    formatted = valid_analysis(analysis_dependencies).model_copy(deep=True)
+    formatted.candidate_profile.skills[0].evidence[0].quote = (
+        "５ 年 Ｐｙｔｈｏｎ 经验。"
+    )
+    client = StubAnalysisClient(formatted)
+
+    response = await analyze_resume_document(
+        analysis_dependencies.document_id,
+        session_factory=analysis_dependencies.session_factory,
+        ai_client=client,
+    )
+
+    assert response["status"] == "completed"
+    assert len(client.payloads) == 1
+    with analysis_dependencies.session_factory() as db:
+        result = db.scalar(
+            select(ScreeningResult)
+            .where(ScreeningResult.document_id == analysis_dependencies.document_id)
+            .options(selectinload(ScreeningResult.evidence_citations))
+        )
+        assert result is not None
+        skill_evidence = next(
+            item
+            for item in result.evidence_citations
+            if item.subject_type == "profile" and item.subject_key == "skill:0"
+        )
+        assert skill_evidence.quote == "5 年 Python 经验"
+
+
+def test_evidence_format_matching_does_not_hide_fact_changes() -> None:
+    assert _find_source_quote("具有 25 年 Python 经验", "2.5 年 Python 经验") is None
+    assert _find_source_quote("熟悉 C 语言", "C#") is None
+
+
+@pytest.mark.asyncio
+async def test_contract_failure_is_repaired_once_before_persistence(
+    analysis_dependencies: AnalysisDependencies,
+) -> None:
+    invalid = valid_analysis(analysis_dependencies).model_copy(deep=True)
+    invalid.dimension_scores[0].evidence[0].quote = "模型改写的系统架构经验"
+    repaired = valid_analysis(analysis_dependencies).model_copy(deep=True)
+    client = StubAnalysisClient(invalid, repair_analysis=repaired)
+
+    response = await analyze_resume_document(
+        analysis_dependencies.document_id,
+        session_factory=analysis_dependencies.session_factory,
+        ai_client=client,
+    )
+
+    assert response["status"] == "completed"
+    assert len(client.payloads) == 2
+    assert client.validation_feedback[0] is None
+    assert "SEG-0002" in (client.validation_feedback[1] or "")
+
+
+@pytest.mark.asyncio
 async def test_invalid_evidence_and_configuration_failure_are_isolated(
     analysis_dependencies: AnalysisDependencies,
 ) -> None:
     invalid = valid_analysis(analysis_dependencies).model_copy(deep=True)
     invalid.dimension_scores[0].evidence[0].quote = "不存在的原文"
+    invalid_client = StubAnalysisClient(invalid)
     invalid_response = await analyze_resume_document(
         analysis_dependencies.document_id,
         session_factory=analysis_dependencies.session_factory,
-        ai_client=StubAnalysisClient(invalid),
+        ai_client=invalid_client,
     )
     assert invalid_response["status"] == "failed"
     assert invalid_response["code"] == "ai_invalid_response"
+    assert len(invalid_client.payloads) == 2
 
     config_response = await analyze_resume_document(
         analysis_dependencies.document_id,

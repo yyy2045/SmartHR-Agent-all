@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import unicodedata
 import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -43,6 +44,73 @@ AI_GROUP_PRIORITY = {"passed": 0, "low_match": 1, "auto_rejected": 2}
 
 class AnalysisContractError(RuntimeError):
     pass
+
+
+PRESERVED_EVIDENCE_PUNCTUATION = {"#", "_", "-", "/", "\\"}
+
+
+def _neighboring_non_space(
+    characters: list[tuple[str, int]],
+    position: int,
+    direction: int,
+) -> str | None:
+    index = position + direction
+    while 0 <= index < len(characters):
+        character = characters[index][0]
+        if not character.isspace():
+            return character
+        index += direction
+    return None
+
+
+def _evidence_match_text(text: str) -> tuple[str, list[int]]:
+    characters: list[tuple[str, int]] = []
+    for source_index, source_character in enumerate(text):
+        for normalized_character in unicodedata.normalize("NFKC", source_character):
+            characters.append((normalized_character, source_index))
+
+    matched_characters: list[str] = []
+    source_indexes: list[int] = []
+    for position, (character, source_index) in enumerate(characters):
+        if character.isspace():
+            continue
+        if unicodedata.category(character).startswith("P"):
+            previous_character = _neighboring_non_space(characters, position, -1)
+            next_character = _neighboring_non_space(characters, position, 1)
+            numeric_separator = (
+                character in {".", ",", ":"}
+                and previous_character is not None
+                and next_character is not None
+                and previous_character.isdigit()
+                and next_character.isdigit()
+            )
+            if character not in PRESERVED_EVIDENCE_PUNCTUATION and not numeric_separator:
+                continue
+        matched_characters.append(character)
+        source_indexes.append(source_index)
+    return "".join(matched_characters), source_indexes
+
+
+def _find_source_quote(segment_text: str, quote: str) -> str | None:
+    exact_start = segment_text.find(quote)
+    if exact_start >= 0:
+        return segment_text[exact_start : exact_start + len(quote)]
+
+    normalized_quote, _ = _evidence_match_text(quote)
+    normalized_segment, source_indexes = _evidence_match_text(segment_text)
+    if len(normalized_quote) < 2:
+        return None
+    normalized_start = normalized_segment.find(normalized_quote)
+    if normalized_start < 0:
+        return None
+
+    source_start = source_indexes[normalized_start]
+    normalized_end = normalized_start + len(normalized_quote) - 1
+    source_end = source_indexes[normalized_end] + 1
+    source_quote = segment_text[source_start:source_end].strip()
+    if not source_quote or len(source_quote) > 1_000:
+        return None
+    return source_quote
 
 
 def screening_result_sort_key(result: ScreeningResult) -> tuple[int, Decimal]:
@@ -132,15 +200,12 @@ def _validate_evidence(
         )
         if segment_text is None:
             raise AnalysisContractError(f"证据片段不存在：{citation.segment_key}")
-        quote = citation.quote.strip()
-        if quote in segment_text:
-            continue
-        normalized_quote = " ".join(quote.split())
-        normalized_segment = " ".join(segment_text.split())
-        if normalized_quote not in normalized_segment:
+        source_quote = _find_source_quote(segment_text, citation.quote.strip())
+        if source_quote is None:
             raise AnalysisContractError(
                 f"证据引用不属于对应简历片段：{citation.segment_key}"
             )
+        citation.quote = source_quote
 
 
 def validate_profile_evidence(
@@ -388,6 +453,42 @@ async def analyze_resume_document(
                 profile,
             )
         analysis = await client.analyze_resume(payload)
+        try:
+            with session_factory() as db:
+                validation_document = _load_document(db, document_id)
+                validation_criteria = _load_criteria(db, resolved_criteria_id)
+                validation_profile = (
+                    _load_profile(db, resolved_profile_id)
+                    if resolved_profile_id is not None
+                    else None
+                )
+                if validation_document is None or validation_criteria is None:
+                    return {"status": "missing", "result_id": str(result_id)}
+                validation_segment_map = {
+                    segment.segment_key: segment
+                    for segment in validation_document.text_segments
+                }
+                validation_profile_data = (
+                    _profile_draft(validation_profile)
+                    if validation_profile is not None
+                    else analysis.candidate_profile
+                )
+                _validate_analysis_contract(
+                    analysis,
+                    validation_criteria,
+                    validation_segment_map,
+                    validation_profile_data,
+                )
+        except AnalysisContractError as error:
+            logger.warning(
+                "AI 简历分析合同校验失败，准备执行一次纠正重试，document_id=%s",
+                document_id,
+            )
+            analysis = await client.analyze_resume(
+                payload,
+                validation_feedback=str(error),
+                previous_analysis=analysis.model_dump(mode="json"),
+            )
         with session_factory() as db:
             document = _load_document(db, document_id)
             result = db.get(ScreeningResult, result_id)
