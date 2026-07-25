@@ -101,12 +101,32 @@ function profile(
     source_profile_id: sourceProfileId,
     model_name: source === 'manual' ? 'manual-correction' : 'stub-model',
     prompt_version: source === 'manual' ? 'profile-correction-v1' : 'resume-match-v1',
-    education: [],
-    work_experiences: [],
-    projects: [],
-    skills: [{ name: versionNumber === 1 ? 'Python' : 'Python / FastAPI', evidence: [] }],
-    certifications: [],
-    languages: [],
+    education: [
+      {
+        institution: '示例大学',
+        degree: '本科',
+        field_of_study: '计算机科学',
+        start_date: '2018',
+        end_date: '2022',
+        evidence: [{ segment_key: 'SEG-0001', quote: '示例大学计算机科学本科' }],
+      },
+    ],
+    work_experiences: [
+      {
+        company: '示例科技',
+        title: '后端工程师',
+        start_date: '2022',
+        end_date: '至今',
+        summary: '负责平台服务建设。',
+        evidence: [],
+      },
+    ],
+    projects: [{ name: '招聘平台', role: '核心开发', summary: '负责筛选模块。', evidence: [] }],
+    skills: [
+      { name: versionNumber === 1 ? 'Python' : 'Python / FastAPI', level: '熟练', evidence: [] },
+    ],
+    certifications: [{ name: '云计算认证', issuer: '示例机构', obtained_at: '2023', evidence: [] }],
+    languages: [{ language: '英语', level: 'CET-6', evidence: [] }],
     created_at: timestamp,
   }
 }
@@ -249,6 +269,13 @@ describe('candidate profile versions and reanalysis flow', () => {
 
     expect(await screen.findByRole('heading', { name: 'CAND-0001' })).toBeInTheDocument()
     expect(screen.getByText('档案 V1')).toBeInTheDocument()
+    expect(screen.getByText('示例大学')).toBeInTheDocument()
+    expect(screen.getByText('本科 · 计算机科学 · 2018 至 2022')).toBeInTheDocument()
+    expect(screen.getByText('示例科技')).toBeInTheDocument()
+    expect(screen.getByText('Python · 熟练')).toBeInTheDocument()
+    expect(screen.queryByText(/"segment_key"/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('查看原文证据（1）'))
+    expect(await screen.findByText('示例大学计算机科学本科')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: /分析历史/ }))
     expect(await screen.findByText('模型暂时不可用')).toBeInTheDocument()
     expect(screen.getByText('失败记录会保留，但不会覆盖此前已经完成的可用结果。')).toBeInTheDocument()

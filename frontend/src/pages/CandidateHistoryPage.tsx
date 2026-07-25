@@ -23,6 +23,7 @@ import {
   Typography,
   message,
 } from 'antd'
+import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -93,13 +94,162 @@ function parseProfileEditor(values: EditorValues): CandidateProfileInput {
   return parsed
 }
 
+type ProfileItem = Record<string, unknown>
+
+function profileField(item: ProfileItem, key: string): string {
+  const value = item[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function joinProfileFields(...values: string[]): string {
+  return values.filter(Boolean).join(' · ')
+}
+
+function profileDateRange(item: ProfileItem): string {
+  const start = profileField(item, 'start_date')
+  const end = profileField(item, 'end_date')
+  if (!start && !end) return ''
+  if (!end || ['至今', 'present', 'current'].includes(end.toLowerCase())) {
+    return `${start || '时间未填写'} 至今`
+  }
+  return `${start || '时间未填写'} 至 ${end}`
+}
+
+function ProfileEvidence({ item }: { item: ProfileItem }) {
+  const evidence = Array.isArray(item.evidence)
+    ? item.evidence.filter(
+        (value): value is ProfileItem => Boolean(value) && typeof value === 'object',
+      )
+    : []
+  if (!evidence.length) return null
+
+  return (
+    <Collapse
+      ghost
+      size="small"
+      className="profile-evidence-collapse"
+      items={[
+        {
+          key: 'evidence',
+          label: `查看原文证据（${evidence.length}）`,
+          children: (
+            <List
+              size="small"
+              dataSource={evidence}
+              renderItem={(reference) => (
+                <List.Item>
+                  <div className="profile-evidence-item">
+                    <Tag>{profileField(reference, 'segment_key') || '未知片段'}</Tag>
+                    <Text>{profileField(reference, 'quote') || '未提供引用内容'}</Text>
+                  </div>
+                </List.Item>
+              )}
+            />
+          ),
+        },
+      ]}
+    />
+  )
+}
+
+function ProfileRecord({
+  title,
+  subtitle,
+  summary,
+  item,
+}: {
+  title: string
+  subtitle?: ReactNode
+  summary?: string
+  item: ProfileItem
+}) {
+  return (
+    <div className="profile-record">
+      <div className="profile-record-heading">
+        <Text strong>{title}</Text>
+        {subtitle && <Text type="secondary">{subtitle}</Text>}
+      </div>
+      {summary && <Paragraph className="profile-record-summary">{summary}</Paragraph>}
+      <ProfileEvidence item={item} />
+    </div>
+  )
+}
+
+function ProfileSectionContent({
+  section,
+  items,
+}: {
+  section: ProfileSection
+  items: ProfileItem[]
+}) {
+  if (section === 'skills' || section === 'languages') {
+    return (
+      <div className="profile-tag-list">
+        {items.map((item, index) => {
+          const name = profileField(item, section === 'skills' ? 'name' : 'language')
+          const level = profileField(item, 'level')
+          return (
+            <div className="profile-tag-record" key={`${name}-${index}`}>
+              <Tag color={section === 'skills' ? 'blue' : 'cyan'}>
+                {joinProfileFields(name || '未命名', level)}
+              </Tag>
+              <ProfileEvidence item={item} />
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  return (
+    <div className="profile-record-list">
+      {items.map((item, index) => {
+        let title = ''
+        let subtitle = ''
+        let summary = ''
+        if (section === 'education') {
+          title = profileField(item, 'institution') || '未填写学校'
+          subtitle = joinProfileFields(
+            profileField(item, 'degree'),
+            profileField(item, 'field_of_study'),
+            profileDateRange(item),
+          )
+        } else if (section === 'work_experiences') {
+          title = profileField(item, 'company') || '未填写公司'
+          subtitle = joinProfileFields(profileField(item, 'title'), profileDateRange(item))
+          summary = profileField(item, 'summary')
+        } else if (section === 'projects') {
+          title = profileField(item, 'name') || '未命名项目'
+          subtitle = profileField(item, 'role')
+          summary = profileField(item, 'summary')
+        } else {
+          title = profileField(item, 'name') || '未命名证书'
+          subtitle = joinProfileFields(
+            profileField(item, 'issuer'),
+            profileField(item, 'obtained_at'),
+          )
+        }
+        return (
+          <ProfileRecord
+            key={`${title}-${index}`}
+            title={title}
+            subtitle={subtitle}
+            summary={summary}
+            item={item}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 function ProfileSnapshot({ profile }: { profile: CandidateProfileRecord }) {
   return (
     <div className="profile-snapshot-grid">
       {profileSections.map(([key, label]) => (
-        <Card key={key} size="small" title={label}>
+        <Card key={key} size="small" title={label} className="profile-section-card">
           {profile[key].length ? (
-            <pre className="profile-json-block">{JSON.stringify(profile[key], null, 2)}</pre>
+            <ProfileSectionContent section={key} items={profile[key]} />
           ) : (
             <Text type="secondary">暂无</Text>
           )}

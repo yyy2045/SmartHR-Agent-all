@@ -1230,19 +1230,77 @@ input {
   margin-top: 16px;
 }
 
-.profile-json-block {
-  max-height: 320px;
-  margin: 0;
-  padding: 14px;
-  overflow: auto;
-  color: #344054;
-  font-size: 12px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: #f8fafc;
-  border: 1px solid #e4e7ec;
+.profile-section-card .ant-card-body {
+  padding: 16px;
+}
+
+.profile-record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-tag-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.profile-record,
+.profile-tag-record {
+  padding: 12px;
+  border: 1px solid #e8edf3;
   border-radius: 10px;
+  background: #f8fafc;
+}
+
+.profile-record-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-record-heading > .ant-typography:last-child {
+  text-align: right;
+}
+
+.profile-record-summary {
+  margin: 8px 0 0 !important;
+  color: #475467;
+  white-space: pre-wrap;
+}
+
+.profile-tag-record > .ant-tag {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.profile-evidence-collapse {
+  margin-top: 6px;
+}
+
+.profile-evidence-collapse .ant-collapse-header {
+  padding: 6px 0 !important;
+  color: #667085 !important;
+  font-size: 12px;
+}
+
+.profile-evidence-collapse .ant-collapse-content-box {
+  padding: 0 !important;
+}
+
+.profile-evidence-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.profile-evidence-item .ant-tag {
+  flex: none;
+  margin: 0;
 }
 
 .analysis-history-list {
