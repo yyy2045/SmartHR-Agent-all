@@ -26,6 +26,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.job import Job, JobCriteriaVersion
+    from app.models.knowledge import ResumeEmbeddingChunk
     from app.models.user import User
 
 
@@ -150,6 +151,10 @@ class ResumeDocument(Base):
         back_populates="document",
         cascade="all, delete-orphan",
         order_by="ScreeningResult.analysis_version",
+    )
+    embedding_chunks: Mapped[list[ResumeEmbeddingChunk]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
     )
 
     @property
@@ -289,6 +294,10 @@ class CandidateProfile(Base):
     document: Mapped[ResumeDocument] = relationship(back_populates="candidate_profiles")
     screening_results: Mapped[list[ScreeningResult]] = relationship(
         back_populates="candidate_profile"
+    )
+    embedding_chunks: Mapped[list[ResumeEmbeddingChunk]] = relationship(
+        back_populates="candidate_profile",
+        cascade="all, delete-orphan",
     )
 
 
