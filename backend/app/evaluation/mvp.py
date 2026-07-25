@@ -224,7 +224,14 @@ class DeterministicEvaluationClient:
         self.runtimes = runtimes
         self.payloads: list[dict[str, object]] = []
 
-    async def analyze_resume(self, payload: dict[str, object]) -> ResumeAnalysisDraft:
+    async def analyze_resume(
+        self,
+        payload: dict[str, object],
+        *,
+        validation_feedback: str | None = None,
+        previous_analysis: dict[str, object] | None = None,
+    ) -> ResumeAnalysisDraft:
+        del validation_feedback, previous_analysis
         self.payloads.append(payload)
         candidate_code = str(payload["candidate_code"])
         prepared = self.samples_by_candidate[candidate_code]
