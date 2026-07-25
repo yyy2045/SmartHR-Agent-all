@@ -39,3 +39,17 @@ def test_ai_concurrency_has_safe_bounds() -> None:
         Settings(_env_file=None, ai_max_concurrency=0)
     with pytest.raises(ValidationError):
         Settings(_env_file=None, ai_max_concurrency=11)
+
+
+def test_embedding_defaults_are_disabled_and_configuration_is_bounded() -> None:
+    default = Settings(_env_file=None)
+    assert default.embedding_enabled is False
+    assert default.embedding_dimension == 1536
+    assert default.embedding_batch_size == 16
+    assert default.embedding_max_concurrency == 2
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, embedding_dimension=0)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, embedding_batch_size=101)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, embedding_max_concurrency=11)

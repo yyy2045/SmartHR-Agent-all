@@ -1,6 +1,6 @@
 # SmartHR-Agent-all
 
-面向招聘专员的 AI 简历筛选 MVP。项目提供职位与版本化筛选标准、批量简历解析、敏感信息脱敏、AI 人岗匹配、人工决策、候选人对比、修正重跑、审计和安全删除闭环。
+面向招聘专员的 AI 简历筛选 MVP。项目提供职位与版本化筛选标准、批量简历解析、敏感信息脱敏、AI 人岗匹配、人工决策、候选人对比、修正重跑、审计、安全删除和企业人才向量索引基础。
 
 ## MVP 能力
 
@@ -14,6 +14,7 @@
 - 候选人档案修正、单人重跑、整批重跑和历史版本保留。
 - 登录、原文件访问、标准确认、自动淘汰恢复、人工决策和重跑审计。
 - 批次二次确认永久删除、数据库级联清理和文件删除失败补偿。
+- 基于 PostgreSQL 与 pgvector 的候选人语义分块、异步 Embedding、版本化索引和重建状态接口。
 
 ## 本地启动
 
@@ -71,7 +72,7 @@ GET  /api/auth/me
 POST /api/auth/logout
 ```
 
-登录会话使用 HttpOnly Cookie，服务端会话保存在 Redis。登录页、认证状态恢复和业务路由保护已经接入前端。除登录和健康检查外，业务接口均要求有效会话，并按招聘专员的职位归属校验数据访问。
+登录会话使用 HttpOnly Cookie，服务端会话保存在 Redis。登录页、认证状态恢复和业务路由保护已经接入前端。除登录和健康检查外，业务接口均要求有效会话；职位筛选数据按招聘专员的职位归属校验，企业人才知识库基础接口由所有已认证招聘专员共享。
 
 ## AI 与异步任务配置
 
@@ -88,6 +89,33 @@ AI_MAX_CONCURRENCY
 未配置真实模型时，职位和简历 AI 功能会返回可读错误，人工职位标准、历史数据和已有结果不受影响。
 
 简历解析和分析由 Celery Worker 执行。默认并发为 2，可通过 `CELERY_WORKER_CONCURRENCY` 配置为 1 或 2；其他值会被拒绝。单批简历上限由 `MAX_BATCH_FILE_COUNT` 配置，最大值为 50。
+
+## 企业人才知识库基础
+
+PostgreSQL 容器使用带 pgvector 扩展的镜像。候选人结构化档案会按教育、工作、项目、技能、证书和语言等语义分块，并保留候选人档案版本、来源片段编号、Embedding 模型和索引版本。电话和邮箱仍保存在业务档案中供招聘专员查看，但进入 Embedding 前会被替换，不会发送给向量服务。
+
+Embedding 默认关闭，只有完成以下 OpenAI 兼容服务配置并显式启用后，分析完成的候选人档案才会异步建立索引：
+
+```text
+EMBEDDING_ENABLED
+EMBEDDING_BASE_URL
+EMBEDDING_API_KEY
+EMBEDDING_MODEL
+EMBEDDING_DIMENSION
+EMBEDDING_VERSION
+EMBEDDING_TIMEOUT_SECONDS
+EMBEDDING_BATCH_SIZE
+EMBEDDING_MAX_CONCURRENCY
+```
+
+当前基础接口：
+
+```text
+GET  /api/knowledge/documents/{document_id}/index
+POST /api/knowledge/documents/{document_id}/index/rebuild
+```
+
+索引任务支持幂等跳过、失败隔离、受控重试、强制重建和模型版本并存。删除简历批次或候选人档案时，关联向量分块会同步级联删除。当前阶段只建立企业人才向量索引基础，不包含自然语言搜索页面、混合排序或岗位自动推荐；向量检索后续只用于候选人召回，不替代硬条件判断和简历原文证据。
 
 ## 项目结构
 

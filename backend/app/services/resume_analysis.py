@@ -393,6 +393,11 @@ async def analyze_resume_document(
             return {
                 "status": "completed",
                 "result_id": str(result.id),
+                "candidate_profile_id": (
+                    str(result.candidate_profile_id)
+                    if result.candidate_profile_id is not None
+                    else ""
+                ),
                 "analysis_version": result.analysis_version,
                 "group": result.ai_group or "",
                 "total_score": float(result.total_score or 0),
@@ -401,6 +406,7 @@ async def analyze_resume_document(
             return {
                 "status": "processing",
                 "result_id": str(result.id),
+                "candidate_profile_id": str(profile.id),
                 "analysis_version": result.analysis_version,
             }
         if result is None:

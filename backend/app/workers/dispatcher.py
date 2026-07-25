@@ -26,3 +26,16 @@ def enqueue_resume_analysis(
         kwargs=kwargs,
     )
     return str(result.id)
+
+
+def enqueue_knowledge_index(
+    candidate_profile_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> str:
+    result = celery_app.send_task(
+        "knowledge.index_profile",
+        args=[str(candidate_profile_id)],
+        kwargs={"force": force},
+    )
+    return str(result.id)

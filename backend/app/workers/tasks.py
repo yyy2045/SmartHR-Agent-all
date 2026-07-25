@@ -1,11 +1,14 @@
 import asyncio
 import logging
 import uuid
+from typing import Any
 
+from app.config import settings
+from app.services.knowledge_index import index_candidate_profile
 from app.services.resume_analysis import analyze_resume_document
 from app.services.resume_processing import process_resume_document
 from app.workers.celery_app import celery_app
-from app.workers.dispatcher import enqueue_resume_analysis
+from app.workers.dispatcher import enqueue_knowledge_index, enqueue_resume_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +36,9 @@ def analyze_resume_task(
     criteria_version_id: str | None = None,
     candidate_profile_id: str | None = None,
     analysis_version: int | None = None,
-) -> dict[str, str | float | int]:
+) -> dict[str, Any]:
     del task
-    return asyncio.run(
+    result = asyncio.run(
         analyze_resume_document(
             uuid.UUID(document_id),
             criteria_version_id=(
@@ -45,5 +48,37 @@ def analyze_resume_task(
                 uuid.UUID(candidate_profile_id) if candidate_profile_id else None
             ),
             analysis_version=analysis_version,
+        )
+    )
+    if (
+        result.get("status") == "completed"
+        and settings.embedding_enabled
+        and result.get("candidate_profile_id")
+    ):
+        try:
+            result["knowledge_index_task_id"] = enqueue_knowledge_index(
+                uuid.UUID(str(result["candidate_profile_id"]))
+            )
+            result["knowledge_index_enqueued"] = True
+        except Exception:
+            logger.exception(
+                "知识库索引任务创建失败，document_id=%s",
+                document_id,
+            )
+            result["knowledge_index_enqueued"] = False
+    return result
+
+
+@celery_app.task(name="knowledge.index_profile", bind=True, acks_late=True)
+def index_candidate_profile_task(
+    task,
+    candidate_profile_id: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    return asyncio.run(
+        index_candidate_profile(
+            uuid.UUID(candidate_profile_id),
+            task_id=str(task.request.id),
+            force=force,
         )
     )

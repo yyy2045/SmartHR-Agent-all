@@ -252,6 +252,21 @@ def _find_matches(
     return _select_non_overlapping(matches)
 
 
+def redact_contact_information(text: str) -> str:
+    matches: list[_CandidateMatch] = []
+    _append_pattern_matches(matches, text, EMAIL_PATTERN, "email", "[EMAIL]", 20)
+    matches.extend(_phone_matches(text))
+    selected = _select_non_overlapping(matches)
+    result_parts: list[str] = []
+    cursor = 0
+    for match in selected:
+        result_parts.append(text[cursor : match.start])
+        result_parts.append(match.replacement)
+        cursor = match.end
+    result_parts.append(text[cursor:])
+    return "".join(result_parts)
+
+
 def redact_resume_segments(
     candidate_code: str,
     segments: Sequence[SegmentLike],

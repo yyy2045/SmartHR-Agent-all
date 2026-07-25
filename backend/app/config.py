@@ -39,6 +39,16 @@ class Settings(BaseSettings):
     ai_timeout_seconds: int = 120
     ai_max_concurrency: int = Field(default=3, ge=1, le=10)
 
+    embedding_enabled: bool = False
+    embedding_base_url: str = "https://api.example.com/v1"
+    embedding_api_key: str = ""
+    embedding_model: str = ""
+    embedding_dimension: int = Field(default=1_536, ge=1, le=4_096)
+    embedding_version: str = "v1"
+    embedding_timeout_seconds: int = Field(default=120, ge=1, le=600)
+    embedding_batch_size: int = Field(default=16, ge=1, le=100)
+    embedding_max_concurrency: int = Field(default=2, ge=1, le=10)
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
