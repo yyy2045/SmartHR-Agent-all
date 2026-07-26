@@ -1,5 +1,6 @@
 import {
   ArrowLeftOutlined,
+  CalendarOutlined,
   ClockCircleOutlined,
   EyeOutlined,
   HistoryOutlined,
@@ -356,6 +357,17 @@ export function CandidateProcessPage() {
                         }
                       >
                         查看档案
+                      </Button>
+                      <Button
+                        size="small"
+                        icon={<CalendarOutlined />}
+                        onClick={() =>
+                          navigate(
+                            `/jobs/${jobId}/candidates/${candidate.document_id}/interview-schedule`,
+                          )
+                        }
+                      >
+                        面试安排
                       </Button>
                       <Button
                         size="small"

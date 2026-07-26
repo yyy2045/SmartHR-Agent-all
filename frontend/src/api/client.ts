@@ -158,6 +158,65 @@ export interface InterviewPlanVersion {
   rounds: InterviewRound[]
 }
 
+export type InterviewMethod = 'onsite' | 'online' | 'phone'
+export type InterviewScheduleStatus = 'scheduled' | 'partially_cancelled' | 'cancelled'
+export type InterviewScheduleRoundStatus = 'scheduled' | 'rescheduled' | 'cancelled'
+
+export interface InterviewScheduleRoundArrangementInput {
+  scheduled_start_at: string
+  interview_method: InterviewMethod
+  location: string | null
+  meeting_url: string | null
+}
+
+export interface InterviewScheduleRoundCreateInput
+  extends InterviewScheduleRoundArrangementInput {
+  plan_round_id: string
+}
+
+export interface InterviewScheduleCreateInput {
+  plan_version_id: string
+  rounds: InterviewScheduleRoundCreateInput[]
+}
+
+export interface InterviewRoundRescheduleInput
+  extends InterviewScheduleRoundArrangementInput {
+  reason: string
+}
+
+export interface InterviewScheduleRoundRecord {
+  id: string
+  plan_round_id: string
+  name: string
+  round_type: InterviewRoundType
+  duration_minutes: number
+  sort_order: number
+  scheduled_start_at: string
+  interview_method: InterviewMethod
+  location: string | null
+  meeting_url: string | null
+  status: InterviewScheduleRoundStatus
+  reschedule_count: number
+  last_change_reason: string | null
+  updated_by_id: string | null
+  cancelled_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface InterviewScheduleRecord {
+  id: string
+  document_id: string
+  candidate_code: string
+  plan_version_id: string
+  plan_version_number: number
+  status: InterviewScheduleStatus
+  created_by_id: string | null
+  created_at: string
+  updated_at: string
+  rounds: InterviewScheduleRoundRecord[]
+}
+
 export type BatchStatus =
   | 'uploading'
   | 'ready'
@@ -683,6 +742,60 @@ export function confirmInterviewPlanVersion(
     `/api/jobs/${jobId}/interview-plans/versions/${versionId}/confirm`,
     { method: 'POST' },
     '确认面试方案失败',
+  )
+}
+
+export async function fetchCandidateInterviewSchedule(
+  jobId: string,
+  documentId: string,
+): Promise<InterviewScheduleRecord | null> {
+  try {
+    return await apiRequest(
+      `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule`,
+      {},
+      '无法读取候选人面试安排',
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
+
+export function createCandidateInterviewSchedule(
+  jobId: string,
+  documentId: string,
+  payload: InterviewScheduleCreateInput,
+): Promise<InterviewScheduleRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    '创建候选人面试安排失败',
+  )
+}
+
+export function rescheduleCandidateInterviewRound(
+  jobId: string,
+  documentId: string,
+  roundId: string,
+  payload: InterviewRoundRescheduleInput,
+): Promise<InterviewScheduleRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+    '修改候选人面试时间失败',
+  )
+}
+
+export function cancelCandidateInterviewRound(
+  jobId: string,
+  documentId: string,
+  roundId: string,
+  reason: string,
+): Promise<InterviewScheduleRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/cancel`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
+    '取消候选人面试轮次失败',
   )
 }
 
