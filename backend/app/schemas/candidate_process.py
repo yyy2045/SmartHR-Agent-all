@@ -1,0 +1,68 @@
+import uuid
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+CandidateStage = Literal[
+    "unprocessed",
+    "pending",
+    "shortlisted",
+    "to_contact",
+    "contacted",
+    "to_interview",
+    "completed",
+    "rejected",
+]
+CandidateProcessEventType = Literal["decision", "stage"]
+
+
+class CandidateProcessCardResponse(BaseModel):
+    process_id: uuid.UUID | None
+    screening_result_id: uuid.UUID
+    batch_id: uuid.UUID
+    batch_name: str
+    document_id: uuid.UUID
+    candidate_code: str
+    original_filename: str
+    ai_group: Literal["passed", "low_match", "auto_rejected"]
+    total_score: float
+    current_decision: Literal["unprocessed", "shortlisted", "pending", "rejected"]
+    current_stage: CandidateStage
+    stage_entered_at: datetime
+    skills: list[str]
+    analysis_created_at: datetime
+
+
+class CandidateStageUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_stage: CandidateStage
+    target_stage: CandidateStage
+    reason: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class CandidateStageUpdateResponse(BaseModel):
+    process_id: uuid.UUID
+    document_id: uuid.UUID
+    previous_stage: CandidateStage
+    current_stage: CandidateStage
+    stage_entered_at: datetime
+
+
+class CandidateProcessTimelineEventResponse(BaseModel):
+    event_type: CandidateProcessEventType
+    from_stage: CandidateStage
+    to_stage: CandidateStage
+    reason: str | None
+    operator_id: uuid.UUID | None
+    operator_display_name: str
+    created_at: datetime

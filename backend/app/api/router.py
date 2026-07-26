@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.batches import router as batches_router
+from app.api.routes.candidate_processes import router as candidate_processes_router
 from app.api.routes.candidate_versions import router as candidate_versions_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
@@ -18,6 +19,11 @@ api_router.include_router(
     candidate_versions_router,
     prefix="/jobs",
     tags=["candidate-versions"],
+)
+api_router.include_router(
+    candidate_processes_router,
+    prefix="/jobs",
+    tags=["candidate-processes"],
 )
 api_router.include_router(
     screening_results_router,

@@ -3,6 +3,7 @@ import {
   FileSearchOutlined,
   FolderOpenOutlined,
   InboxOutlined,
+  ProjectOutlined,
   PlusOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
@@ -60,6 +61,12 @@ export function JobListPage() {
         </Paragraph>
 
         <Space wrap>
+          <Button
+            icon={<ProjectOutlined />}
+            onClick={() => navigate(`/jobs/${job.id}/pipeline`)}
+          >
+            流程看板
+          </Button>
           <Button
             icon={<FileSearchOutlined />}
             onClick={() => navigate(`/jobs/${job.id}/results`)}

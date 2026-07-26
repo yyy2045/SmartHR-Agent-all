@@ -43,6 +43,9 @@ function pageMeta(pathname: string) {
   if (pathname.endsWith('/compare')) {
     return { title: '候选人对比', subtitle: '在同一职位标准下横向比较候选人' }
   }
+  if (pathname.endsWith('/pipeline')) {
+    return { title: '候选人流程看板', subtitle: '管理 AI 初筛后的人工处理进度' }
+  }
   if (pathname.endsWith('/history') && pathname.includes('/documents/')) {
     return { title: '候选人资料与版本', subtitle: '修正结构化资料并追踪每次分析结果' }
   }

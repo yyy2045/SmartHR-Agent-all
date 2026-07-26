@@ -1,0 +1,328 @@
+import uuid
+from collections.abc import Generator
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal
+
+import fakeredis
+import httpx
+import pytest
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.database import Base, get_db
+from app.main import app
+from app.models import (
+    AuditLog,
+    CandidateProcess,
+    CandidateProcessEvent,
+    CandidateProfile,
+    Job,
+    JobCriteriaVersion,
+    RecruiterDecision,
+    ResumeDocument,
+    ScreeningBatch,
+    ScreeningResult,
+    User,
+)
+from app.redis_client import get_session_store
+from app.services.security import hash_password
+from app.services.session_store import SessionStore
+
+
+@dataclass(frozen=True)
+class CandidateProcessDependencies:
+    job_id: uuid.UUID
+    batch_id: uuid.UUID
+    document_id: uuid.UUID
+    result_id: uuid.UUID
+    session_factory: sessionmaker[Session]
+
+
+@pytest.fixture
+def candidate_process_dependencies() -> Generator[CandidateProcessDependencies, None, None]:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    testing_session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    Base.metadata.create_all(engine)
+
+    with testing_session() as db:
+        user = User(
+            username="recruiter",
+            password_hash=hash_password("correct-password"),
+            display_name="招聘专员",
+        )
+        db.add(user)
+        db.flush()
+        job = Job(owner_id=user.id, title="后端工程师", department="研发", original_jd="JD")
+        db.add(job)
+        db.flush()
+        criteria = JobCriteriaVersion(
+            job_id=job.id,
+            version_number=1,
+            status="confirmed",
+            pass_threshold=60,
+            confirmed_by_id=user.id,
+        )
+        db.add(criteria)
+        db.flush()
+        batch = ScreeningBatch(
+            job_id=job.id,
+            criteria_version_id=criteria.id,
+            name="七月批次",
+            status="completed",
+            ai_input_mode="raw",
+        )
+        db.add(batch)
+        db.flush()
+        document = ResumeDocument(
+            batch_id=batch.id,
+            original_filename="candidate.pdf",
+            file_extension=".pdf",
+            content_type="application/pdf",
+            detected_type="pdf",
+            size_bytes=100,
+            status="completed",
+            parsed_at=datetime.now(UTC),
+            redacted_at=datetime.now(UTC),
+            segment_count=1,
+        )
+        db.add(document)
+        db.flush()
+        profile = CandidateProfile(
+            document_id=document.id,
+            version_number=1,
+            source="ai",
+            model_name="stub-model",
+            prompt_version="resume-match-v2",
+            education=[],
+            work_experiences=[],
+            projects=[],
+            skills=[{"name": "Python", "level": "熟练", "evidence": []}],
+            certifications=[],
+            languages=[],
+        )
+        result = ScreeningResult(
+            document_id=document.id,
+            candidate_profile=profile,
+            criteria_version_id=criteria.id,
+            analysis_version=1,
+            status="completed",
+            ai_group="passed",
+            total_score=Decimal("88.00"),
+            pass_threshold=60,
+            hard_requirement_results=[],
+            strengths=["Python"],
+            gaps=[],
+            missing_items=[],
+            interview_questions=[],
+            model_name="stub-model",
+            prompt_version="resume-match-v2",
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        db.add(result)
+        db.commit()
+
+    session_store = SessionStore(
+        redis_client=fakeredis.FakeRedis(decode_responses=True),
+        ttl_seconds=3600,
+    )
+
+    def override_db() -> Generator[Session, None, None]:
+        with testing_session() as db:
+            yield db
+
+    def override_session_store() -> SessionStore:
+        return session_store
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_session_store] = override_session_store
+    yield CandidateProcessDependencies(
+        job_id=job.id,
+        batch_id=batch.id,
+        document_id=document.id,
+        result_id=result.id,
+        session_factory=testing_session,
+    )
+    app.dependency_overrides.clear()
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+async def login(client: httpx.AsyncClient) -> None:
+    response = await client.post(
+        "/auth/login",
+        json={"username": "recruiter", "password": "correct-password"},
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_board_requires_authentication_and_lists_latest_candidate(
+    candidate_process_dependencies: CandidateProcessDependencies,
+) -> None:
+    dependency = candidate_process_dependencies
+    path = f"/jobs/{dependency.job_id}/candidate-processes"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        anonymous = await client.get(path)
+        await login(client)
+        response = await client.get(path, params={"query": "python", "min_score": 80})
+
+    assert anonymous.status_code == 401
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["document_id"] == str(dependency.document_id)
+    assert body[0]["current_stage"] == "unprocessed"
+    assert body[0]["skills"] == ["Python"]
+    assert body[0]["batch_name"] == "七月批次"
+
+
+@pytest.mark.asyncio
+async def test_stage_changes_are_concurrency_safe_and_record_timeline(
+    candidate_process_dependencies: CandidateProcessDependencies,
+) -> None:
+    dependency = candidate_process_dependencies
+    path = (
+        f"/jobs/{dependency.job_id}/candidate-processes/"
+        f"{dependency.document_id}/stage"
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        shortlisted = await client.post(
+            path,
+            json={"expected_stage": "unprocessed", "target_stage": "shortlisted"},
+        )
+        stale = await client.post(
+            path,
+            json={"expected_stage": "unprocessed", "target_stage": "pending"},
+        )
+        to_contact = await client.post(
+            path,
+            json={"expected_stage": "shortlisted", "target_stage": "to_contact"},
+        )
+        blocked_decision = await client.post(
+            f"/jobs/{dependency.job_id}/screening-results/{dependency.result_id}/decisions",
+            json={"decision": "pending"},
+        )
+        timeline = await client.get(
+            f"/jobs/{dependency.job_id}/candidate-processes/"
+            f"{dependency.document_id}/timeline"
+        )
+
+    assert shortlisted.status_code == 200
+    assert stale.status_code == 409
+    assert to_contact.status_code == 200
+    assert blocked_decision.status_code == 409
+    assert [item["to_stage"] for item in timeline.json()] == ["shortlisted", "to_contact"]
+    with dependency.session_factory() as db:
+        process = db.scalar(
+            select(CandidateProcess).where(
+                CandidateProcess.document_id == dependency.document_id
+            )
+        )
+        assert process is not None
+        assert process.current_stage == "to_contact"
+        assert db.scalar(select(func.count(CandidateProcessEvent.id))) == 2
+        assert db.scalar(select(func.count(RecruiterDecision.id))) == 1
+        assert (
+            db.scalar(
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.action == "candidate_process.stage_changed"
+                )
+            )
+            == 2
+        )
+
+
+@pytest.mark.asyncio
+async def test_backward_and_rejection_require_reason_and_terminal_stage_is_locked(
+    candidate_process_dependencies: CandidateProcessDependencies,
+) -> None:
+    dependency = candidate_process_dependencies
+    path = (
+        f"/jobs/{dependency.job_id}/candidate-processes/"
+        f"{dependency.document_id}/stage"
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        for expected, target in (
+            ("unprocessed", "shortlisted"),
+            ("shortlisted", "to_contact"),
+            ("to_contact", "contacted"),
+        ):
+            response = await client.post(
+                path,
+                json={"expected_stage": expected, "target_stage": target},
+            )
+            assert response.status_code == 200
+        missing_backward_reason = await client.post(
+            path,
+            json={"expected_stage": "contacted", "target_stage": "to_contact"},
+        )
+        backward = await client.post(
+            path,
+            json={
+                "expected_stage": "contacted",
+                "target_stage": "to_contact",
+                "reason": "需要再次确认到岗时间",
+            },
+        )
+        missing_rejection_reason = await client.post(
+            path,
+            json={"expected_stage": "to_contact", "target_stage": "rejected"},
+        )
+        rejected = await client.post(
+            path,
+            json={
+                "expected_stage": "to_contact",
+                "target_stage": "rejected",
+                "reason": "候选人明确不再考虑",
+            },
+        )
+        terminal = await client.post(
+            path,
+            json={"expected_stage": "rejected", "target_stage": "pending"},
+        )
+
+    assert missing_backward_reason.status_code == 422
+    assert backward.status_code == 200
+    assert missing_rejection_reason.status_code == 422
+    assert rejected.status_code == 200
+    assert terminal.status_code == 409
+
+
+def test_deleting_source_batch_cascades_candidate_process(
+    candidate_process_dependencies: CandidateProcessDependencies,
+) -> None:
+    dependency = candidate_process_dependencies
+    with dependency.session_factory() as db:
+        process = CandidateProcess(
+            document_id=dependency.document_id,
+            current_stage="to_contact",
+            updated_by_id=db.scalar(select(User.id).where(User.username == "recruiter")),
+        )
+        process.events = [
+            CandidateProcessEvent(
+                sequence_number=1,
+                from_stage="shortlisted",
+                to_stage="to_contact",
+                operator_id=process.updated_by_id,
+            )
+        ]
+        db.add(process)
+        db.commit()
+        batch = db.get(ScreeningBatch, dependency.batch_id)
+        assert batch is not None
+        db.delete(batch)
+        db.commit()
+        assert db.scalar(select(func.count(CandidateProcess.id))) == 0
+        assert db.scalar(select(func.count(CandidateProcessEvent.id))) == 0

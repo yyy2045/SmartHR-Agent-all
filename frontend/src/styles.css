@@ -1376,6 +1376,94 @@ input {
   display: none;
 }
 
+.candidate-board-filter-card {
+  margin-bottom: 18px;
+}
+
+.candidate-board-search {
+  width: 300px;
+}
+
+.candidate-board-filter {
+  width: 180px;
+}
+
+.candidate-board {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 16px;
+  overflow-x: auto;
+}
+
+.candidate-board-column {
+  flex: 0 0 330px;
+  min-width: 0;
+  padding: 14px;
+  background: #f4f7fb;
+  border: 1px solid #e4eaf2;
+  border-radius: 14px;
+}
+
+.candidate-board-column-heading {
+  min-height: 70px;
+  margin-bottom: 12px;
+}
+
+.candidate-board-column-heading .ant-typography {
+  margin: 0;
+}
+
+.candidate-board-column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 180px;
+}
+
+.candidate-flow-card {
+  border: 1px solid #dfe6ef;
+  box-shadow: 0 5px 14px rgb(16 24 40 / 5%);
+}
+
+.candidate-flow-card .ant-card-head-title {
+  font-size: 14px;
+}
+
+.candidate-flow-card .ant-card-body > .ant-typography {
+  margin-bottom: 10px;
+}
+
+.candidate-flow-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 28px;
+  margin: 12px 0;
+}
+
+.candidate-flow-skills .ant-tag {
+  margin: 0;
+}
+
+.candidate-flow-duration {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.candidate-flow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.candidate-stage-form,
+.candidate-stage-select {
+  width: 100%;
+}
+
 @media (max-width: 1180px) {
   .header-search {
     display: none;
@@ -1596,5 +1684,20 @@ input {
 
   .sticky-actions {
     bottom: 8px;
+  }
+
+  .candidate-board-filter-card .ant-space,
+  .candidate-board-search,
+  .candidate-board-filter,
+  .candidate-board-filter-card .ant-input-number {
+    width: 100%;
+  }
+
+  .candidate-board-column {
+    flex-basis: min(86vw, 330px);
+  }
+
+  .candidate-flow-actions .ant-btn {
+    flex: 1 1 auto;
   }
 }

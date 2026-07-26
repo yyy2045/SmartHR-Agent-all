@@ -160,6 +160,7 @@ coverage.xml
 lcov.info
 playwright-report/
 test-results/
+output/playwright/
 .playwright-mcp/
 .playwright-cli/
 allure-results/
