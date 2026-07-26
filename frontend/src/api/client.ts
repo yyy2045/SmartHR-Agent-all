@@ -217,6 +217,84 @@ export interface InterviewScheduleRecord {
   rounds: InterviewScheduleRoundRecord[]
 }
 
+export type InterviewEvaluationStatus = 'draft' | 'submitted'
+export type OverallRecommendation =
+  | 'strongly_recommend'
+  | 'recommend'
+  | 'reserve'
+  | 'not_recommend'
+
+export interface InterviewQuestionResponseInput {
+  question_id: string
+  answer_summary: string
+  evidence: string
+}
+
+export interface InterviewDimensionRatingInput {
+  dimension_id: string
+  score: number | null
+  evidence: string
+}
+
+export interface InterviewEvaluationDraftInput {
+  overall_recommendation: OverallRecommendation | null
+  overall_comment: string
+  question_responses: InterviewQuestionResponseInput[]
+  dimension_ratings: InterviewDimensionRatingInput[]
+}
+
+export interface InterviewQuestionResponseRecord extends InterviewQuestionResponseInput {
+  id: string
+}
+
+export interface InterviewDimensionRatingRecord extends InterviewDimensionRatingInput {
+  id: string
+}
+
+export interface InterviewEvaluationRecord {
+  id: string
+  status: InterviewEvaluationStatus
+  overall_recommendation: OverallRecommendation | null
+  overall_comment: string
+  total_score: number | null
+  passed: boolean | null
+  submitted_by_id: string | null
+  submitted_at: string | null
+  created_at: string
+  updated_at: string
+  question_responses: InterviewQuestionResponseRecord[]
+  dimension_ratings: InterviewDimensionRatingRecord[]
+}
+
+export interface InterviewEvaluationQuestionContext {
+  id: string
+  question_text: string
+  evaluation_guide: string
+  sort_order: number
+}
+
+export interface InterviewEvaluationDimensionContext {
+  id: string
+  name: string
+  description: string
+  weight_percent: number
+  sort_order: number
+  anchors: Array<{ score_value: number; description: string }>
+}
+
+export interface InterviewEvaluationContext {
+  round_id: string
+  plan_round_id: string
+  round_name: string
+  round_type: InterviewRoundType
+  round_status: InterviewScheduleRoundStatus
+  pass_threshold: number
+  scheduled_start_at: string
+  questions: InterviewEvaluationQuestionContext[]
+  dimensions: InterviewEvaluationDimensionContext[]
+  evaluation: InterviewEvaluationRecord | null
+}
+
 export type BatchStatus =
   | 'uploading'
   | 'ready'
@@ -452,6 +530,25 @@ export interface CandidateProcessCardRecord {
   stage_entered_at: string
   skills: string[]
   analysis_created_at: string
+  interview_evaluation?: InterviewEvaluationProgressRecord | null
+}
+
+export type InterviewEvaluationProgressStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled'
+
+export interface InterviewEvaluationProgressRecord {
+  status: InterviewEvaluationProgressStatus
+  total_rounds: number
+  submitted_count: number
+  draft_count: number
+  pending_count: number
+  cancelled_count: number
+  action_round_id: string | null
+  action_round_name: string | null
+  action_evaluation_status: 'not_started' | 'draft' | 'submitted' | null
 }
 
 export interface CandidateProcessTimelineEventRecord {
@@ -796,6 +893,43 @@ export function cancelCandidateInterviewRound(
     `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/cancel`,
     { method: 'POST', body: JSON.stringify({ reason }) },
     '取消候选人面试轮次失败',
+  )
+}
+
+export function fetchInterviewEvaluation(
+  jobId: string,
+  documentId: string,
+  roundId: string,
+): Promise<InterviewEvaluationContext> {
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation`,
+    {},
+    '无法读取面试评价',
+  )
+}
+
+export function saveInterviewEvaluationDraft(
+  jobId: string,
+  documentId: string,
+  roundId: string,
+  payload: InterviewEvaluationDraftInput,
+): Promise<InterviewEvaluationContext> {
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation`,
+    { method: 'PUT', body: JSON.stringify(payload) },
+    '保存面试评价草稿失败',
+  )
+}
+
+export function submitInterviewEvaluation(
+  jobId: string,
+  documentId: string,
+  roundId: string,
+): Promise<InterviewEvaluationContext> {
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation/submit`,
+    { method: 'POST' },
+    '提交面试评价失败',
   )
 }
 

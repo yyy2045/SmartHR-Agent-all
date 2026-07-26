@@ -3,6 +3,7 @@ import {
   CalendarOutlined,
   ClockCircleOutlined,
   EyeOutlined,
+  FileDoneOutlined,
   HistoryOutlined,
   MoreOutlined,
   ReloadOutlined,
@@ -75,6 +76,13 @@ const aiGroupMeta: Record<AIGroup, { label: string; color: string }> = {
   low_match: { label: '低匹配组', color: 'warning' },
   auto_rejected: { label: '自动淘汰组', color: 'error' },
 }
+
+const evaluationProgressMeta = {
+  not_started: { label: '待评价', color: 'default' },
+  in_progress: { label: '评价进行中', color: 'processing' },
+  completed: { label: '评价完成', color: 'success' },
+  cancelled: { label: '轮次已取消', color: 'default' },
+} as const
 
 const allowedTransitions: Record<CandidateStage, CandidateStage[]> = {
   unprocessed: ['pending', 'shortlisted', 'rejected'],
@@ -360,6 +368,55 @@ export function CandidateProcessPage() {
                     <Text type="secondary" className="candidate-flow-duration">
                       <ClockCircleOutlined /> 当前阶段 {stageDuration(candidate.stage_entered_at)}
                     </Text>
+                    {candidate.interview_evaluation && (
+                      <div className="candidate-evaluation-progress">
+                        <div className="candidate-evaluation-progress-heading">
+                          <Text strong>面试评价</Text>
+                          <Tag
+                            color={
+                              evaluationProgressMeta[candidate.interview_evaluation.status]
+                                .color
+                            }
+                          >
+                            {
+                              evaluationProgressMeta[candidate.interview_evaluation.status]
+                                .label
+                            }
+                          </Tag>
+                        </div>
+                        <Text type="secondary">
+                          {candidate.interview_evaluation.submitted_count}/
+                          {candidate.interview_evaluation.total_rounds} 轮已提交
+                          {candidate.interview_evaluation.draft_count > 0 &&
+                            ` · ${candidate.interview_evaluation.draft_count} 份草稿`}
+                          {candidate.interview_evaluation.pending_count > 0 &&
+                            ` · ${candidate.interview_evaluation.pending_count} 轮待评价`}
+                        </Text>
+                        {candidate.interview_evaluation.action_round_id && (
+                          <Button
+                            size="small"
+                            type="link"
+                            icon={<FileDoneOutlined />}
+                            onClick={() =>
+                              navigate(
+                                `/jobs/${jobId}/candidates/${candidate.document_id}/interview-evaluations/${candidate.interview_evaluation?.action_round_id}`,
+                              )
+                            }
+                          >
+                            {candidate.interview_evaluation.action_evaluation_status ===
+                            'submitted'
+                              ? '查看评价'
+                              : candidate.interview_evaluation.action_evaluation_status ===
+                                  'draft'
+                                ? '继续评价'
+                                : '填写评价'}
+                            {candidate.interview_evaluation.action_round_name
+                              ? ` · ${candidate.interview_evaluation.action_round_name}`
+                              : ''}
+                          </Button>
+                        )}
+                      </div>
+                    )}
                     <div className="candidate-flow-actions">
                       <Button
                         size="small"

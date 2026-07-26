@@ -100,6 +100,11 @@ describe('招聘业务导航', () => {
       'interviews',
       '面试管理',
     ],
+    [
+      '/jobs/job-1/candidates/document-1/interview-evaluations/round-1',
+      'interviews',
+      '面试管理',
+    ],
     ['/jobs/job-1/criteria', 'jobs', '岗位管理'],
   ])('将 %s 归入 %s 模块', (path, module, label) => {
     expect(businessModuleForPath(path)).toBe(module)
