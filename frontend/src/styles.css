@@ -1777,3 +1777,69 @@ input {
     flex: 1 1 auto;
   }
 }
+
+.interview-schedule-create-card,
+.interview-schedule-view {
+  margin-top: 18px;
+}
+
+.interview-schedule-plan-select {
+  width: min(100%, 320px);
+}
+
+.interview-schedule-round-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.interview-schedule-round-card.is-cancelled {
+  opacity: 0.72;
+}
+
+.interview-schedule-form-grid,
+.interview-schedule-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.interview-schedule-form-grid label,
+.interview-schedule-modal-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.interview-schedule-form-grid .ant-select,
+.interview-schedule-modal-form,
+.interview-schedule-modal-form .ant-select {
+  width: 100%;
+}
+
+.interview-schedule-summary-grid .ant-typography {
+  margin: 5px 0 0;
+}
+
+.interview-schedule-actions {
+  margin-top: 16px;
+}
+
+@media (max-width: 1100px) {
+  .interview-schedule-form-grid,
+  .interview-schedule-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .interview-schedule-form-grid,
+  .interview-schedule-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .interview-schedule-plan-select,
+  .interview-schedule-actions,
+  .interview-schedule-actions .ant-btn {
+    width: 100%;
+  }
+}
