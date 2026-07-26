@@ -371,6 +371,7 @@ export function ScreeningResultsPage() {
             返回职位列表
           </Button>
           <Button onClick={() => navigate(`/jobs/${jobId}/batches`)}>简历批次</Button>
+          <Button onClick={() => navigate(`/jobs/${jobId}/pipeline`)}>流程看板</Button>
           <Button icon={<ReloadOutlined />} onClick={() => void results.refetch()}>
             刷新结果
           </Button>

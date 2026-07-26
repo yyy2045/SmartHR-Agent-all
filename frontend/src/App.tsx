@@ -33,6 +33,11 @@ const CandidateHistoryPage = lazy(() =>
     default: module.CandidateHistoryPage,
   })),
 )
+const CandidateProcessPage = lazy(() =>
+  import('./pages/CandidateProcessPage').then((module) => ({
+    default: module.CandidateProcessPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -54,6 +59,7 @@ function App() {
                 <Route path="/jobs/:jobId/batches" element={<BatchPage />} />
                 <Route path="/jobs/:jobId/results" element={<ScreeningResultsPage />} />
                 <Route path="/jobs/:jobId/compare" element={<CandidateComparisonPage />} />
+                <Route path="/jobs/:jobId/pipeline" element={<CandidateProcessPage />} />
                 <Route
                   path="/jobs/:jobId/batches/:batchId/documents/:documentId/history"
                   element={<CandidateHistoryPage />}

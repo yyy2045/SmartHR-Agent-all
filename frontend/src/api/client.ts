@@ -181,6 +181,15 @@ export type AIGroup = 'passed' | 'low_match' | 'auto_rejected'
 export type RequirementStatus = 'passed' | 'failed' | 'unknown'
 export type ManualDecision = 'unprocessed' | 'shortlisted' | 'pending' | 'rejected'
 export type DecisionAction = Exclude<ManualDecision, 'unprocessed'>
+export type CandidateStage =
+  | 'unprocessed'
+  | 'pending'
+  | 'shortlisted'
+  | 'to_contact'
+  | 'contacted'
+  | 'to_interview'
+  | 'completed'
+  | 'rejected'
 
 export interface EvidenceCitationRecord {
   id: string
@@ -299,6 +308,50 @@ export interface ScreeningResultSummary {
   current_decision: ManualDecision
   latest_decision_at: string | null
   created_at: string
+}
+
+export interface CandidateProcessCardRecord {
+  process_id: string | null
+  screening_result_id: string
+  batch_id: string
+  batch_name: string
+  document_id: string
+  candidate_code: string
+  original_filename: string
+  ai_group: AIGroup
+  total_score: number
+  current_decision: ManualDecision
+  current_stage: CandidateStage
+  stage_entered_at: string
+  skills: string[]
+  analysis_created_at: string
+}
+
+export interface CandidateProcessTimelineEventRecord {
+  event_type: 'decision' | 'stage'
+  from_stage: CandidateStage
+  to_stage: CandidateStage
+  reason: string | null
+  operator_id: string | null
+  operator_display_name: string
+  created_at: string
+}
+
+export interface CandidateStageUpdateRecord {
+  process_id: string
+  document_id: string
+  previous_stage: CandidateStage
+  current_stage: CandidateStage
+  stage_entered_at: string
+}
+
+export interface CandidateProcessFilters {
+  batchId?: string
+  stage?: CandidateStage
+  aiGroup?: AIGroup
+  minScore?: number
+  maxScore?: number
+  query?: string
 }
 
 export interface ScreeningResultDetail {
@@ -708,6 +761,57 @@ export function fetchScreeningResult(
     `/api/jobs/${jobId}/screening-results/${resultId}`,
     {},
     '无法读取候选人筛选详情',
+  )
+}
+
+export function fetchCandidateProcesses(
+  jobId: string,
+  filters: CandidateProcessFilters = {},
+): Promise<CandidateProcessCardRecord[]> {
+  const query = new URLSearchParams()
+  if (filters.batchId) query.set('batch_id', filters.batchId)
+  if (filters.stage) query.set('stage', filters.stage)
+  if (filters.aiGroup) query.set('ai_group', filters.aiGroup)
+  if (filters.minScore !== undefined) query.set('min_score', String(filters.minScore))
+  if (filters.maxScore !== undefined) query.set('max_score', String(filters.maxScore))
+  if (filters.query?.trim()) query.set('query', filters.query.trim())
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes${suffix}`,
+    {},
+    '无法读取候选人流程看板',
+  )
+}
+
+export function updateCandidateStage(
+  jobId: string,
+  documentId: string,
+  expectedStage: CandidateStage,
+  targetStage: CandidateStage,
+  reason?: string,
+): Promise<CandidateStageUpdateRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes/${documentId}/stage`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_stage: expectedStage,
+        target_stage: targetStage,
+        reason: reason?.trim() || null,
+      }),
+    },
+    '调整候选人阶段失败',
+  )
+}
+
+export function fetchCandidateProcessTimeline(
+  jobId: string,
+  documentId: string,
+): Promise<CandidateProcessTimelineEventRecord[]> {
+  return apiRequest(
+    `/api/jobs/${jobId}/candidate-processes/${documentId}/timeline`,
+    {},
+    '无法读取候选人流程记录',
   )
 }
 

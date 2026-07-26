@@ -25,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.candidate_process import CandidateProcess
     from app.models.job import Job, JobCriteriaVersion
     from app.models.knowledge import ResumeEmbeddingChunk
     from app.models.user import User
@@ -155,6 +156,11 @@ class ResumeDocument(Base):
     embedding_chunks: Mapped[list[ResumeEmbeddingChunk]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
+    )
+    candidate_process: Mapped[CandidateProcess | None] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
 
     @property
