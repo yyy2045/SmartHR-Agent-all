@@ -1,6 +1,8 @@
 from app.models.audit import AuditLog
 from app.models.candidate_process import CandidateProcess, CandidateProcessEvent
 from app.models.interview import (
+    CandidateInterviewRound,
+    CandidateInterviewSchedule,
     InterviewPlanVersion,
     InterviewQuestion,
     InterviewRound,
@@ -25,6 +27,8 @@ from app.models.user import User
 __all__ = [
     "AuditLog",
     "CandidateProfile",
+    "CandidateInterviewRound",
+    "CandidateInterviewSchedule",
     "CandidateProcess",
     "CandidateProcessEvent",
     "DimensionScore",
