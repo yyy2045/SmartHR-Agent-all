@@ -4,6 +4,7 @@ import {
   ClockCircleOutlined,
   EyeOutlined,
   HistoryOutlined,
+  MoreOutlined,
   ReloadOutlined,
   SwapOutlined,
 } from '@ant-design/icons'
@@ -13,6 +14,7 @@ import {
   Button,
   Card,
   Drawer,
+  Dropdown,
   Empty,
   Input,
   InputNumber,
@@ -303,7 +305,10 @@ export function CandidateProcessPage() {
         <Empty description="当前条件下没有已完成 AI 初筛的候选人" />
       )}
       {candidates.isSuccess && candidates.data.length > 0 && (
-        <div className="candidate-board" aria-label="候选人流程看板">
+        <div
+          className={`candidate-board${visibleStages.length === 1 ? ' candidate-board--single-stage' : ''}`}
+          aria-label="候选人流程看板"
+        >
           {visibleStages.map((stageKey) => (
             <section className="candidate-board-column" key={stageKey}>
               <div className="candidate-board-column-heading">
@@ -338,7 +343,16 @@ export function CandidateProcessPage() {
                     </Space>
                     <div className="candidate-flow-skills">
                       {candidate.skills.length ? (
-                        candidate.skills.map((skill) => <Tag key={skill}>{skill}</Tag>)
+                        <>
+                          {candidate.skills.slice(0, 3).map((skill) => (
+                            <Tag key={skill}>{skill}</Tag>
+                          ))}
+                          {candidate.skills.length > 3 && (
+                            <Tag title={candidate.skills.slice(3).join('、')}>
+                              +{candidate.skills.length - 3}
+                            </Tag>
+                          )}
+                        </>
                       ) : (
                         <Text type="secondary">暂无技能标签</Text>
                       )}
@@ -369,23 +383,39 @@ export function CandidateProcessPage() {
                       >
                         面试安排
                       </Button>
-                      <Button
-                        size="small"
-                        icon={<HistoryOutlined />}
-                        onClick={() => setTimelineTarget(candidate)}
-                      >
-                        时间线
-                      </Button>
-                      {allowedTransitions[candidate.current_stage].length > 0 && (
-                        <Button
-                          size="small"
-                          type="primary"
-                          icon={<SwapOutlined />}
-                          onClick={() => openStageChange(candidate)}
+                      <div className="candidate-flow-actions-secondary">
+                        {allowedTransitions[candidate.current_stage].length > 0 && (
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<SwapOutlined />}
+                            onClick={() => openStageChange(candidate)}
+                          >
+                            调整阶段
+                          </Button>
+                        )}
+                        <Dropdown
+                          trigger={['click']}
+                          menu={{
+                            items: [
+                              {
+                                key: 'timeline',
+                                icon: <HistoryOutlined />,
+                                label: '查看时间线',
+                              },
+                            ],
+                            onClick: ({ key }) => {
+                              if (key === 'timeline') setTimelineTarget(candidate)
+                            },
+                          }}
                         >
-                          调整阶段
-                        </Button>
-                      )}
+                          <Button
+                            size="small"
+                            icon={<MoreOutlined />}
+                            aria-label={`更多操作 ${candidate.candidate_code}`}
+                          />
+                        </Dropdown>
+                      </div>
                     </div>
                   </Card>
                 ))}
