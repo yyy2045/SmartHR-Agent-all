@@ -6,6 +6,7 @@ import {
   ProjectOutlined,
   PlusOutlined,
   SettingOutlined,
+  SolutionOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Card, Empty, Popconfirm, Skeleton, Space, Switch, Tag, Typography } from 'antd'
@@ -61,6 +62,12 @@ export function JobListPage() {
         </Paragraph>
 
         <Space wrap>
+          <Button
+            icon={<SolutionOutlined />}
+            onClick={() => navigate(`/jobs/${job.id}/interview-plan`)}
+          >
+            面试方案
+          </Button>
           <Button
             icon={<ProjectOutlined />}
             onClick={() => navigate(`/jobs/${job.id}/pipeline`)}
