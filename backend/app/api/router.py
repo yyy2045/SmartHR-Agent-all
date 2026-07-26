@@ -5,6 +5,7 @@ from app.api.routes.batches import router as batches_router
 from app.api.routes.candidate_processes import router as candidate_processes_router
 from app.api.routes.candidate_versions import router as candidate_versions_router
 from app.api.routes.health import router as health_router
+from app.api.routes.interview_evaluations import router as interview_evaluations_router
 from app.api.routes.interview_plans import router as interview_plans_router
 from app.api.routes.interview_schedules import router as interview_schedules_router
 from app.api.routes.jobs import router as jobs_router
@@ -16,6 +17,11 @@ api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(health_router, prefix="/health", tags=["health"])
 api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
+api_router.include_router(
+    interview_evaluations_router,
+    prefix="/jobs",
+    tags=["interview-evaluations"],
+)
 api_router.include_router(
     interview_plans_router,
     prefix="/jobs",

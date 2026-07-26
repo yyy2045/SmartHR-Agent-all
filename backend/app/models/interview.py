@@ -5,10 +5,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -137,6 +139,9 @@ class InterviewQuestion(Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     round: Mapped[InterviewRound] = relationship(back_populates="questions")
+    evaluation_responses: Mapped[list[InterviewQuestionResponse]] = relationship(
+        back_populates="question"
+    )
 
 
 class InterviewScoreDimension(Base):
@@ -170,6 +175,9 @@ class InterviewScoreDimension(Base):
         back_populates="dimension",
         cascade="all, delete-orphan",
         order_by="InterviewScoreAnchor.score_value",
+    )
+    evaluation_ratings: Mapped[list[InterviewDimensionRating]] = relationship(
+        back_populates="dimension"
     )
 
 
@@ -315,6 +323,11 @@ class CandidateInterviewRound(Base):
     schedule: Mapped[CandidateInterviewSchedule] = relationship(back_populates="rounds")
     plan_round: Mapped[InterviewRound] = relationship(back_populates="scheduled_rounds")
     updated_by: Mapped[User | None] = relationship(foreign_keys=[updated_by_id])
+    evaluation: Mapped[InterviewEvaluation | None] = relationship(
+        back_populates="candidate_round",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     @property
     def name(self) -> str:
@@ -327,3 +340,127 @@ class CandidateInterviewRound(Base):
     @property
     def duration_minutes(self) -> int:
         return self.plan_round.duration_minutes
+
+
+class InterviewEvaluation(Base):
+    __tablename__ = "interview_evaluations"
+    __table_args__ = (
+        UniqueConstraint("candidate_round_id", name="uq_interview_evaluation_round"),
+        CheckConstraint(
+            "status IN ('draft', 'submitted')",
+            name="ck_interview_evaluations_status",
+        ),
+        CheckConstraint(
+            "overall_recommendation IS NULL OR "
+            "overall_recommendation IN "
+            "('strongly_recommend', 'recommend', 'reserve', 'not_recommend')",
+            name="ck_interview_evaluations_recommendation",
+        ),
+        CheckConstraint(
+            "total_score IS NULL OR (total_score >= 0 AND total_score <= 100)",
+            name="ck_interview_evaluations_total_score",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    candidate_round_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("candidate_interview_rounds.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    overall_recommendation: Mapped[str | None] = mapped_column(String(30))
+    overall_comment: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    total_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    passed: Mapped[bool | None] = mapped_column(Boolean)
+    submitted_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    candidate_round: Mapped[CandidateInterviewRound] = relationship(
+        back_populates="evaluation"
+    )
+    submitted_by: Mapped[User | None] = relationship(foreign_keys=[submitted_by_id])
+    question_responses: Mapped[list[InterviewQuestionResponse]] = relationship(
+        back_populates="evaluation",
+        cascade="all, delete-orphan",
+    )
+    dimension_ratings: Mapped[list[InterviewDimensionRating]] = relationship(
+        back_populates="evaluation",
+        cascade="all, delete-orphan",
+    )
+
+
+class InterviewQuestionResponse(Base):
+    __tablename__ = "interview_question_responses"
+    __table_args__ = (
+        UniqueConstraint(
+            "evaluation_id", "question_id", name="uq_interview_question_response"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_evaluations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_questions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    answer_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    evidence: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    evaluation: Mapped[InterviewEvaluation] = relationship(
+        back_populates="question_responses"
+    )
+    question: Mapped[InterviewQuestion] = relationship(
+        back_populates="evaluation_responses"
+    )
+
+
+class InterviewDimensionRating(Base):
+    __tablename__ = "interview_dimension_ratings"
+    __table_args__ = (
+        UniqueConstraint(
+            "evaluation_id", "dimension_id", name="uq_interview_dimension_rating"
+        ),
+        CheckConstraint(
+            "score IS NULL OR (score >= 1 AND score <= 5)",
+            name="ck_interview_dimension_ratings_score",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_evaluations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    dimension_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("interview_score_dimensions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    score: Mapped[int | None] = mapped_column(Integer)
+    evidence: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    evaluation: Mapped[InterviewEvaluation] = relationship(
+        back_populates="dimension_ratings"
+    )
+    dimension: Mapped[InterviewScoreDimension] = relationship(
+        back_populates="evaluation_ratings"
+    )
