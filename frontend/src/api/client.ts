@@ -530,6 +530,25 @@ export interface CandidateProcessCardRecord {
   stage_entered_at: string
   skills: string[]
   analysis_created_at: string
+  interview_evaluation?: InterviewEvaluationProgressRecord | null
+}
+
+export type InterviewEvaluationProgressStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled'
+
+export interface InterviewEvaluationProgressRecord {
+  status: InterviewEvaluationProgressStatus
+  total_rounds: number
+  submitted_count: number
+  draft_count: number
+  pending_count: number
+  cancelled_count: number
+  action_round_id: string | null
+  action_round_name: string | null
+  action_evaluation_status: 'not_started' | 'draft' | 'submitted' | null
 }
 
 export interface CandidateProcessTimelineEventRecord {

@@ -10,6 +10,8 @@ from app.api.dependencies.auth import CurrentUser
 from app.api.routes.jobs import get_owned_job
 from app.database import get_db
 from app.models import (
+    CandidateInterviewRound,
+    CandidateInterviewSchedule,
     CandidateProcess,
     CandidateProcessEvent,
     Job,
@@ -24,6 +26,7 @@ from app.schemas.candidate_process import (
     CandidateStage,
     CandidateStageUpdate,
     CandidateStageUpdateResponse,
+    InterviewEvaluationProgressResponse,
 )
 from app.schemas.screening import AIGroup, ManualDecision
 from app.services.audit import record_audit
@@ -60,11 +63,76 @@ def _result_options() -> tuple[object, ...]:
         selectinload(ScreeningResult.document)
         .selectinload(ResumeDocument.candidate_process)
         .selectinload(CandidateProcess.events),
+        selectinload(ScreeningResult.document)
+        .selectinload(ResumeDocument.interview_schedule)
+        .selectinload(CandidateInterviewSchedule.rounds)
+        .selectinload(CandidateInterviewRound.plan_round),
+        selectinload(ScreeningResult.document)
+        .selectinload(ResumeDocument.interview_schedule)
+        .selectinload(CandidateInterviewSchedule.rounds)
+        .selectinload(CandidateInterviewRound.evaluation),
         selectinload(ScreeningResult.candidate_profile),
         selectinload(ScreeningResult.criteria_version),
         selectinload(ScreeningResult.recruiter_decisions).selectinload(
             RecruiterDecision.operator
         ),
+    )
+
+
+def _interview_evaluation_progress(
+    schedule: CandidateInterviewSchedule | None,
+) -> InterviewEvaluationProgressResponse | None:
+    if schedule is None:
+        return None
+    ordered_rounds = sorted(schedule.rounds, key=lambda item: item.sort_order)
+    active_rounds = [item for item in ordered_rounds if item.status != "cancelled"]
+    cancelled_count = len(ordered_rounds) - len(active_rounds)
+    submitted = [
+        item
+        for item in active_rounds
+        if item.evaluation is not None and item.evaluation.status == "submitted"
+    ]
+    drafts = [
+        item
+        for item in active_rounds
+        if item.evaluation is not None and item.evaluation.status == "draft"
+    ]
+    pending = [item for item in active_rounds if item.evaluation is None]
+
+    if not active_rounds:
+        progress_status = "cancelled"
+    elif len(submitted) == len(active_rounds):
+        progress_status = "completed"
+    elif submitted or drafts:
+        progress_status = "in_progress"
+    else:
+        progress_status = "not_started"
+
+    if drafts:
+        action_round = drafts[0]
+    elif pending:
+        action_round = pending[0]
+    elif submitted:
+        action_round = submitted[0]
+    else:
+        action_round = None
+    action_status = None
+    if action_round is not None:
+        action_status = (
+            action_round.evaluation.status
+            if action_round.evaluation is not None
+            else "not_started"
+        )
+    return InterviewEvaluationProgressResponse(
+        status=progress_status,
+        total_rounds=len(active_rounds),
+        submitted_count=len(submitted),
+        draft_count=len(drafts),
+        pending_count=len(pending),
+        cancelled_count=cancelled_count,
+        action_round_id=action_round.id if action_round is not None else None,
+        action_round_name=action_round.name if action_round is not None else None,
+        action_evaluation_status=action_status,
     )
 
 
@@ -270,6 +338,9 @@ def list_candidate_processes(
                 stage_entered_at=_stage_entered_at(result, document_results, process),
                 skills=skills,
                 analysis_created_at=result.created_at,
+                interview_evaluation=_interview_evaluation_progress(
+                    result.document.interview_schedule
+                ),
             )
         )
     cards.sort(

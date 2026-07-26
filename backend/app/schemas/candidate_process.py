@@ -15,6 +15,25 @@ CandidateStage = Literal[
     "rejected",
 ]
 CandidateProcessEventType = Literal["decision", "stage"]
+InterviewEvaluationProgressStatus = Literal[
+    "not_started",
+    "in_progress",
+    "completed",
+    "cancelled",
+]
+InterviewEvaluationActionStatus = Literal["not_started", "draft", "submitted"]
+
+
+class InterviewEvaluationProgressResponse(BaseModel):
+    status: InterviewEvaluationProgressStatus
+    total_rounds: int
+    submitted_count: int
+    draft_count: int
+    pending_count: int
+    cancelled_count: int
+    action_round_id: uuid.UUID | None
+    action_round_name: str | None
+    action_evaluation_status: InterviewEvaluationActionStatus | None
 
 
 class CandidateProcessCardResponse(BaseModel):
@@ -32,6 +51,7 @@ class CandidateProcessCardResponse(BaseModel):
     stage_entered_at: datetime
     skills: list[str]
     analysis_created_at: datetime
+    interview_evaluation: InterviewEvaluationProgressResponse | None
 
 
 class CandidateStageUpdate(BaseModel):

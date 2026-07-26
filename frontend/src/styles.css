@@ -1925,6 +1925,34 @@ input {
   margin-top: 16px;
 }
 
+.candidate-evaluation-progress {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  margin-top: 10px;
+  background: #f6f9fd;
+  border: 1px solid #e2e9f2;
+  border-radius: 9px;
+}
+
+.candidate-evaluation-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.candidate-evaluation-progress-heading .ant-tag {
+  margin: 0;
+}
+
+.candidate-evaluation-progress > .ant-btn {
+  justify-self: start;
+  height: auto;
+  padding: 0;
+  white-space: normal;
+}
+
 .evaluation-overview-card,
 .evaluation-section,
 .evaluation-summary-card {

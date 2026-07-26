@@ -15,9 +15,14 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     AuditLog,
+    CandidateInterviewRound,
+    CandidateInterviewSchedule,
     CandidateProcess,
     CandidateProcessEvent,
     CandidateProfile,
+    InterviewEvaluation,
+    InterviewPlanVersion,
+    InterviewRound,
     Job,
     JobCriteriaVersion,
     RecruiterDecision,
@@ -182,6 +187,119 @@ async def test_board_requires_authentication_and_lists_latest_candidate(
     assert body[0]["current_stage"] == "unprocessed"
     assert body[0]["skills"] == ["Python"]
     assert body[0]["batch_name"] == "七月批次"
+    assert body[0]["interview_evaluation"] is None
+
+
+@pytest.mark.asyncio
+async def test_board_exposes_compact_interview_evaluation_progress(
+    candidate_process_dependencies: CandidateProcessDependencies,
+) -> None:
+    dependency = candidate_process_dependencies
+    with dependency.session_factory() as db:
+        user_id = db.scalar(select(User.id).where(User.username == "recruiter"))
+        assert user_id is not None
+        plan = InterviewPlanVersion(
+            job_id=dependency.job_id,
+            version_number=1,
+            status="confirmed",
+            confirmed_by_id=user_id,
+            confirmed_at=datetime.now(UTC),
+            rounds=[
+                InterviewRound(
+                    name="技术一面",
+                    round_type="technical",
+                    duration_minutes=60,
+                    pass_threshold=70,
+                    focus="系统设计",
+                    sort_order=0,
+                ),
+                InterviewRound(
+                    name="HR 面",
+                    round_type="hr",
+                    duration_minutes=30,
+                    pass_threshold=60,
+                    focus="发展意愿",
+                    sort_order=1,
+                ),
+                InterviewRound(
+                    name="终面",
+                    round_type="final",
+                    duration_minutes=45,
+                    pass_threshold=70,
+                    focus="综合判断",
+                    sort_order=2,
+                ),
+            ],
+        )
+        db.add(plan)
+        db.flush()
+        schedule = CandidateInterviewSchedule(
+            document_id=dependency.document_id,
+            plan_version_id=plan.id,
+            status="partially_cancelled",
+            created_by_id=user_id,
+            rounds=[
+                CandidateInterviewRound(
+                    plan_round_id=plan.rounds[0].id,
+                    sort_order=0,
+                    scheduled_start_at=datetime.now(UTC),
+                    interview_method="onsite",
+                    location="3A 会议室",
+                    status="scheduled",
+                    updated_by_id=user_id,
+                    evaluation=InterviewEvaluation(
+                        status="submitted",
+                        overall_recommendation="recommend",
+                        total_score=80,
+                        passed=True,
+                        submitted_by_id=user_id,
+                        submitted_at=datetime.now(UTC),
+                    ),
+                ),
+                CandidateInterviewRound(
+                    plan_round_id=plan.rounds[1].id,
+                    sort_order=1,
+                    scheduled_start_at=datetime.now(UTC),
+                    interview_method="phone",
+                    status="scheduled",
+                    updated_by_id=user_id,
+                    evaluation=InterviewEvaluation(status="draft"),
+                ),
+                CandidateInterviewRound(
+                    plan_round_id=plan.rounds[2].id,
+                    sort_order=2,
+                    scheduled_start_at=datetime.now(UTC),
+                    interview_method="online",
+                    meeting_url="https://meeting.example.com/final",
+                    status="cancelled",
+                    updated_by_id=user_id,
+                    cancelled_at=datetime.now(UTC),
+                ),
+            ],
+        )
+        db.add(schedule)
+        db.commit()
+        draft_round_id = schedule.rounds[1].id
+
+    path = f"/jobs/{dependency.job_id}/candidate-processes"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.get(path)
+
+    assert response.status_code == 200
+    progress = response.json()[0]["interview_evaluation"]
+    assert progress == {
+        "status": "in_progress",
+        "total_rounds": 2,
+        "submitted_count": 1,
+        "draft_count": 1,
+        "pending_count": 0,
+        "cancelled_count": 1,
+        "action_round_id": str(draft_round_id),
+        "action_round_name": "HR 面",
+        "action_evaluation_status": "draft",
+    }
 
 
 @pytest.mark.asyncio

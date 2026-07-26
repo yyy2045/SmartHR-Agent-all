@@ -55,6 +55,17 @@ describe('candidate process board', () => {
       stage_entered_at: timestamp,
       skills: ['Python', 'FastAPI', 'PostgreSQL', 'React', 'Docker'],
       analysis_created_at: timestamp,
+      interview_evaluation: {
+        status: 'in_progress',
+        total_rounds: 2,
+        submitted_count: 1,
+        draft_count: 1,
+        pending_count: 0,
+        cancelled_count: 0,
+        action_round_id: 'round-2',
+        action_round_name: 'HR 面',
+        action_evaluation_status: 'draft',
+      },
     }
     let timeline: CandidateProcessTimelineEventRecord[] = []
     let stageRequest: Record<string, unknown> | undefined
@@ -129,6 +140,8 @@ describe('candidate process board', () => {
     expect(screen.getByText('Python')).toBeInTheDocument()
     expect(screen.getByText('+2')).toHaveAttribute('title', 'React、Docker')
     expect(screen.queryByText('React')).not.toBeInTheDocument()
+    expect(screen.getByText('评价进行中')).toBeInTheDocument()
+    expect(screen.getByText('1/2 轮已提交 · 1 份草稿')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /调整阶段/ }))
     fireEvent.click(screen.getByRole('button', { name: '确认调整' }))
 
@@ -146,6 +159,12 @@ describe('candidate process board', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: /查看时间线/ }))
     expect(await screen.findByText('待人工处理 → 待定')).toBeInTheDocument()
     expect(screen.getAllByText(/招聘专员/).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: /继续评价 · HR 面/ }))
+    await waitFor(() => {
+      expect(window.location.pathname).toBe(
+        '/jobs/job-1/candidates/document-1/interview-evaluations/round-2',
+      )
+    })
   })
 
   it('从候选人卡片进入对应档案页面', async () => {
