@@ -48,6 +48,7 @@ describe('candidate process board', () => {
       document_id: 'document-1',
       candidate_code: 'CAND-0001',
       original_filename: 'candidate.pdf',
+      phone: '13800138000',
       ai_group: 'passed',
       total_score: 88,
       current_decision: 'unprocessed',
@@ -137,6 +138,7 @@ describe('candidate process board', () => {
     expect(await screen.findByRole('heading', { name: '平台工程师' })).toBeInTheDocument()
     expect(screen.getByText('CAND-0001')).toBeInTheDocument()
     expect(screen.getByText('candidate.pdf')).toBeInTheDocument()
+    expect(screen.getByText('13800138000')).toBeInTheDocument()
     expect(screen.getByText('Python')).toBeInTheDocument()
     expect(screen.getByText('+2')).toHaveAttribute('title', 'React、Docker')
     expect(screen.queryByText('React')).not.toBeInTheDocument()
@@ -176,6 +178,7 @@ describe('candidate process board', () => {
       document_id: 'document-1',
       candidate_code: 'CAND-0001',
       original_filename: 'candidate.pdf',
+      phone: null,
       ai_group: 'passed',
       total_score: 88,
       current_decision: 'shortlisted',
@@ -214,6 +217,8 @@ describe('candidate process board', () => {
         <App />
       </QueryClientProvider>,
     )
+
+    expect(await screen.findByText('未识别电话')).toBeInTheDocument()
 
     fireEvent.click(await screen.findByRole('button', { name: /查看档案/ }))
     await waitFor(() => {

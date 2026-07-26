@@ -27,6 +27,8 @@ from app.models import (
     JobCriteriaVersion,
     RecruiterDecision,
     ResumeDocument,
+    ResumeRedaction,
+    ResumeTextSegment,
     ScreeningBatch,
     ScreeningResult,
     User,
@@ -98,6 +100,34 @@ def candidate_process_dependencies() -> Generator[CandidateProcessDependencies, 
         )
         db.add(document)
         db.flush()
+        document.text_segments = [
+            ResumeTextSegment(
+                segment_key="page-1",
+                source_type="pdf_page",
+                source_index=0,
+                page_number=1,
+                raw_text="2023.09-2027.06 电话：13800138000",
+                normalized_text="2023.09-2027.06 电话：13800138000",
+                redacted_text="[PHONE] 电话：[PHONE]",
+                sort_order=0,
+                redactions=[
+                    ResumeRedaction(
+                        entity_type="phone",
+                        original_text="2023.09-2027.06",
+                        replacement_text="[PHONE]",
+                        start_offset=0,
+                        end_offset=15,
+                    ),
+                    ResumeRedaction(
+                        entity_type="phone",
+                        original_text="13800138000",
+                        replacement_text="[PHONE]",
+                        start_offset=19,
+                        end_offset=30,
+                    )
+                ],
+            )
+        ]
         profile = CandidateProfile(
             document_id=document.id,
             version_number=1,
@@ -184,6 +214,7 @@ async def test_board_requires_authentication_and_lists_latest_candidate(
     body = response.json()
     assert len(body) == 1
     assert body[0]["document_id"] == str(dependency.document_id)
+    assert body[0]["phone"] == "13800138000"
     assert body[0]["current_stage"] == "unprocessed"
     assert body[0]["skills"] == ["Python"]
     assert body[0]["batch_name"] == "七月批次"

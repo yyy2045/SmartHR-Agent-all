@@ -1552,6 +1552,13 @@ input {
   margin-bottom: 8px;
 }
 
+.candidate-flow-phone {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
 .candidate-flow-skills {
   display: flex;
   flex-wrap: wrap;

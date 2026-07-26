@@ -523,6 +523,7 @@ export interface CandidateProcessCardRecord {
   document_id: string
   candidate_code: string
   original_filename: string
+  phone: string | null
   ai_group: AIGroup
   total_score: number
   current_decision: ManualDecision

@@ -6,6 +6,7 @@ import {
   FileDoneOutlined,
   HistoryOutlined,
   MoreOutlined,
+  PhoneOutlined,
   ReloadOutlined,
   SwapOutlined,
 } from '@ant-design/icons'
@@ -343,6 +344,12 @@ export function CandidateProcessPage() {
                     <Paragraph ellipsis={{ rows: 1 }} title={candidate.original_filename}>
                       {candidate.original_filename}
                     </Paragraph>
+                    <Text
+                      type={candidate.phone ? undefined : 'secondary'}
+                      className="candidate-flow-phone"
+                    >
+                      <PhoneOutlined /> {candidate.phone || '未识别电话'}
+                    </Text>
                     <Space wrap size={[4, 6]}>
                       <Tag color={aiGroupMeta[candidate.ai_group].color}>
                         {aiGroupMeta[candidate.ai_group].label}
