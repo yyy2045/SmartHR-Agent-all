@@ -66,7 +66,7 @@ describe('authentication flow', () => {
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'example-password' } })
     fireEvent.click(screen.getByRole('button', { name: /登\s*录/ }))
 
-    expect(await screen.findByRole('heading', { name: '职位筛选' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '岗位管理' })).toBeInTheDocument()
     expect(screen.getByText('招聘专员')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))

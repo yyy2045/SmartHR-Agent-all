@@ -1,17 +1,27 @@
 import {
+  CheckCircleOutlined,
   EditOutlined,
   FileSearchOutlined,
-  FolderOpenOutlined,
   InboxOutlined,
-  ProjectOutlined,
+  MoreOutlined,
   PlusOutlined,
-  SettingOutlined,
-  SolutionOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Card, Empty, Popconfirm, Skeleton, Space, Switch, Tag, Typography } from 'antd'
+import {
+  Alert,
+  Button,
+  Card,
+  Dropdown,
+  Empty,
+  Modal,
+  Skeleton,
+  Space,
+  Switch,
+  Tag,
+  Typography,
+} from 'antd'
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 
 import { ApiError, archiveJob, fetchJobs, type JobRecord } from '../api/client'
 
@@ -29,7 +39,9 @@ function formatDate(value: string) {
 
 export function JobListPage() {
   const navigate = useNavigate()
+  const { jobId: currentJobId } = useParams()
   const queryClient = useQueryClient()
+  const [modal, modalContextHolder] = Modal.useModal()
   const [includeArchived, setIncludeArchived] = useState(false)
   const jobs = useQuery({
     queryKey: ['jobs', { includeArchived }],
@@ -42,13 +54,31 @@ export function JobListPage() {
 
   function renderJob(job: JobRecord) {
     const archived = job.status === 'archived'
+    const current = job.id === currentJobId
+
+    function confirmArchive() {
+      modal.confirm({
+        title: '确认归档该职位？',
+        content: '归档后职位与历史标准仍可查看，但不能继续修改。',
+        okText: '确认归档',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: () => archiveMutation.mutateAsync(job.id),
+      })
+    }
+
     return (
-      <Card key={job.id} className="job-card">
+      <Card key={job.id} className={`job-card${current ? ' job-card--current' : ''}`}>
         <div className="job-card-heading">
           <div>
             <Space size="small" wrap>
               <Title level={4}>{job.title}</Title>
               <Tag color={archived ? 'default' : 'blue'}>{archived ? '已归档' : '进行中'}</Tag>
+              {current && (
+                <Tag color="processing" icon={<CheckCircleOutlined />}>
+                  当前岗位
+                </Tag>
+              )}
             </Space>
             <Text type="secondary">{job.department || '未填写部门'}</Text>
           </div>
@@ -61,69 +91,59 @@ export function JobListPage() {
           {job.original_jd}
         </Paragraph>
 
-        <Space wrap>
-          <Button
-            icon={<SolutionOutlined />}
-            onClick={() => navigate(`/jobs/${job.id}/interview-plan`)}
-          >
-            面试方案
-          </Button>
-          <Button
-            icon={<ProjectOutlined />}
-            onClick={() => navigate(`/jobs/${job.id}/pipeline`)}
-          >
-            流程看板
-          </Button>
-          <Button
-            icon={<FileSearchOutlined />}
-            onClick={() => navigate(`/jobs/${job.id}/results`)}
-          >
-            筛选结果
-          </Button>
-          <Button
-            icon={<FolderOpenOutlined />}
-            onClick={() => navigate(`/jobs/${job.id}/batches`)}
-          >
-            简历批次
-          </Button>
-          <Button
-            type="primary"
-            icon={<SettingOutlined />}
-            onClick={() => navigate(`/jobs/${job.id}/criteria`)}
-          >
-            {archived ? '查看标准' : '配置筛选标准'}
-          </Button>
-          <Button
-            icon={<EditOutlined />}
-            disabled={archived}
-            onClick={() => navigate(`/jobs/${job.id}/edit`)}
-          >
-            编辑职位
-          </Button>
-          {!archived && (
-            <Popconfirm
-              title="确认归档该职位？"
-              description="归档后职位与历史标准仍可查看，但不能继续修改。"
-              okText="确认归档"
-              cancelText="取消"
-              onConfirm={() => archiveMutation.mutate(job.id)}
-            >
-              <Button danger icon={<InboxOutlined />} loading={archiveMutation.isPending}>
-                归档
+        <div className="job-card-footer">
+          <Text type="secondary" className="job-card-context-hint">
+            {current ? '已选为当前岗位，可从左侧进入各业务模块' : '选择后可从左侧进入各业务模块'}
+          </Text>
+          <div className="job-card-actions">
+            {!current && (
+              <Button type="primary" onClick={() => navigate(`/jobs/${job.id}`)}>
+                设为当前岗位
               </Button>
-            </Popconfirm>
-          )}
-        </Space>
+            )}
+            <Button
+              icon={<EditOutlined />}
+              onClick={() => navigate(`/jobs/${job.id}/edit`)}
+            >
+              {archived ? '查看职位' : '编辑职位'}
+            </Button>
+            {!archived && (
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: [
+                    {
+                      key: 'archive',
+                      danger: true,
+                      icon: <InboxOutlined />,
+                      label: '归档职位',
+                    },
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === 'archive') confirmArchive()
+                  },
+                }}
+              >
+                <Button
+                  icon={<MoreOutlined />}
+                  aria-label={`更多操作 ${job.title}`}
+                  loading={archiveMutation.isPending}
+                />
+              </Dropdown>
+            )}
+          </div>
+        </div>
       </Card>
     )
   }
 
   return (
     <>
+      {modalContextHolder}
       <div className="page-heading">
         <div>
-          <Title level={2}>职位筛选</Title>
-          <Text type="secondary">创建职位并维护可版本化的筛选标准</Text>
+          <Title level={2}>岗位管理</Title>
+          <Text type="secondary">维护岗位信息并选择当前岗位工作区</Text>
         </div>
         <Space wrap>
           <Space size="small">

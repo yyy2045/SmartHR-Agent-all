@@ -68,6 +68,7 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
                 <Route path="/" element={<JobListPage />} />
+                <Route path="/jobs/:jobId" element={<JobListPage />} />
                 <Route path="/jobs/new" element={<JobFormPage />} />
                 <Route path="/jobs/:jobId/edit" element={<JobFormPage />} />
                 <Route path="/jobs/:jobId/criteria" element={<CriteriaPage />} />
