@@ -212,6 +212,7 @@ async def test_schedule_requires_confirmed_plan_and_all_rounds(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         await login(client)
+        empty = await client.get(path)
         draft_payload = schedule_payload(dependency)
         draft_payload["plan_version_id"] = str(dependency.draft_plan_id)
         draft = await client.post(path, json=draft_payload)
@@ -232,6 +233,8 @@ async def test_schedule_requires_confirmed_plan_and_all_rounds(
         repeated = await client.post(path, json=schedule_payload(dependency))
         fetched = await client.get(path)
 
+    assert empty.status_code == 200
+    assert empty.json() is None
     assert draft.status_code == 422
     assert draft.json()["detail"] == "只能使用已确认的面试方案版本"
     assert incomplete.status_code == 422

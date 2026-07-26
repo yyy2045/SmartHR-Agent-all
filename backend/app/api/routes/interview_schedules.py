@@ -125,20 +125,25 @@ def update_schedule_status(schedule: CandidateInterviewSchedule) -> None:
 
 @router.get(
     "/{job_id}/candidate-processes/{document_id}/interview-schedule",
-    response_model=InterviewScheduleResponse,
+    response_model=InterviewScheduleResponse | None,
 )
 def get_candidate_interview_schedule(
     job_id: uuid.UUID,
     document_id: uuid.UUID,
     current_user: CurrentUser,
     db: DbSession,
-) -> CandidateInterviewSchedule:
+) -> CandidateInterviewSchedule | None:
     get_owned_job(db, job_id, current_user.id)
-    return get_owned_schedule(
+    get_owned_document(
         db,
         job_id=job_id,
         document_id=document_id,
         owner_id=current_user.id,
+    )
+    return db.scalar(
+        select(CandidateInterviewSchedule)
+        .where(CandidateInterviewSchedule.document_id == document_id)
+        .options(*schedule_load_options())
     )
 
 
