@@ -565,6 +565,16 @@ input {
   transform: translateY(-2px);
 }
 
+.job-card--current {
+  border-color: #7bb4f8;
+  box-shadow: 0 8px 24px rgb(38 123 230 / 12%);
+}
+
+.job-card--current:hover {
+  border-color: #559cf1;
+  box-shadow: 0 12px 30px rgb(38 123 230 / 16%);
+}
+
 .job-card .ant-card-body {
   padding: 24px;
 }
@@ -600,6 +610,26 @@ input {
   margin: 20px 0 24px;
   color: #5d697b;
   line-height: 1.65;
+}
+
+.job-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #edf0f4;
+}
+
+.job-card-context-hint {
+  min-width: 0;
+  font-size: 12px;
+}
+
+.job-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
 /* 筛选标准 */
@@ -1779,6 +1809,19 @@ input {
 
   .job-updated-at {
     flex: auto;
+  }
+
+  .job-card-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .job-card-actions {
+    flex-wrap: wrap;
+  }
+
+  .job-card-actions > .ant-btn:first-child {
+    flex: 1;
   }
 
   .criteria-field-grid,

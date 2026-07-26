@@ -38,5 +38,5 @@ export function defaultPathForModule(module: BusinessModule, jobId: string): str
   if (module === 'screening') return `/jobs/${encodedJobId}/batches`
   if (module === 'candidate-process') return `/jobs/${encodedJobId}/pipeline`
   if (module === 'interviews') return `/jobs/${encodedJobId}/interview-plan`
-  return `/jobs/${encodedJobId}/edit`
+  return `/jobs/${encodedJobId}`
 }

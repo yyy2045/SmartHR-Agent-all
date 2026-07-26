@@ -135,7 +135,7 @@ describe('招聘业务导航', () => {
   })
 
   it('按当前业务模块生成岗位切换后的安全默认页', () => {
-    expect(defaultPathForModule('jobs', 'job-2')).toBe('/jobs/job-2/edit')
+    expect(defaultPathForModule('jobs', 'job-2')).toBe('/jobs/job-2')
     expect(defaultPathForModule('screening', 'job-2')).toBe('/jobs/job-2/batches')
     expect(defaultPathForModule('candidate-process', 'job-2')).toBe('/jobs/job-2/pipeline')
     expect(defaultPathForModule('interviews', 'job-2')).toBe('/jobs/job-2/interview-plan')
