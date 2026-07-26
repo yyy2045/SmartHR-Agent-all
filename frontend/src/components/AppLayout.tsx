@@ -1,28 +1,44 @@
 import {
-  ApiOutlined,
+  AppstoreOutlined,
   BarChartOutlined,
   BellOutlined,
+  CalendarOutlined,
+  DatabaseOutlined,
   FileSearchOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
-  SearchOutlined,
+  ProfileOutlined,
   SettingOutlined,
   SolutionOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Input, Layout, Space, Spin, Tag, Tooltip, Typography } from 'antd'
-import { useState } from 'react'
+import { Alert, Button, Layout, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { useState, type ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
-import { fetchLiveHealth } from '../api/client'
+import { fetchJob, fetchJobs, fetchLiveHealth } from '../api/client'
 import { useAuth } from '../auth/context'
+import {
+  businessModuleForPath,
+  defaultPathForModule,
+  jobIdFromPath,
+  type BusinessModule,
+} from './navigation'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
+
+interface NavigationItem {
+  key: BusinessModule
+  label: string
+  icon: ReactNode
+  path?: string
+  badge?: string
+}
 
 function pageMeta(pathname: string) {
   if (pathname === '/jobs/new') {
@@ -62,11 +78,57 @@ export function AppLayout() {
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const meta = pageMeta(location.pathname)
+  const activeModule = businessModuleForPath(location.pathname)
+  const jobId = jobIdFromPath(location.pathname)
+  const navigationItems: NavigationItem[] = [
+    {
+      key: 'workbench',
+      label: '工作台',
+      icon: <AppstoreOutlined />,
+      badge: '待开发',
+    },
+    { key: 'jobs', label: '岗位管理', icon: <ProfileOutlined />, path: '/' },
+    {
+      key: 'screening',
+      label: '智能筛选',
+      icon: <FileSearchOutlined />,
+      path: jobId ? `/jobs/${jobId}/batches` : undefined,
+      badge: jobId ? undefined : '先选岗位',
+    },
+    {
+      key: 'candidate-process',
+      label: '候选人流程',
+      icon: <TeamOutlined />,
+      path: jobId ? `/jobs/${jobId}/pipeline` : undefined,
+      badge: jobId ? undefined : '先选岗位',
+    },
+    {
+      key: 'interviews',
+      label: '面试管理',
+      icon: <CalendarOutlined />,
+      path: jobId ? `/jobs/${jobId}/interview-plan` : undefined,
+      badge: jobId ? undefined : '先选岗位',
+    },
+    { key: 'talent', label: '人才库', icon: <DatabaseOutlined />, badge: '待开发' },
+    { key: 'analytics', label: '数据分析', icon: <BarChartOutlined />, badge: '待开发' },
+  ]
   const health = useQuery({
     queryKey: ['health', 'live'],
     queryFn: fetchLiveHealth,
     staleTime: 30_000,
   })
+  const jobs = useQuery({
+    queryKey: ['jobs', { includeArchived: true }],
+    queryFn: () => fetchJobs(true),
+    staleTime: 30_000,
+  })
+  const currentJob = useQuery({
+    queryKey: ['job', jobId],
+    queryFn: () => fetchJob(jobId!),
+    enabled: Boolean(jobId),
+    staleTime: 30_000,
+  })
+  const selectedJob = currentJob.data ?? jobs.data?.find((job) => job.id === jobId)
 
   async function handleLogout() {
     setLogoutError(null)
@@ -76,6 +138,11 @@ export function AppLayout() {
     } catch {
       setLogoutError('退出失败，请稍后重试')
     }
+  }
+
+  function handleJobChange(nextJobId: string) {
+    navigate(defaultPathForModule(activeModule, nextJobId))
+    setMobileNavOpen(false)
   }
 
   return (
@@ -96,37 +163,37 @@ export function AppLayout() {
         </button>
 
         <nav className="sidebar-nav" aria-label="主导航">
-          <Text className="nav-caption">导航</Text>
-          <button
-            type="button"
-            className="nav-item is-active"
-            onClick={() => {
-              navigate('/')
-              setMobileNavOpen(false)
-            }}
-          >
-            <FileSearchOutlined />
-            <span>职位管理</span>
-          </button>
-          <button type="button" className="nav-item" disabled>
-            <ApiOutlined />
-            <span>AI 智能匹配</span>
-            <small>待开发</small>
-          </button>
-          <button type="button" className="nav-item" disabled>
-            <TeamOutlined />
-            <span>候选人库</span>
-          </button>
-          <button type="button" className="nav-item" disabled>
-            <BarChartOutlined />
-            <span>数据分析</span>
-          </button>
+          <Text className="nav-caption">业务模块</Text>
+          {navigationItems.map((item) => {
+            const active = activeModule === item.key
+            return (
+              <button
+                key={item.key}
+                type="button"
+                className={`nav-item${active ? ' is-active' : ''}`}
+                aria-label={item.label}
+                aria-current={active ? 'page' : undefined}
+                disabled={!item.path}
+                title={!item.path && item.badge === '先选岗位' ? '请先选择一个岗位' : undefined}
+                onClick={() => {
+                  if (!item.path) return
+                  navigate(item.path)
+                  setMobileNavOpen(false)
+                }}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+                {item.badge && <small>{item.badge}</small>}
+              </button>
+            )
+          })}
         </nav>
 
         <div className="sidebar-footer">
-          <button type="button" className="nav-item" disabled>
+          <button type="button" className="nav-item" aria-label="系统设置" disabled>
             <SettingOutlined />
             <span>系统设置</span>
+            <small>待开发</small>
           </button>
           <div className="sidebar-service-card" aria-label="服务状态">
             <span className="service-dot" />
@@ -153,14 +220,40 @@ export function AppLayout() {
             </div>
           </div>
 
-          <Space size="middle" className="header-actions">
-            <Input
-              className="header-search"
-              prefix={<SearchOutlined />}
-              placeholder="搜索职位、候选人…"
-              aria-label="搜索职位、候选人"
-              disabled
+          <div className="current-job-context" aria-label="当前岗位上下文">
+            <Text className="current-job-label">当前岗位</Text>
+            <Select
+              className="current-job-select"
+              aria-label="切换当前岗位"
+              showSearch
+              value={jobId ?? undefined}
+              placeholder={jobs.isPending ? '正在读取岗位…' : '选择一个岗位'}
+              loading={jobs.isPending}
+              status={jobs.isError ? 'error' : undefined}
+              optionFilterProp="label"
+              options={(jobs.data ?? []).map((job) => ({
+                value: job.id,
+                label: `${job.title}${job.status === 'archived' ? '（已归档）' : ''}`,
+              }))}
+              onChange={handleJobChange}
             />
+            <div className="current-job-meta" aria-live="polite">
+              {selectedJob ? (
+                <>
+                  <Text ellipsis>{selectedJob.department || '未填写部门'}</Text>
+                  <Tag color={selectedJob.status === 'active' ? 'success' : 'default'}>
+                    {selectedJob.status === 'active' ? '招聘中' : '已归档'}
+                  </Tag>
+                </>
+              ) : (
+                <Text type={jobs.isError ? 'danger' : 'secondary'}>
+                  {jobs.isError ? '岗位列表读取失败' : '选择后进入岗位业务'}
+                </Text>
+              )}
+            </div>
+          </div>
+
+          <Space size="middle" className="header-actions">
             <Button
               type="primary"
               icon={<PlusOutlined />}

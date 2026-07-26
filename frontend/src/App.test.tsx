@@ -40,7 +40,7 @@ describe('authentication flow', () => {
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (path === '/api/jobs') {
+      if (path.startsWith('/api/jobs')) {
         return new Response(JSON.stringify([]), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
