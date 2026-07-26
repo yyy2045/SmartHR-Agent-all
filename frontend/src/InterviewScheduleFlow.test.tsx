@@ -241,6 +241,7 @@ describe('candidate interview scheduling flow', () => {
       'plan-round-1',
       'plan-round-2',
     ])
+    expect(screen.getAllByRole('button', { name: /面试评价/ })).toHaveLength(2)
 
     fireEvent.click(screen.getAllByRole('button', { name: /改期/ })[0])
     fireEvent.change(screen.getByLabelText('改期原因'), {

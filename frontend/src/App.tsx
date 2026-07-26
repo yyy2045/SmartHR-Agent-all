@@ -48,6 +48,11 @@ const InterviewSchedulePage = lazy(() =>
     default: module.InterviewSchedulePage,
   })),
 )
+const InterviewEvaluationPage = lazy(() =>
+  import('./pages/InterviewEvaluationPage').then((module) => ({
+    default: module.InterviewEvaluationPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -74,6 +79,10 @@ function App() {
                 <Route
                   path="/jobs/:jobId/candidates/:documentId/interview-schedule"
                   element={<InterviewSchedulePage />}
+                />
+                <Route
+                  path="/jobs/:jobId/candidates/:documentId/interview-evaluations/:roundId"
+                  element={<InterviewEvaluationPage />}
                 />
                 <Route
                   path="/jobs/:jobId/batches/:batchId/documents/:documentId/history"

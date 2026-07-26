@@ -3,6 +3,7 @@ import {
   CalendarOutlined,
   CloseCircleOutlined,
   EnvironmentOutlined,
+  FileDoneOutlined,
   LinkOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
@@ -498,23 +499,37 @@ export function InterviewSchedulePage() {
                     description={round.last_change_reason}
                   />
                 )}
-                {!archived && round.status !== 'cancelled' && (
-                  <Space wrap className="interview-schedule-actions">
-                    <Button icon={<CalendarOutlined />} onClick={() => openReschedule(round)}>
-                      改期
-                    </Button>
-                    <Button
-                      danger
-                      icon={<CloseCircleOutlined />}
-                      onClick={() => {
-                        setCancellingRound(round)
-                        setCancelReason('')
-                      }}
-                    >
-                      取消本轮
-                    </Button>
-                  </Space>
-                )}
+                <Space wrap className="interview-schedule-actions">
+                  <Button
+                    type="primary"
+                    ghost
+                    icon={<FileDoneOutlined />}
+                    onClick={() =>
+                      navigate(
+                        `/jobs/${jobId}/candidates/${documentId}/interview-evaluations/${round.id}`,
+                      )
+                    }
+                  >
+                    {archived || round.status === 'cancelled' ? '查看评价' : '面试评价'}
+                  </Button>
+                  {!archived && round.status !== 'cancelled' && (
+                    <>
+                      <Button icon={<CalendarOutlined />} onClick={() => openReschedule(round)}>
+                        改期
+                      </Button>
+                      <Button
+                        danger
+                        icon={<CloseCircleOutlined />}
+                        onClick={() => {
+                          setCancellingRound(round)
+                          setCancelReason('')
+                        }}
+                      >
+                        取消本轮
+                      </Button>
+                    </>
+                  )}
+                </Space>
               </Card>
             ))}
           </div>

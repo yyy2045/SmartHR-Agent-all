@@ -18,7 +18,11 @@ export function businessModuleForPath(pathname: string): BusinessModule {
   ) {
     return 'candidate-process'
   }
-  if (pathname.endsWith('/interview-plan') || pathname.endsWith('/interview-schedule')) {
+  if (
+    pathname.endsWith('/interview-plan') ||
+    pathname.endsWith('/interview-schedule') ||
+    pathname.includes('/interview-evaluations/')
+  ) {
     return 'interviews'
   }
   return 'jobs'
