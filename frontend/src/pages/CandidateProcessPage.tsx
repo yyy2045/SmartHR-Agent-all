@@ -303,7 +303,10 @@ export function CandidateProcessPage() {
         <Empty description="当前条件下没有已完成 AI 初筛的候选人" />
       )}
       {candidates.isSuccess && candidates.data.length > 0 && (
-        <div className="candidate-board" aria-label="候选人流程看板">
+        <div
+          className={`candidate-board${visibleStages.length === 1 ? ' candidate-board--single-stage' : ''}`}
+          aria-label="候选人流程看板"
+        >
           {visibleStages.map((stageKey) => (
             <section className="candidate-board-column" key={stageKey}>
               <div className="candidate-board-column-heading">

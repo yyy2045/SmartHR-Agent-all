@@ -1451,15 +1451,17 @@ input {
 }
 
 .candidate-board {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: flex-start;
   gap: 16px;
-  padding-bottom: 16px;
-  overflow-x: auto;
+}
+
+.candidate-board--single-stage {
+  grid-template-columns: minmax(300px, 520px);
 }
 
 .candidate-board-column {
-  flex: 0 0 330px;
   min-width: 0;
   padding: 14px;
   background: #f4f7fb;
@@ -1551,6 +1553,14 @@ input {
 
   .result-filter-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .candidate-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .candidate-board--single-stage {
+    grid-template-columns: minmax(300px, 520px);
   }
 }
 
@@ -1769,8 +1779,9 @@ input {
     width: 100%;
   }
 
-  .candidate-board-column {
-    flex-basis: min(86vw, 330px);
+  .candidate-board,
+  .candidate-board--single-stage {
+    grid-template-columns: 1fr;
   }
 
   .candidate-flow-actions .ant-btn {
