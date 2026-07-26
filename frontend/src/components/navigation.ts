@@ -25,5 +25,14 @@ export function businessModuleForPath(pathname: string): BusinessModule {
 }
 
 export function jobIdFromPath(pathname: string): string | null {
-  return pathname.match(/^\/jobs\/([^/]+)/)?.[1] ?? null
+  const jobId = pathname.match(/^\/jobs\/([^/]+)/)?.[1]
+  return jobId && jobId !== 'new' ? jobId : null
+}
+
+export function defaultPathForModule(module: BusinessModule, jobId: string): string {
+  const encodedJobId = encodeURIComponent(jobId)
+  if (module === 'screening') return `/jobs/${encodedJobId}/batches`
+  if (module === 'candidate-process') return `/jobs/${encodedJobId}/pipeline`
+  if (module === 'interviews') return `/jobs/${encodedJobId}/interview-plan`
+  return `/jobs/${encodedJobId}/edit`
 }

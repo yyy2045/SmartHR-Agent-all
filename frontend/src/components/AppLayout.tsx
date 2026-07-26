@@ -10,21 +10,21 @@ import {
   MenuUnfoldOutlined,
   PlusOutlined,
   ProfileOutlined,
-  SearchOutlined,
   SettingOutlined,
   SolutionOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Input, Layout, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Layout, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import { useState, type ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
-import { fetchLiveHealth } from '../api/client'
+import { fetchJob, fetchJobs, fetchLiveHealth } from '../api/client'
 import { useAuth } from '../auth/context'
 import {
   businessModuleForPath,
+  defaultPathForModule,
   jobIdFromPath,
   type BusinessModule,
 } from './navigation'
@@ -117,6 +117,18 @@ export function AppLayout() {
     queryFn: fetchLiveHealth,
     staleTime: 30_000,
   })
+  const jobs = useQuery({
+    queryKey: ['jobs', { includeArchived: true }],
+    queryFn: () => fetchJobs(true),
+    staleTime: 30_000,
+  })
+  const currentJob = useQuery({
+    queryKey: ['job', jobId],
+    queryFn: () => fetchJob(jobId!),
+    enabled: Boolean(jobId),
+    staleTime: 30_000,
+  })
+  const selectedJob = currentJob.data ?? jobs.data?.find((job) => job.id === jobId)
 
   async function handleLogout() {
     setLogoutError(null)
@@ -126,6 +138,11 @@ export function AppLayout() {
     } catch {
       setLogoutError('退出失败，请稍后重试')
     }
+  }
+
+  function handleJobChange(nextJobId: string) {
+    navigate(defaultPathForModule(activeModule, nextJobId))
+    setMobileNavOpen(false)
   }
 
   return (
@@ -203,14 +220,40 @@ export function AppLayout() {
             </div>
           </div>
 
-          <Space size="middle" className="header-actions">
-            <Input
-              className="header-search"
-              prefix={<SearchOutlined />}
-              placeholder="搜索职位、候选人…"
-              aria-label="搜索职位、候选人"
-              disabled
+          <div className="current-job-context" aria-label="当前岗位上下文">
+            <Text className="current-job-label">当前岗位</Text>
+            <Select
+              className="current-job-select"
+              aria-label="切换当前岗位"
+              showSearch
+              value={jobId ?? undefined}
+              placeholder={jobs.isPending ? '正在读取岗位…' : '选择一个岗位'}
+              loading={jobs.isPending}
+              status={jobs.isError ? 'error' : undefined}
+              optionFilterProp="label"
+              options={(jobs.data ?? []).map((job) => ({
+                value: job.id,
+                label: `${job.title}${job.status === 'archived' ? '（已归档）' : ''}`,
+              }))}
+              onChange={handleJobChange}
             />
+            <div className="current-job-meta" aria-live="polite">
+              {selectedJob ? (
+                <>
+                  <Text ellipsis>{selectedJob.department || '未填写部门'}</Text>
+                  <Tag color={selectedJob.status === 'active' ? 'success' : 'default'}>
+                    {selectedJob.status === 'active' ? '招聘中' : '已归档'}
+                  </Tag>
+                </>
+              ) : (
+                <Text type={jobs.isError ? 'danger' : 'secondary'}>
+                  {jobs.isError ? '岗位列表读取失败' : '选择后进入岗位业务'}
+                </Text>
+              )}
+            </div>
+          </div>
+
+          <Space size="middle" className="header-actions">
             <Button
               type="primary"
               icon={<PlusOutlined />}
