@@ -700,6 +700,68 @@ input {
   width: 180px;
 }
 
+/* 面试方案 */
+.interview-round-grid {
+  display: grid;
+  grid-template-columns: 2fr 1.4fr 1fr 1fr;
+  gap: 12px;
+}
+
+.interview-round-grid .ant-input-number {
+  width: 100%;
+}
+
+.interview-subsection {
+  margin-top: 16px;
+  border-color: #e7ebf1;
+  border-radius: 10px;
+}
+
+.interview-anchor-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.interview-anchor-grid .ant-form-item {
+  margin-bottom: 0;
+}
+
+.interview-dimension-view.ant-list-item {
+  display: block;
+  width: 100%;
+}
+
+.interview-dimension-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 20px;
+  align-items: start;
+  width: 100%;
+}
+
+.interview-dimension-summary .ant-progress {
+  width: 180px;
+}
+
+.interview-anchor-view {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.interview-anchor-view > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #e7ebf1;
+  border-radius: 8px;
+}
+
 /* 简历批次 */
 .upload-panel,
 .batch-card {
@@ -1477,6 +1539,12 @@ input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .interview-round-grid,
+  .interview-anchor-grid,
+  .interview-anchor-view {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .upload-panel-layout {
     grid-template-columns: 260px minmax(0, 1fr);
   }
@@ -1604,8 +1672,16 @@ input {
   }
 
   .criteria-field-grid,
-  .criteria-dimension-grid {
+  .criteria-dimension-grid,
+  .interview-round-grid,
+  .interview-anchor-grid,
+  .interview-anchor-view,
+  .interview-dimension-summary {
     grid-template-columns: 1fr;
+  }
+
+  .interview-dimension-summary .ant-progress {
+    width: 100%;
   }
 
   .section-heading,

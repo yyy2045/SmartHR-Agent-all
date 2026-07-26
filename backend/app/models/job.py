@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.interview import InterviewPlanVersion
     from app.models.resume import ScreeningBatch, ScreeningResult
 
 
@@ -62,6 +63,11 @@ class Job(Base):
         back_populates="job",
         cascade="all, delete-orphan",
         order_by="ScreeningBatch.created_at",
+    )
+    interview_plan_versions: Mapped[list[InterviewPlanVersion]] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="InterviewPlanVersion.version_number",
     )
 
 

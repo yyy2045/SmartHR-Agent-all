@@ -1,5 +1,12 @@
 from app.models.audit import AuditLog
 from app.models.candidate_process import CandidateProcess, CandidateProcessEvent
+from app.models.interview import (
+    InterviewPlanVersion,
+    InterviewQuestion,
+    InterviewRound,
+    InterviewScoreAnchor,
+    InterviewScoreDimension,
+)
 from app.models.job import HardRequirement, Job, JobCriteriaVersion, ScoringDimension
 from app.models.knowledge import ResumeEmbeddingChunk
 from app.models.resume import (
@@ -23,6 +30,11 @@ __all__ = [
     "DimensionScore",
     "EvidenceCitation",
     "HardRequirement",
+    "InterviewPlanVersion",
+    "InterviewQuestion",
+    "InterviewRound",
+    "InterviewScoreAnchor",
+    "InterviewScoreDimension",
     "Job",
     "JobCriteriaVersion",
     "RecruiterDecision",

@@ -15,6 +15,8 @@ export interface LoginCredentials {
 
 export type JobStatus = 'active' | 'archived'
 export type CriteriaStatus = 'draft' | 'confirmed'
+export type InterviewPlanStatus = 'draft' | 'confirmed'
+export type InterviewRoundType = 'phone' | 'technical' | 'business' | 'hr' | 'final' | 'other'
 export type HardRequirementType =
   | 'min_experience_years'
   | 'min_education'
@@ -88,6 +90,72 @@ export interface JDAIDraft extends CriteriaDraftInput {
 
 export interface JobDetail extends JobRecord {
   criteria_versions: CriteriaVersion[]
+}
+
+export interface InterviewScoreAnchorInput {
+  score_value: number
+  description: string
+}
+
+export interface InterviewScoreAnchor extends InterviewScoreAnchorInput {
+  id: string
+}
+
+export interface InterviewScoreDimensionInput {
+  name: string
+  description: string
+  weight_percent: number
+  sort_order: number
+  anchors: InterviewScoreAnchorInput[]
+}
+
+export interface InterviewScoreDimension extends InterviewScoreDimensionInput {
+  id: string
+  anchors: InterviewScoreAnchor[]
+}
+
+export interface InterviewQuestionInput {
+  question_text: string
+  evaluation_guide: string
+  sort_order: number
+}
+
+export interface InterviewQuestion extends InterviewQuestionInput {
+  id: string
+}
+
+export interface InterviewRoundInput {
+  name: string
+  round_type: InterviewRoundType
+  duration_minutes: number
+  pass_threshold: number
+  focus: string
+  sort_order: number
+  questions: InterviewQuestionInput[]
+  scoring_dimensions: InterviewScoreDimensionInput[]
+}
+
+export interface InterviewRound extends InterviewRoundInput {
+  id: string
+  questions: InterviewQuestion[]
+  scoring_dimensions: InterviewScoreDimension[]
+}
+
+export interface InterviewPlanDraftInput {
+  rounds: InterviewRoundInput[]
+}
+
+export interface InterviewPlanVersion {
+  id: string
+  job_id: string
+  version_number: number
+  status: InterviewPlanStatus
+  source_version_id: string | null
+  confirmed_by_id: string | null
+  confirmed_at: string | null
+  created_at: string
+  updated_at: string
+  rounds: InterviewRound[]
 }
 
 export type BatchStatus =
@@ -570,6 +638,51 @@ export function generateJDAIDraft(jobId: string): Promise<JDAIDraft> {
     `/api/jobs/${jobId}/criteria/ai-draft`,
     { method: 'POST' },
     'AI 生成筛选草稿失败',
+  )
+}
+
+export function fetchInterviewPlanVersions(jobId: string): Promise<InterviewPlanVersion[]> {
+  return apiRequest(
+    `/api/jobs/${jobId}/interview-plans/versions`,
+    {},
+    '无法读取面试方案版本',
+  )
+}
+
+export function createInterviewPlanVersion(
+  jobId: string,
+  sourceVersionId?: string,
+): Promise<InterviewPlanVersion> {
+  return apiRequest(
+    `/api/jobs/${jobId}/interview-plans/versions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ source_version_id: sourceVersionId ?? null }),
+    },
+    '创建面试方案版本失败',
+  )
+}
+
+export function updateInterviewPlanDraft(
+  jobId: string,
+  versionId: string,
+  payload: InterviewPlanDraftInput,
+): Promise<InterviewPlanVersion> {
+  return apiRequest(
+    `/api/jobs/${jobId}/interview-plans/versions/${versionId}`,
+    { method: 'PUT', body: JSON.stringify(payload) },
+    '保存面试方案失败',
+  )
+}
+
+export function confirmInterviewPlanVersion(
+  jobId: string,
+  versionId: string,
+): Promise<InterviewPlanVersion> {
+  return apiRequest(
+    `/api/jobs/${jobId}/interview-plans/versions/${versionId}/confirm`,
+    { method: 'POST' },
+    '确认面试方案失败',
   )
 }
 
