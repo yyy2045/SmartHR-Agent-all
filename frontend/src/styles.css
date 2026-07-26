@@ -300,7 +300,8 @@ input {
   background: rgb(255 255 255 / 5%);
 }
 
-.nav-item.is-active {
+.nav-item.is-active,
+.nav-item.is-active:hover:not(:disabled) {
   color: #ffffff;
   background: linear-gradient(90deg, #277de9, #3c91ef);
   box-shadow: 0 8px 22px rgb(29 105 209 / 25%);
