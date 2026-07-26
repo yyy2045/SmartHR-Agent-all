@@ -44,6 +44,7 @@ class CandidateProcessCardResponse(BaseModel):
     document_id: uuid.UUID
     candidate_code: str
     original_filename: str
+    phone: str | None
     ai_group: Literal["passed", "low_match", "auto_rejected"]
     total_score: float
     current_decision: Literal["unprocessed", "shortlisted", "pending", "rejected"]

@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -17,6 +18,8 @@ from app.models import (
     Job,
     RecruiterDecision,
     ResumeDocument,
+    ResumeRedaction,
+    ResumeTextSegment,
     ScreeningBatch,
     ScreeningResult,
 )
@@ -189,6 +192,45 @@ def _profile_skills(result: ScreeningResult) -> list[str]:
     return skills
 
 
+def _phones_by_document(
+    db: Session,
+    document_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, str]:
+    if not document_ids:
+        return {}
+    rows = db.execute(
+        select(ResumeTextSegment.document_id, ResumeRedaction.original_text)
+        .join(ResumeRedaction, ResumeRedaction.segment_id == ResumeTextSegment.id)
+        .where(
+            ResumeTextSegment.document_id.in_(document_ids),
+            ResumeRedaction.entity_type == "phone",
+        )
+        .order_by(
+            ResumeTextSegment.document_id,
+            ResumeTextSegment.sort_order,
+            ResumeRedaction.start_offset,
+        )
+    )
+    phones: dict[uuid.UUID, str] = {}
+    for document_id, original_text in rows:
+        phone = _valid_display_phone(original_text)
+        if phone is not None:
+            phones.setdefault(document_id, phone)
+    return phones
+
+
+def _valid_display_phone(value: str) -> str | None:
+    phone = value.strip()
+    compact = re.sub(r"\D", "", phone)
+    if re.fullmatch(r"1[3-9]\d{9}", compact):
+        return phone
+    if phone.startswith("+") and 8 <= len(compact) <= 15:
+        return phone
+    if re.fullmatch(r"0\d{2,3}[- ]?\d{7,8}", phone):
+        return phone
+    return None
+
+
 def _latest_results_by_document(
     results: list[ScreeningResult],
 ) -> list[tuple[ScreeningResult, list[ScreeningResult]]]:
@@ -292,9 +334,14 @@ def list_candidate_processes(
         .unique()
         .all()
     )
+    latest_results = _latest_results_by_document(results)
+    phones_by_document = _phones_by_document(
+        db,
+        [result.document_id for result, _ in latest_results],
+    )
     cards: list[CandidateProcessCardResponse] = []
     normalized_query = query.strip().lower() if query else None
-    for result, document_results in _latest_results_by_document(results):
+    for result, document_results in latest_results:
         if result.ai_group is None or result.total_score is None:
             continue
         process = result.document.candidate_process
@@ -331,6 +378,7 @@ def list_candidate_processes(
                 document_id=result.document_id,
                 candidate_code=result.document.candidate_code,
                 original_filename=result.document.original_filename,
+                phone=phones_by_document.get(result.document_id),
                 ai_group=result.ai_group,
                 total_score=score,
                 current_decision=_manual_decision(document_results, process),

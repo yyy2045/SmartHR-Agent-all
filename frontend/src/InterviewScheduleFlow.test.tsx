@@ -48,6 +48,7 @@ const candidate: CandidateProcessCardRecord = {
   document_id: 'document-1',
   candidate_code: 'CAND-0001',
   original_filename: 'candidate.pdf',
+  phone: null,
   ai_group: 'passed',
   total_score: 88,
   current_decision: 'shortlisted',
