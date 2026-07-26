@@ -1494,8 +1494,16 @@ input {
   font-size: 14px;
 }
 
+.candidate-flow-card .ant-card-head {
+  padding-inline: 14px;
+}
+
+.candidate-flow-card .ant-card-body {
+  padding: 14px;
+}
+
 .candidate-flow-card .ant-card-body > .ant-typography {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .candidate-flow-skills {
@@ -1503,7 +1511,7 @@ input {
   flex-wrap: wrap;
   gap: 4px;
   min-height: 28px;
-  margin: 12px 0;
+  margin: 10px 0;
 }
 
 .candidate-flow-skills .ant-tag {
@@ -1517,10 +1525,24 @@ input {
 }
 
 .candidate-flow-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 12px;
+}
+
+.candidate-flow-actions > .ant-btn {
+  width: 100%;
+}
+
+.candidate-flow-actions-secondary {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 8px;
+}
+
+.candidate-flow-actions-secondary > .ant-btn:first-child {
+  flex: 1;
 }
 
 .candidate-stage-form,
@@ -1784,9 +1806,6 @@ input {
     grid-template-columns: 1fr;
   }
 
-  .candidate-flow-actions .ant-btn {
-    flex: 1 1 auto;
-  }
 }
 
 .interview-schedule-create-card,

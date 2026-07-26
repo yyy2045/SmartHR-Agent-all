@@ -53,7 +53,7 @@ describe('candidate process board', () => {
       current_decision: 'unprocessed',
       current_stage: 'unprocessed',
       stage_entered_at: timestamp,
-      skills: ['Python', 'FastAPI'],
+      skills: ['Python', 'FastAPI', 'PostgreSQL', 'React', 'Docker'],
       analysis_created_at: timestamp,
     }
     let timeline: CandidateProcessTimelineEventRecord[] = []
@@ -127,6 +127,8 @@ describe('candidate process board', () => {
     expect(screen.getByText('CAND-0001')).toBeInTheDocument()
     expect(screen.getByText('candidate.pdf')).toBeInTheDocument()
     expect(screen.getByText('Python')).toBeInTheDocument()
+    expect(screen.getByText('+2')).toHaveAttribute('title', 'React、Docker')
+    expect(screen.queryByText('React')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /调整阶段/ }))
     fireEvent.click(screen.getByRole('button', { name: '确认调整' }))
 
@@ -140,7 +142,8 @@ describe('candidate process board', () => {
       expect(screen.getByText('需要补充信息或进一步确认')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('button', { name: /时间线/ }))
+    fireEvent.click(screen.getByRole('button', { name: '更多操作 CAND-0001' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /查看时间线/ }))
     expect(await screen.findByText('待人工处理 → 待定')).toBeInTheDocument()
     expect(screen.getAllByText(/招聘专员/).length).toBeGreaterThan(0)
   })
