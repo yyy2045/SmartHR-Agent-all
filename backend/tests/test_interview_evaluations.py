@@ -27,8 +27,10 @@ from app.models import (
     Job,
     JobCriteriaVersion,
     ResumeDocument,
+    Role,
     ScreeningBatch,
     User,
+    UserRole,
 )
 from app.redis_client import get_session_store
 from app.services.security import hash_password
@@ -64,20 +66,33 @@ def evaluation_dependencies() -> Generator[EvaluationDependencies, None, None]:
     Base.metadata.create_all(engine)
 
     with testing_session() as db:
+        roles = {
+            "recruiter": Role(key="recruiter", display_name="招聘专员"),
+            "hiring_manager": Role(key="hiring_manager", display_name="用人经理"),
+        }
         recruiter = User(
             username="recruiter",
             password_hash=hash_password("correct-password"),
             display_name="测试招聘专员",
+            role_assignments=[UserRole(role=roles["recruiter"])],
         )
         other_recruiter = User(
             username="other-recruiter",
             password_hash=hash_password("correct-password"),
             display_name="其他招聘专员",
+            role_assignments=[UserRole(role=roles["recruiter"])],
         )
-        db.add_all([recruiter, other_recruiter])
+        manager = User(
+            username="manager",
+            password_hash=hash_password("correct-password"),
+            display_name="用人经理",
+            role_assignments=[UserRole(role=roles["hiring_manager"])],
+        )
+        db.add_all([*roles.values(), recruiter, other_recruiter, manager])
         db.flush()
         job = Job(
             owner_id=recruiter.id,
+            hiring_manager_id=manager.id,
             title="高级后端工程师",
             department="研发中心",
             original_jd="负责核心服务设计与开发。",
@@ -276,6 +291,24 @@ def complete_payload(dependency: EvaluationDependencies) -> dict[str, object]:
             },
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_hiring_manager_can_read_but_cannot_write_evaluation(
+    evaluation_dependencies: EvaluationDependencies,
+) -> None:
+    dependency = evaluation_dependencies
+    path = evaluation_path(dependency)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "manager")
+        readable = await client.get(path)
+        write_denied = await client.put(path, json=complete_payload(dependency))
+        submit_denied = await client.post(f"{path}/submit")
+
+    assert readable.status_code == 200
+    assert write_denied.status_code == 403
+    assert submit_denied.status_code == 403
 
 
 @pytest.mark.asyncio

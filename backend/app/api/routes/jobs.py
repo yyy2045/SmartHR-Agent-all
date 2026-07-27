@@ -43,31 +43,6 @@ DbSession = Annotated[Session, Depends(get_db)]
 AIClient = Annotated[OpenAICompatibleClient, Depends(get_ai_client)]
 
 
-def get_owned_job(db: Session, job_id: uuid.UUID, owner_id: uuid.UUID) -> Job:
-    job = db.scalar(select(Job).where(Job.id == job_id, Job.owner_id == owner_id))
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="职位不存在")
-    return job
-
-
-def get_job_detail(db: Session, job_id: uuid.UUID, owner_id: uuid.UUID) -> Job:
-    job = db.scalar(
-        select(Job)
-        .where(Job.id == job_id, Job.owner_id == owner_id)
-        .options(
-            selectinload(Job.criteria_versions).selectinload(
-                JobCriteriaVersion.hard_requirements
-            ),
-            selectinload(Job.criteria_versions).selectinload(
-                JobCriteriaVersion.scoring_dimensions
-            ),
-        )
-    )
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="职位不存在")
-    return job
-
-
 def get_visible_job_detail(db: Session, job_id: uuid.UUID, user: User) -> Job:
     job = db.scalar(
         select(Job)
@@ -84,30 +59,6 @@ def get_visible_job_detail(db: Session, job_id: uuid.UUID, user: User) -> Job:
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="职位不存在")
     return job
-
-
-def get_owned_version(
-    db: Session,
-    job_id: uuid.UUID,
-    version_id: uuid.UUID,
-    owner_id: uuid.UUID,
-) -> JobCriteriaVersion:
-    version = db.scalar(
-        select(JobCriteriaVersion)
-        .join(Job)
-        .where(
-            JobCriteriaVersion.id == version_id,
-            JobCriteriaVersion.job_id == job_id,
-            Job.owner_id == owner_id,
-        )
-        .options(
-            selectinload(JobCriteriaVersion.hard_requirements),
-            selectinload(JobCriteriaVersion.scoring_dimensions),
-        )
-    )
-    if version is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="筛选标准版本不存在")
-    return version
 
 
 def get_visible_version(

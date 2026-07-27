@@ -18,6 +18,7 @@ from app.models import (
     ResumeTextSegment,
     ScreeningBatch,
     ScreeningResult,
+    User,
 )
 from app.schemas.screening import (
     BatchReanalysisRequest,
@@ -31,6 +32,7 @@ from app.schemas.screening import (
     ScreeningResultResponse,
 )
 from app.services.audit import record_audit
+from app.services.authorization import ensure_job_writable, get_visible_job
 from app.services.model_payload import (
     ModelPayloadSecurityError,
     validate_candidate_profile_payload,
@@ -48,17 +50,16 @@ def _owned_document(
     job_id: uuid.UUID,
     batch_id: uuid.UUID,
     document_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
 ) -> ResumeDocument:
+    get_visible_job(db, job_id, user)
     document = db.scalar(
         select(ResumeDocument)
         .join(ScreeningBatch)
-        .join(Job)
         .where(
             ResumeDocument.id == document_id,
             ResumeDocument.batch_id == batch_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(
             selectinload(ResumeDocument.batch),
@@ -78,15 +79,14 @@ def _owned_batch(
     *,
     job_id: uuid.UUID,
     batch_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
 ) -> ScreeningBatch:
+    get_visible_job(db, job_id, user)
     batch = db.scalar(
         select(ScreeningBatch)
-        .join(Job)
         .where(
             ScreeningBatch.id == batch_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(
             selectinload(ScreeningBatch.documents).selectinload(
@@ -103,11 +103,10 @@ def _ensure_active_job(
     db: Session,
     *,
     job_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
 ) -> Job:
-    job = db.scalar(select(Job).where(Job.id == job_id, Job.owner_id == owner_id))
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="职位不存在")
+    job = get_visible_job(db, job_id, user)
+    ensure_job_writable(job, user)
     if job.status == "archived":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="已归档职位不能重跑分析")
     return job
@@ -118,15 +117,14 @@ def _confirmed_criteria(
     *,
     job_id: uuid.UUID,
     criteria_version_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
 ) -> JobCriteriaVersion:
+    get_visible_job(db, job_id, user)
     criteria = db.scalar(
         select(JobCriteriaVersion)
-        .join(Job)
         .where(
             JobCriteriaVersion.id == criteria_version_id,
             JobCriteriaVersion.job_id == job_id,
-            Job.owner_id == owner_id,
         )
     )
     if criteria is None:
@@ -254,7 +252,7 @@ def list_candidate_profiles(
         job_id=job_id,
         batch_id=batch_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     return list(
         db.scalars(
@@ -281,7 +279,7 @@ def list_candidate_analysis_history(
         job_id=job_id,
         batch_id=batch_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     results = list(
         db.scalars(
@@ -309,13 +307,13 @@ def correct_candidate_profile(
     current_user: CurrentUser,
     db: DbSession,
 ) -> CandidateProfileCorrectionResponse:
-    _ensure_active_job(db, job_id=job_id, owner_id=current_user.id)
+    _ensure_active_job(db, job_id=job_id, user=current_user)
     document = _owned_document(
         db,
         job_id=job_id,
         batch_id=batch_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     if document.status != "completed" or document.redacted_at is None:
         raise HTTPException(
@@ -326,7 +324,7 @@ def correct_candidate_profile(
         db,
         job_id=job_id,
         criteria_version_id=payload.criteria_version_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     source = db.get(CandidateProfile, payload.source_profile_id)
     latest = _latest_profile(db, document.id)
@@ -421,13 +419,13 @@ def reanalyze_candidate(
     current_user: CurrentUser,
     db: DbSession,
 ) -> ReanalysisTaskResponse:
-    _ensure_active_job(db, job_id=job_id, owner_id=current_user.id)
+    _ensure_active_job(db, job_id=job_id, user=current_user)
     document = _owned_document(
         db,
         job_id=job_id,
         batch_id=batch_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     if document.status != "completed" or document.redacted_at is None:
         raise HTTPException(
@@ -438,7 +436,7 @@ def reanalyze_candidate(
         db,
         job_id=job_id,
         criteria_version_id=payload.criteria_version_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     profile = (
         db.get(CandidateProfile, payload.candidate_profile_id)
@@ -495,18 +493,18 @@ def reanalyze_batch(
     current_user: CurrentUser,
     db: DbSession,
 ) -> BatchReanalysisResponse:
-    _ensure_active_job(db, job_id=job_id, owner_id=current_user.id)
+    _ensure_active_job(db, job_id=job_id, user=current_user)
     batch = _owned_batch(
         db,
         job_id=job_id,
         batch_id=batch_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     criteria = _confirmed_criteria(
         db,
         job_id=job_id,
         criteria_version_id=payload.criteria_version_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     ready_documents = [
         document

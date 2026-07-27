@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
-from app.api.routes.jobs import ensure_job_active, get_owned_job
+from app.api.routes.jobs import ensure_job_active
 from app.database import get_db
 from app.models import (
     CandidateInterviewRound,
@@ -18,15 +18,16 @@ from app.models import (
     InterviewQuestionResponse,
     InterviewRound,
     InterviewScoreDimension,
-    Job,
     ResumeDocument,
     ScreeningBatch,
+    User,
 )
 from app.schemas.interview_evaluation import (
     InterviewEvaluationContextResponse,
     InterviewEvaluationDraftUpdate,
 )
 from app.services.audit import record_audit
+from app.services.authorization import ensure_job_writable, get_visible_job
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -58,9 +59,12 @@ def get_owned_candidate_round(
     job_id: uuid.UUID,
     document_id: uuid.UUID,
     round_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
     for_update: bool = False,
 ) -> CandidateInterviewRound:
+    job = get_visible_job(db, job_id, user)
+    if for_update:
+        ensure_job_writable(job, user)
     statement = (
         select(CandidateInterviewRound)
         .join(
@@ -69,12 +73,10 @@ def get_owned_candidate_round(
         )
         .join(ResumeDocument, CandidateInterviewSchedule.document_id == ResumeDocument.id)
         .join(ScreeningBatch, ResumeDocument.batch_id == ScreeningBatch.id)
-        .join(Job, ScreeningBatch.job_id == Job.id)
         .where(
             CandidateInterviewRound.id == round_id,
             CandidateInterviewSchedule.document_id == document_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(*evaluation_load_options())
     )
@@ -220,13 +222,13 @@ def get_interview_evaluation(
     current_user: CurrentUser,
     db: DbSession,
 ) -> InterviewEvaluationContextResponse:
-    get_owned_job(db, job_id, current_user.id)
+    get_visible_job(db, job_id, current_user)
     round_item = get_owned_candidate_round(
         db,
         job_id=job_id,
         document_id=document_id,
         round_id=round_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     return serialize_context(round_item)
 
@@ -244,14 +246,15 @@ def save_interview_evaluation_draft(
     current_user: CurrentUser,
     db: DbSession,
 ) -> InterviewEvaluationContextResponse:
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     ensure_job_active(job)
     round_item = get_owned_candidate_round(
         db,
         job_id=job_id,
         document_id=document_id,
         round_id=round_id,
-        owner_id=current_user.id,
+        user=current_user,
         for_update=True,
     )
     if round_item.status == "cancelled":
@@ -291,7 +294,7 @@ def save_interview_evaluation_draft(
         job_id=job_id,
         document_id=document_id,
         round_id=round_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     return serialize_context(refreshed)
 
@@ -308,14 +311,15 @@ def submit_interview_evaluation(
     current_user: CurrentUser,
     db: DbSession,
 ) -> InterviewEvaluationContextResponse:
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     ensure_job_active(job)
     round_item = get_owned_candidate_round(
         db,
         job_id=job_id,
         document_id=document_id,
         round_id=round_id,
-        owner_id=current_user.id,
+        user=current_user,
         for_update=True,
     )
     if round_item.status == "cancelled":
@@ -359,6 +363,6 @@ def submit_interview_evaluation(
         job_id=job_id,
         document_id=document_id,
         round_id=round_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     return serialize_context(refreshed)

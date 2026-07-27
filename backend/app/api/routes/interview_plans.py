@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
-from app.api.routes.jobs import ensure_job_active, get_owned_job
+from app.api.routes.jobs import ensure_job_active
 from app.database import get_db
 from app.models import (
     InterviewPlanVersion,
@@ -15,7 +15,7 @@ from app.models import (
     InterviewRound,
     InterviewScoreAnchor,
     InterviewScoreDimension,
-    Job,
+    User,
 )
 from app.schemas.interview_plan import (
     InterviewPlanDraftUpdate,
@@ -23,6 +23,7 @@ from app.schemas.interview_plan import (
     InterviewPlanVersionResponse,
 )
 from app.services.audit import record_audit
+from app.services.authorization import ensure_job_writable, get_visible_job
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -41,15 +42,14 @@ def get_owned_plan_version(
     db: Session,
     job_id: uuid.UUID,
     version_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
 ) -> InterviewPlanVersion:
+    get_visible_job(db, job_id, user)
     version = db.scalar(
         select(InterviewPlanVersion)
-        .join(Job)
         .where(
             InterviewPlanVersion.id == version_id,
             InterviewPlanVersion.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(*plan_load_options())
     )
@@ -149,7 +149,7 @@ def list_interview_plan_versions(
     current_user: CurrentUser,
     db: DbSession,
 ) -> list[InterviewPlanVersion]:
-    get_owned_job(db, job_id, current_user.id)
+    get_visible_job(db, job_id, current_user)
     return list(
         db.scalars(
             select(InterviewPlanVersion)
@@ -171,7 +171,8 @@ def create_interview_plan_version(
     current_user: CurrentUser,
     db: DbSession,
 ) -> InterviewPlanVersion:
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     ensure_job_active(job)
     source = None
     if payload.source_version_id is not None:
@@ -179,7 +180,7 @@ def create_interview_plan_version(
             db,
             job_id,
             payload.source_version_id,
-            current_user.id,
+            current_user,
         )
         if source.status != "confirmed":
             raise HTTPException(
@@ -214,7 +215,7 @@ def create_interview_plan_version(
         },
     )
     db.commit()
-    return get_owned_plan_version(db, job_id, version.id, current_user.id)
+    return get_owned_plan_version(db, job_id, version.id, current_user)
 
 
 @router.get(
@@ -227,7 +228,7 @@ def get_interview_plan_version(
     current_user: CurrentUser,
     db: DbSession,
 ) -> InterviewPlanVersion:
-    return get_owned_plan_version(db, job_id, version_id, current_user.id)
+    return get_owned_plan_version(db, job_id, version_id, current_user)
 
 
 @router.put(
@@ -241,9 +242,10 @@ def update_interview_plan_draft(
     current_user: CurrentUser,
     db: DbSession,
 ) -> InterviewPlanVersion:
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     ensure_job_active(job)
-    version = get_owned_plan_version(db, job_id, version_id, current_user.id)
+    version = get_owned_plan_version(db, job_id, version_id, current_user)
     if version.status != "draft":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -294,7 +296,7 @@ def update_interview_plan_draft(
         },
     )
     db.commit()
-    return get_owned_plan_version(db, job_id, version_id, current_user.id)
+    return get_owned_plan_version(db, job_id, version_id, current_user)
 
 
 @router.post(
@@ -307,9 +309,10 @@ def confirm_interview_plan_version(
     current_user: CurrentUser,
     db: DbSession,
 ) -> InterviewPlanVersion:
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     ensure_job_active(job)
-    version = get_owned_plan_version(db, job_id, version_id, current_user.id)
+    version = get_owned_plan_version(db, job_id, version_id, current_user)
     if version.status == "confirmed":
         return version
     validate_confirmable(version)
@@ -335,4 +338,4 @@ def confirm_interview_plan_version(
         },
     )
     db.commit()
-    return get_owned_plan_version(db, job_id, version_id, current_user.id)
+    return get_owned_plan_version(db, job_id, version_id, current_user)

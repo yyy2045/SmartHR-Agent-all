@@ -14,13 +14,20 @@ from app.schemas.knowledge import (
     KnowledgeIndexTaskResponse,
 )
 from app.services.audit import record_audit
+from app.services.authorization import ensure_job_writable, get_visible_job
 from app.workers.dispatcher import enqueue_knowledge_index
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
 
 
-def _shared_document(db: Session, document_id: uuid.UUID) -> ResumeDocument:
+def _shared_document(
+    db: Session,
+    document_id: uuid.UUID,
+    current_user: CurrentUser,
+    *,
+    writable: bool = False,
+) -> ResumeDocument:
     document = db.scalar(
         select(ResumeDocument)
         .where(ResumeDocument.id == document_id)
@@ -28,6 +35,11 @@ def _shared_document(db: Session, document_id: uuid.UUID) -> ResumeDocument:
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="简历文件不存在")
+    if current_user.has_role("administrator", "recruiter"):
+        return document
+    job = get_visible_job(db, document.batch.job_id, current_user)
+    if writable:
+        ensure_job_writable(job, current_user)
     return document
 
 
@@ -70,8 +82,7 @@ def get_document_index_status(
     current_user: CurrentUser,
     db: DbSession,
 ) -> KnowledgeIndexStatusResponse:
-    del current_user
-    _shared_document(db, document_id)
+    _shared_document(db, document_id, current_user)
     profile = _latest_profile(db, document_id)
     chunks = list(
         db.scalars(
@@ -113,7 +124,7 @@ def rebuild_document_index(
     current_user: CurrentUser,
     db: DbSession,
 ) -> KnowledgeIndexTaskResponse:
-    document = _shared_document(db, document_id)
+    document = _shared_document(db, document_id, current_user, writable=True)
     profile = _latest_profile(db, document_id)
     if not settings.embedding_enabled:
         raise HTTPException(
