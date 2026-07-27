@@ -22,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.candidate import JobApplication
     from app.models.job import Job
     from app.models.resume import ResumeDocument
     from app.models.user import User
@@ -206,7 +207,10 @@ class InterviewScoreAnchor(Base):
 class CandidateInterviewSchedule(Base):
     __tablename__ = "candidate_interview_schedules"
     __table_args__ = (
-        UniqueConstraint("document_id", name="uq_candidate_interview_schedule_document"),
+        UniqueConstraint(
+            "application_id",
+            name="uq_candidate_interview_schedule_application",
+        ),
         CheckConstraint(
             "status IN ('scheduled', 'partially_cancelled', 'cancelled')",
             name="ck_candidate_interview_schedules_status",
@@ -214,8 +218,8 @@ class CandidateInterviewSchedule(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("resume_documents.id", ondelete="CASCADE"),
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_applications.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -241,7 +245,7 @@ class CandidateInterviewSchedule(Base):
         onupdate=func.now(),
     )
 
-    document: Mapped[ResumeDocument] = relationship(back_populates="interview_schedule")
+    application: Mapped[JobApplication] = relationship(back_populates="interview_schedule")
     plan_version: Mapped[InterviewPlanVersion] = relationship(
         back_populates="candidate_schedules"
     )
@@ -254,7 +258,15 @@ class CandidateInterviewSchedule(Base):
 
     @property
     def candidate_code(self) -> str:
-        return self.document.candidate_code
+        return self.application.candidate.candidate_code
+
+    @property
+    def document_id(self) -> uuid.UUID:
+        return self.application.documents[0].id
+
+    @property
+    def document(self) -> ResumeDocument:
+        return self.application.documents[0]
 
     @property
     def plan_version_number(self) -> int:

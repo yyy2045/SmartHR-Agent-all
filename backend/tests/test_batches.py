@@ -19,8 +19,11 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     AuditLog,
+    Candidate,
+    CandidateDuplicateReview,
     CandidateProfile,
     Job,
+    JobApplication,
     JobCriteriaVersion,
     RecruiterDecision,
     ResumeDocument,
@@ -225,6 +228,43 @@ async def test_batch_ai_input_mode_defaults_to_raw_and_accepts_redacted(
 
 
 @pytest.mark.asyncio
+async def test_upload_creates_independent_candidate_and_job_application(
+    batch_dependencies: BatchDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        first, _ = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="candidate-a.pdf",
+            marker=b"candidate-a",
+        )
+        second, _ = await upload_single_resume(
+            client,
+            batch_dependencies,
+            filename="candidate-b.pdf",
+            marker=b"candidate-b",
+        )
+
+    first_document = first["documents"][0]
+    second_document = second["documents"][0]
+    assert first_document["candidate_id"] != second_document["candidate_id"]
+    assert first_document["application_id"] != second_document["application_id"]
+    assert first_document["candidate_code"].startswith("CAND-")
+
+    with batch_dependencies.session_factory() as db:
+        candidates = db.scalars(select(Candidate).order_by(Candidate.created_at)).all()
+        applications = db.scalars(
+            select(JobApplication).order_by(JobApplication.created_at)
+        ).all()
+
+    assert len(candidates) == 2
+    assert len(applications) == 2
+    assert {str(item.job_id) for item in applications} == {batch_dependencies.job_id}
+
+
+@pytest.mark.asyncio
 async def test_all_supported_resume_formats_are_accepted(
     batch_dependencies: BatchDependencies,
 ) -> None:
@@ -330,16 +370,26 @@ async def test_partial_failure_download_duplicate_and_retry(
             files={"files": ("duplicate.pdf", VALID_PDF, "application/pdf")},
         )
         assert duplicate.status_code == 201
-        assert duplicate.json()["status"] == "failed"
-        assert duplicate.json()["documents"][0]["failure_code"] == "duplicate_file"
+        assert duplicate.json()["status"] == "processing"
+        assert duplicate.json()["documents"][0]["status"] == "queued"
+        assert duplicate.json()["documents"][0]["failure_code"] is None
 
     stored_files = [path for path in settings.file_storage_root.rglob("*") if path.is_file()]
-    assert len(stored_files) == 2
+    assert len(stored_files) == 3
     assert all(path.name not in {"private.pdf", "replacement.png"} for path in stored_files)
     with batch_dependencies.session_factory() as db:
+        duplicate_review = db.scalar(select(CandidateDuplicateReview))
         audit = db.scalar(
             select(AuditLog).where(AuditLog.action == "resume.file_viewed")
         )
+        duplicate_audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "candidate.duplicate_detected")
+        )
+    assert duplicate_review is not None
+    assert duplicate_review.status == "pending"
+    assert duplicate_review.confidence == "strong"
+    assert duplicate_review.signals == ["resume_sha256_exact"]
+    assert duplicate_audit is not None
     assert audit is not None
     assert audit.actor_username == "recruiter"
     assert str(audit.target_id) == valid_document["id"]
@@ -578,6 +628,8 @@ async def test_batch_permanent_delete_cascades_database_and_private_file(
         )
         batch_id = uuid.UUID(body["id"])
         document_id = uuid.UUID(body["documents"][0]["id"])
+        candidate_id = uuid.UUID(body["documents"][0]["candidate_id"])
+        application_id = uuid.UUID(body["documents"][0]["application_id"])
         with batch_dependencies.session_factory() as db:
             document = db.get(ResumeDocument, document_id)
             user = db.scalar(select(User).where(User.username == "recruiter"))
@@ -668,6 +720,8 @@ async def test_batch_permanent_delete_cascades_database_and_private_file(
     with batch_dependencies.session_factory() as db:
         assert db.get(ScreeningBatch, batch_id) is None
         assert db.get(ResumeDocument, document_id) is None
+        assert db.get(JobApplication, application_id) is None
+        assert db.get(Candidate, candidate_id) is None
         for model in (
             ResumeTextSegment,
             ResumeRedaction,
@@ -782,9 +836,7 @@ async def test_batch_delete_database_failure_restores_private_file(
 
         def fail_batch_delete_commit(session: Session) -> None:
             nonlocal failed_once
-            if not failed_once and any(
-                isinstance(item, ScreeningBatch) for item in session.deleted
-            ):
+            if not failed_once:
                 failed_once = True
                 raise RuntimeError("simulated database failure")
             original_commit(session)

@@ -14,6 +14,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     AuditLog,
+    Candidate,
     CandidateInterviewRound,
     CandidateInterviewSchedule,
     InterviewDimensionRating,
@@ -25,6 +26,7 @@ from app.models import (
     InterviewScoreAnchor,
     InterviewScoreDimension,
     Job,
+    JobApplication,
     JobCriteriaVersion,
     ResumeDocument,
     Role,
@@ -110,8 +112,12 @@ def evaluation_dependencies() -> Generator[EvaluationDependencies, None, None]:
         )
         db.add(batch)
         db.flush()
+        candidate = Candidate(full_name="候选人A")
+        application = JobApplication(candidate=candidate, job_id=job.id)
         document = ResumeDocument(
             batch_id=batch.id,
+            candidate=candidate,
+            application=application,
             original_filename="候选人A.pdf",
             file_extension=".pdf",
             content_type="application/pdf",
@@ -190,7 +196,7 @@ def evaluation_dependencies() -> Generator[EvaluationDependencies, None, None]:
         db.flush()
         start_at = datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)
         schedule = CandidateInterviewSchedule(
-            document_id=document.id,
+            application_id=application.id,
             plan_version_id=plan.id,
             status="partially_cancelled",
             created_by_id=recruiter.id,

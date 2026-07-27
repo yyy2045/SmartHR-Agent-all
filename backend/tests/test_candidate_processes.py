@@ -15,6 +15,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     AuditLog,
+    Candidate,
     CandidateInterviewRound,
     CandidateInterviewSchedule,
     CandidateProcess,
@@ -24,6 +25,7 @@ from app.models import (
     InterviewPlanVersion,
     InterviewRound,
     Job,
+    JobApplication,
     JobCriteriaVersion,
     RecruiterDecision,
     ResumeDocument,
@@ -45,6 +47,7 @@ class CandidateProcessDependencies:
     job_id: uuid.UUID
     batch_id: uuid.UUID
     document_id: uuid.UUID
+    application_id: uuid.UUID
     result_id: uuid.UUID
     session_factory: sessionmaker[Session]
 
@@ -118,8 +121,12 @@ def candidate_process_dependencies() -> Generator[CandidateProcessDependencies, 
         )
         db.add(batch)
         db.flush()
+        candidate = Candidate(phone="13800138000")
+        application = JobApplication(candidate=candidate, job_id=job.id)
         document = ResumeDocument(
             batch_id=batch.id,
+            candidate=candidate,
+            application=application,
             original_filename="candidate.pdf",
             file_extension=".pdf",
             content_type="application/pdf",
@@ -213,6 +220,7 @@ def candidate_process_dependencies() -> Generator[CandidateProcessDependencies, 
         job_id=job.id,
         batch_id=batch.id,
         document_id=document.id,
+        application_id=application.id,
         result_id=result.id,
         session_factory=testing_session,
     )
@@ -351,7 +359,7 @@ async def test_board_exposes_compact_interview_evaluation_progress(
         db.add(plan)
         db.flush()
         schedule = CandidateInterviewSchedule(
-            document_id=dependency.document_id,
+            application_id=dependency.application_id,
             plan_version_id=plan.id,
             status="partially_cancelled",
             created_by_id=user_id,
@@ -460,7 +468,7 @@ async def test_stage_changes_are_concurrency_safe_and_record_timeline(
     with dependency.session_factory() as db:
         process = db.scalar(
             select(CandidateProcess).where(
-                CandidateProcess.document_id == dependency.document_id
+                CandidateProcess.application_id == dependency.application_id
             )
         )
         assert process is not None
@@ -535,13 +543,13 @@ async def test_backward_and_rejection_require_reason_and_terminal_stage_is_locke
     assert terminal.status_code == 409
 
 
-def test_deleting_source_batch_cascades_candidate_process(
+def test_deleting_application_cascades_candidate_process(
     candidate_process_dependencies: CandidateProcessDependencies,
 ) -> None:
     dependency = candidate_process_dependencies
     with dependency.session_factory() as db:
         process = CandidateProcess(
-            document_id=dependency.document_id,
+            application_id=dependency.application_id,
             current_stage="to_contact",
             updated_by_id=db.scalar(select(User.id).where(User.username == "recruiter")),
         )
@@ -555,9 +563,9 @@ def test_deleting_source_batch_cascades_candidate_process(
         ]
         db.add(process)
         db.commit()
-        batch = db.get(ScreeningBatch, dependency.batch_id)
-        assert batch is not None
-        db.delete(batch)
+        application = db.get(JobApplication, dependency.application_id)
+        assert application is not None
+        db.delete(application)
         db.commit()
         assert db.scalar(select(func.count(CandidateProcess.id))) == 0
         assert db.scalar(select(func.count(CandidateProcessEvent.id))) == 0

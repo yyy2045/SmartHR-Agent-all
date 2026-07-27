@@ -12,9 +12,12 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models import (
     AuditLog,
+    Candidate,
+    CandidateDuplicateReview,
     CandidateProfile,
     HardRequirement,
     Job,
+    JobApplication,
     JobCriteriaVersion,
     ResumeDocument,
     ResumeTextSegment,
@@ -25,6 +28,7 @@ from app.models import (
 )
 from app.schemas.screening import ResumeAnalysisDraft
 from app.services.ai_client import AIConfigurationError
+from app.services.candidate_duplicates import build_experience_fingerprint
 from app.services.resume_analysis import (
     _find_source_quote,
     analyze_resume_document,
@@ -170,8 +174,12 @@ def analysis_dependencies() -> Generator[AnalysisDependencies, None, None]:
         )
         db.add(batch)
         db.flush()
+        candidate = Candidate(full_name="李雷", full_name_normalized="李雷")
+        application = JobApplication(candidate=candidate, job_id=job.id)
         document = ResumeDocument(
             batch_id=batch.id,
+            candidate=candidate,
+            application=application,
             original_filename="private.pdf",
             file_extension=".pdf",
             content_type="application/pdf",
@@ -353,6 +361,57 @@ def valid_analysis(
             "interview_questions": ["请说明系统扩展性设计。"],
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_completed_analysis_generates_weak_duplicate_review(
+    analysis_dependencies: AnalysisDependencies,
+) -> None:
+    analysis = valid_analysis(analysis_dependencies)
+    experience = [
+        item.model_dump(mode="json")
+        for item in analysis.candidate_profile.work_experiences
+    ]
+    with analysis_dependencies.session_factory() as db:
+        source_document = db.get(ResumeDocument, analysis_dependencies.document_id)
+        assert source_document is not None
+        existing = Candidate(
+            full_name="李 雷",
+            full_name_normalized="李雷",
+            experience_fingerprint=build_experience_fingerprint(experience),
+        )
+        existing_application = JobApplication(
+            candidate=existing,
+            job_id=source_document.batch.job_id,
+        )
+        db.add(
+            ResumeDocument(
+                batch_id=source_document.batch_id,
+                candidate=existing,
+                application=existing_application,
+                original_filename="existing.pdf",
+                file_extension=".pdf",
+                content_type="application/pdf",
+                detected_type="pdf",
+                size_bytes=100,
+                sha256="b" * 64,
+                status="completed",
+            )
+        )
+        db.commit()
+
+    response = await analyze_resume_document(
+        analysis_dependencies.document_id,
+        session_factory=analysis_dependencies.session_factory,
+        ai_client=StubAnalysisClient(analysis),
+    )
+
+    assert response["status"] == "completed"
+    with analysis_dependencies.session_factory() as db:
+        review = db.scalar(select(CandidateDuplicateReview))
+        assert review is not None
+        assert review.confidence == "weak"
+        assert review.signals == ["name_experience_exact"]
 
 
 @pytest.mark.asyncio

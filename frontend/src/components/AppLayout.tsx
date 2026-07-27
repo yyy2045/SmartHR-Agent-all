@@ -4,6 +4,7 @@ import {
   BarChartOutlined,
   BellOutlined,
   CalendarOutlined,
+  ContactsOutlined,
   DatabaseOutlined,
   FileSearchOutlined,
   LogoutOutlined,
@@ -44,6 +45,9 @@ interface NavigationItem {
 function pageMeta(pathname: string) {
   if (pathname.startsWith('/recruitment-requests')) {
     return { title: '招聘需求', subtitle: '发起、审批并追踪招聘任务来源' }
+  }
+  if (pathname.startsWith('/candidates')) {
+    return { title: '候选人中心', subtitle: '统一查看主档案、应聘历史与重复确认' }
   }
   if (pathname === '/jobs/new') {
     return { title: '新建职位', subtitle: '录入职位信息并建立筛选标准' }
@@ -96,6 +100,9 @@ export function AppLayout() {
   const canCreateJobs = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
   )
+  const canAccessCandidateCenter = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter'].includes(role),
+  )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
   const showJobContext = ['jobs', 'screening', 'candidate-process', 'interviews'].includes(
     activeModule,
@@ -134,6 +141,16 @@ export function AppLayout() {
             path: jobId ? `/jobs/${jobId}/pipeline` : undefined,
             badge: jobId ? undefined : '先选岗位',
           },
+          ...(canAccessCandidateCenter
+            ? [
+                {
+                  key: 'candidates' as const,
+                  label: '候选人中心',
+                  icon: <ContactsOutlined />,
+                  path: '/candidates',
+                },
+              ]
+            : []),
           {
             key: 'interviews' as const,
             label: '面试管理',

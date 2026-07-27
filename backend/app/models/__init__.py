@@ -1,4 +1,5 @@
 from app.models.audit import AuditLog
+from app.models.candidate import Candidate, CandidateDuplicateReview, JobApplication
 from app.models.candidate_process import CandidateProcess, CandidateProcessEvent
 from app.models.interview import (
     CandidateInterviewRound,
@@ -34,6 +35,8 @@ from app.models.user import Role, User, UserRole
 
 __all__ = [
     "AuditLog",
+    "Candidate",
+    "CandidateDuplicateReview",
     "CandidateProfile",
     "CandidateInterviewRound",
     "CandidateInterviewSchedule",
@@ -51,6 +54,7 @@ __all__ = [
     "InterviewScoreAnchor",
     "InterviewScoreDimension",
     "Job",
+    "JobApplication",
     "JobCriteriaVersion",
     "RecruiterDecision",
     "RecruitmentRequest",

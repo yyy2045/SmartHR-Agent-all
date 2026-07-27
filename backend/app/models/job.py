@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.candidate import JobApplication
     from app.models.interview import InterviewPlanVersion
     from app.models.recruitment_request import RecruitmentRequest
     from app.models.resume import ScreeningBatch, ScreeningResult
@@ -81,6 +82,7 @@ class Job(Base):
         cascade="all, delete-orphan",
         order_by="InterviewPlanVersion.version_number",
     )
+    applications: Mapped[list[JobApplication]] = relationship(back_populates="job")
     hiring_manager: Mapped[User | None] = relationship(foreign_keys=[hiring_manager_id])
     recruitment_request: Mapped[RecruitmentRequest | None] = relationship(
         back_populates="job"

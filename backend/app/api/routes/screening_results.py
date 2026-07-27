@@ -10,6 +10,7 @@ from app.api.routes.batches import screening_result_response
 from app.database import get_db
 from app.models import (
     DimensionScore,
+    JobApplication,
     RecruiterDecision,
     ResumeDocument,
     ScreeningBatch,
@@ -38,9 +39,9 @@ DbSession = Annotated[Session, Depends(get_db)]
 def _result_options() -> tuple[object, ...]:
     return (
         selectinload(ScreeningResult.document).selectinload(ResumeDocument.batch),
-        selectinload(ScreeningResult.document).selectinload(
-            ResumeDocument.candidate_process
-        ),
+        selectinload(ScreeningResult.document)
+        .selectinload(ResumeDocument.application)
+        .selectinload(JobApplication.process),
         selectinload(ScreeningResult.candidate_profile),
         selectinload(ScreeningResult.criteria_version),
         selectinload(ScreeningResult.dimension_scores).selectinload(
@@ -367,7 +368,10 @@ def create_recruiter_decision(
             status_code=status.HTTP_409_CONFLICT,
             detail="只有已完成的 AI 分析可以作出人工决策",
         )
-    if result.document.candidate_process is not None:
+    if (
+        result.document.application is not None
+        and result.document.application.process is not None
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="候选人已进入流程看板，请在看板中调整阶段",

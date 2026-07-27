@@ -2027,6 +2027,248 @@ input {
   white-space: normal;
 }
 
+/* 候选人中心 */
+.candidate-center-heading {
+  margin-bottom: 4px;
+}
+
+.candidate-center-tabs {
+  margin-bottom: 16px;
+}
+
+.candidate-center-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.candidate-center-section {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.candidate-center-section > * {
+  min-width: 0;
+}
+
+.candidate-center-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #e3e8ef;
+}
+
+.candidate-center-toolbar .ant-input-search {
+  width: min(420px, 100%);
+}
+
+.candidate-center-table .ant-table-container {
+  overflow: hidden;
+  border: 1px solid #e2e7ee;
+  border-radius: 8px;
+}
+
+.candidate-identity {
+  display: flex;
+  min-width: 0;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.candidate-identity .ant-avatar {
+  flex: 0 0 auto;
+  color: #176b52;
+  background: #e1f3ec;
+}
+
+.candidate-identity-main {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.candidate-contact-lines {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.candidate-contact-lines .ant-typography {
+  min-width: 0;
+  margin: 0;
+}
+
+.candidate-duplicate-toolbar {
+  justify-content: flex-end;
+}
+
+.candidate-duplicate-list {
+  display: grid;
+  gap: 14px;
+}
+
+.candidate-duplicate-review {
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #dfe5ec;
+  border-radius: 8px;
+}
+
+.candidate-duplicate-review-header,
+.candidate-duplicate-review-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.candidate-duplicate-review-header {
+  border-bottom: 1px solid #edf0f4;
+}
+
+.candidate-duplicate-review-footer {
+  justify-content: flex-end;
+  background: #f8fafc;
+  border-top: 1px solid #edf0f4;
+}
+
+.candidate-duplicate-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 18px 16px;
+}
+
+.candidate-duplicate-person {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 14px;
+  background: #f7f9fb;
+  border-radius: 6px;
+}
+
+.candidate-duplicate-divider {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  color: #ad5f00;
+  background: #fff2d8;
+  border-radius: 50%;
+  place-items: center;
+}
+
+.candidate-detail-content {
+  display: grid;
+  gap: 24px;
+}
+
+.candidate-detail-content section {
+  min-width: 0;
+}
+
+.candidate-detail-content section > .ant-typography {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.candidate-merged-target-link {
+  height: auto;
+  padding: 0;
+}
+
+.candidate-resolution-alert {
+  margin-bottom: 16px;
+}
+
+.candidate-merge-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin: 10px 0 18px;
+}
+
+.candidate-merge-choices .ant-radio-button-wrapper {
+  display: grid;
+  height: auto;
+  min-width: 0;
+  padding: 10px 12px;
+  line-height: 1.45;
+  border: 1px solid #d9dfe7;
+  border-radius: 6px;
+}
+
+.candidate-merge-choices .ant-radio-button-wrapper::before {
+  display: none;
+}
+
+.candidate-merge-choices .ant-radio-button-wrapper span,
+.candidate-merge-choices .ant-radio-button-wrapper small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-merge-choices .ant-radio-button-wrapper small {
+  color: #687386;
+}
+
+.candidate-resolution-reason {
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .candidate-center-toolbar,
+  .candidate-duplicate-review-header,
+  .candidate-duplicate-review-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .candidate-center-toolbar .ant-input-search,
+  .candidate-center-toolbar .ant-segmented,
+  .candidate-center-toolbar > .ant-btn {
+    width: 100%;
+  }
+
+  .candidate-center-toolbar .ant-segmented-group {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .candidate-duplicate-toolbar .ant-segmented-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .candidate-duplicate-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .candidate-duplicate-divider {
+    transform: rotate(90deg);
+    justify-self: center;
+  }
+
+  .candidate-duplicate-review-footer .ant-space {
+    width: 100%;
+  }
+
+  .candidate-duplicate-review-footer .ant-btn {
+    flex: 1;
+  }
+
+  .candidate-merge-choices {
+    grid-template-columns: 1fr;
+  }
+}
+
 .evaluation-overview-card,
 .evaluation-section,
 .evaluation-summary-card {
