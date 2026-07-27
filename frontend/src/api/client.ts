@@ -127,6 +127,11 @@ export interface RecruitmentRequestVersionCreateInput
   source_version_id: string
 }
 
+export interface RecruitmentRequestJobInput {
+  department: string
+  original_jd: string
+}
+
 export interface HardRequirementInput {
   requirement_type: HardRequirementType
   title: string
@@ -979,6 +984,17 @@ export function decideRecruitmentRequest(
       body: JSON.stringify({ version_id: versionId, decision, comment }),
     },
     decision === 'approved' ? '批准招聘需求失败' : '驳回招聘需求失败',
+  )
+}
+
+export function createJobFromRecruitmentRequest(
+  requestId: string,
+  payload: RecruitmentRequestJobInput,
+): Promise<JobRecord> {
+  return apiRequest(
+    `/api/recruitment-requests/${requestId}/job`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    '创建关联职位失败',
   )
 }
 

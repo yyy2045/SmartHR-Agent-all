@@ -3,6 +3,7 @@ import {
   EditOutlined,
   EyeOutlined,
   FileAddOutlined,
+  ProfileOutlined,
   SendOutlined,
   StopOutlined,
 } from '@ant-design/icons'
@@ -30,9 +31,11 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import {
   ApiError,
+  createJobFromRecruitmentRequest,
   createRecruitmentRequest,
   createRecruitmentRequestVersion,
   decideRecruitmentRequest,
@@ -41,6 +44,7 @@ import {
   submitRecruitmentRequest,
   type RecruitmentRequestContentInput,
   type RecruitmentRequestDecision,
+  type RecruitmentRequestJobInput,
   type RecruitmentRequestPriority,
   type RecruitmentRequestRecord,
   type RecruitmentRequestStatus,
@@ -131,22 +135,28 @@ function requestContent(values: RecruitmentRequestFormValues): RecruitmentReques
 
 export function RecruitmentRequestPage() {
   const auth = useAuth()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, messageContext] = message.useMessage()
   const [modal, modalContext] = Modal.useModal()
   const [requestForm] = Form.useForm<RecruitmentRequestFormValues>()
   const [decisionForm] = Form.useForm<DecisionFormValues>()
+  const [jobForm] = Form.useForm<RecruitmentRequestJobInput>()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [selectedId, setSelectedId] = useState<string>()
   const [formOpen, setFormOpen] = useState(false)
   const [editingRequest, setEditingRequest] = useState<RecruitmentRequestRecord>()
   const [decisionTarget, setDecisionTarget] = useState<DecisionTarget>()
+  const [jobTarget, setJobTarget] = useState<RecruitmentRequestRecord>()
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
   const isHiringManager = auth.user?.roles.includes('hiring_manager') ?? false
   const canCreate = isAdministrator || isHiringManager
   const canApprove =
     isAdministrator || (auth.user?.roles.includes('approver') ?? false)
+  const canAccessJobs = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
+  )
 
   const requests = useQuery({
     queryKey: ['recruitment-requests'],
@@ -241,6 +251,26 @@ export function RecruitmentRequestPage() {
       messageApi.success(variables.target.decision === 'approved' ? '需求已批准' : '需求已驳回')
     },
   })
+  const createJobMutation = useMutation({
+    mutationFn: ({ requestId, values }: { requestId: string; values: RecruitmentRequestJobInput }) =>
+      createJobFromRecruitmentRequest(requestId, values),
+    onSuccess: (savedJob, variables) => {
+      queryClient.setQueryData<RecruitmentRequestRecord[]>(
+        ['recruitment-requests'],
+        (current = []) =>
+          current.map((request) =>
+            request.id === variables.requestId
+              ? { ...request, status: 'converted', linked_job_id: savedJob.id }
+              : request,
+          ),
+      )
+      void queryClient.invalidateQueries({ queryKey: ['recruitment-requests'] })
+      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      setJobTarget(undefined)
+      jobForm.resetFields()
+      messageApi.success('关联职位已创建')
+    },
+  })
 
   function openCreateForm() {
     const nextKey = crypto.randomUUID()
@@ -296,6 +326,22 @@ export function RecruitmentRequestPage() {
     decisionMutation.reset()
     decisionForm.resetFields()
     setDecisionTarget({ request, decision })
+  }
+
+  function canConvert(request: RecruitmentRequestRecord) {
+    return (
+      request.status === 'approved' &&
+      (isAdministrator ||
+        ((auth.user?.roles.includes('recruiter') ?? false) &&
+          request.recruiter.id === auth.user?.id))
+    )
+  }
+
+  function openJobForm(request: RecruitmentRequestRecord) {
+    createJobMutation.reset()
+    jobForm.resetFields()
+    jobForm.setFieldsValue({ department: '', original_jd: '' })
+    setJobTarget(request)
   }
 
   const columns: ColumnsType<RecruitmentRequestRecord> = [
@@ -366,8 +412,7 @@ export function RecruitmentRequestPage() {
     },
   ]
 
-  const mutationError =
-    saveMutation.error ?? submitMutation.error ?? decisionMutation.error
+  const mutationError = saveMutation.error ?? submitMutation.error ?? decisionMutation.error
   const optionError = recruiters.error ?? hiringManagers.error
 
   return (
@@ -515,6 +560,25 @@ export function RecruitmentRequestPage() {
                       驳回
                     </Button>
                   </>
+                )}
+                {canConvert(selectedRequest) && (
+                  <Button
+                    type="primary"
+                    icon={<ProfileOutlined />}
+                    onClick={() => openJobForm(selectedRequest)}
+                  >
+                    创建关联职位
+                  </Button>
+                )}
+                {selectedRequest.linked_job_id && canAccessJobs && (
+                  <Button
+                    icon={<ProfileOutlined />}
+                    onClick={() =>
+                      navigate(`/jobs/${selectedRequest.linked_job_id}/criteria`)
+                    }
+                  >
+                    查看关联职位
+                  </Button>
                 )}
               </Space>
             </div>
@@ -776,6 +840,66 @@ export function RecruitmentRequestPage() {
                   ? '可选，填写批准意见'
                   : '说明需要修改的内容'
               }
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        width={680}
+        open={Boolean(jobTarget)}
+        title="创建关联职位"
+        okText="确认创建"
+        cancelText="取消"
+        confirmLoading={createJobMutation.isPending}
+        forceRender
+        onCancel={() => setJobTarget(undefined)}
+        onOk={() => jobForm.submit()}
+      >
+        {createJobMutation.isError && (
+          <Alert
+            type="error"
+            showIcon
+            className="page-alert"
+            message={
+              createJobMutation.error instanceof ApiError
+                ? createJobMutation.error.message
+                : '创建关联职位失败'
+            }
+          />
+        )}
+        {jobTarget && (
+          <Alert
+            type="info"
+            showIcon
+            className="page-alert"
+            message={`职位名称：${jobTarget.current_version.job_title}`}
+            description={`招聘专员为 ${jobTarget.recruiter.display_name}，用人经理为 ${jobTarget.requester.display_name}；创建后以上信息不可在此覆盖。`}
+          />
+        )}
+        <Form<RecruitmentRequestJobInput>
+          form={jobForm}
+          layout="vertical"
+          requiredMark={false}
+          onFinish={(values) => {
+            if (jobTarget) {
+              createJobMutation.mutate({ requestId: jobTarget.id, values })
+            }
+          }}
+        >
+          <Form.Item label="展示分组" name="department">
+            <Input maxLength={100} showCount placeholder="例如：研发中心，可留空" />
+          </Form.Item>
+          <Form.Item
+            label="原始 JD"
+            name="original_jd"
+            rules={[{ required: true, whitespace: true, message: '请填写职位描述' }]}
+          >
+            <Input.TextArea
+              rows={12}
+              maxLength={50_000}
+              showCount
+              placeholder="填写岗位职责、任职要求和加分项"
             />
           </Form.Item>
         </Form>

@@ -20,11 +20,13 @@ const manager: AuthUser = {
   roles: ['hiring_manager'],
 }
 
-const recruiter = {
+const recruiter: AuthUser = {
   id: 'recruiter-1',
   username: 'recruiter',
   display_name: '招聘专员',
-  roles: ['recruiter' as const],
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
 }
 
 const approver: AuthUser = {
@@ -256,6 +258,7 @@ describe('招聘需求流程', () => {
     )
     expect(await screen.findByText('招聘理由充分')).toBeInTheDocument()
     expect(screen.getAllByText('已批准').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: /创建关联职位/ })).not.toBeInTheDocument()
   })
 
   it('被驳回需求通过新版本修改后才能重新提交', async () => {
@@ -323,5 +326,62 @@ describe('招聘需求流程', () => {
     )
     expect((await screen.findAllByText('V2')).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: /提交审批/ })).toBeInTheDocument()
+  })
+
+  it('指定招聘专员将已批准需求创建为唯一关联职位', async () => {
+    let record = requestRecord({ status: 'approved' })
+    let jobBody: Record<string, unknown> | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = input.toString()
+        if (path === '/api/recruitment-requests' && !init?.method) {
+          return jsonResponse([record])
+        }
+        if (path === '/api/recruitment-requests/request-1/job') {
+          jobBody = JSON.parse(init?.body as string) as Record<string, unknown>
+          record = { ...record, status: 'converted', linked_job_id: 'job-1' }
+          return jsonResponse(
+            {
+              id: 'job-1',
+              recruiter_id: recruiter.id,
+              hiring_manager_id: manager.id,
+              recruitment_request_id: record.id,
+              title: record.current_version.job_title,
+              department: jobBody.department,
+              original_jd: jobBody.original_jd,
+              status: 'active',
+              archived_at: null,
+              created_at: '2026-07-28T10:00:00Z',
+              updated_at: '2026-07-28T10:00:00Z',
+            },
+            201,
+          )
+        }
+        return jsonResponse({ detail: 'not found' }, 404)
+      }),
+    )
+
+    renderPage(recruiter)
+    fireEvent.click(await screen.findByRole('button', { name: /查看/ }))
+    fireEvent.click(screen.getByRole('button', { name: /创建关联职位/ }))
+    expect(screen.getByText('职位名称：高级后端工程师')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('展示分组'), {
+      target: { value: '研发中心' },
+    })
+    fireEvent.change(screen.getByLabelText('原始 JD'), {
+      target: { value: '负责核心平台服务设计、开发和稳定性建设。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认创建' }))
+
+    await waitFor(() =>
+      expect(jobBody).toEqual({
+        department: '研发中心',
+        original_jd: '负责核心平台服务设计、开发和稳定性建设。',
+      }),
+    )
+    expect((await screen.findAllByText('已转职位')).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /查看关联职位/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /创建关联职位/ })).not.toBeInTheDocument()
   })
 })
