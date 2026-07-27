@@ -24,6 +24,7 @@ import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { ApiError, archiveJob, fetchJobs, type JobRecord } from '../api/client'
+import { useAuth } from '../auth/context'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -39,6 +40,7 @@ function formatDate(value: string) {
 
 export function JobListPage() {
   const navigate = useNavigate()
+  const auth = useAuth()
   const { jobId: currentJobId } = useParams()
   const queryClient = useQueryClient()
   const [modal, modalContextHolder] = Modal.useModal()
@@ -51,10 +53,15 @@ export function JobListPage() {
     mutationFn: archiveJob,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['jobs'] }),
   })
+  const canCreate = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter'].includes(role),
+  )
 
   function renderJob(job: JobRecord) {
     const archived = job.status === 'archived'
     const current = job.id === currentJobId
+    const writable =
+      (auth.user?.roles.includes('administrator') ?? false) || job.recruiter_id === auth.user?.id
 
     function confirmArchive() {
       modal.confirm({
@@ -105,9 +112,9 @@ export function JobListPage() {
               icon={<EditOutlined />}
               onClick={() => navigate(`/jobs/${job.id}/edit`)}
             >
-              {archived ? '查看职位' : '编辑职位'}
+              {archived || !writable ? '查看职位' : '编辑职位'}
             </Button>
-            {!archived && (
+            {!archived && writable && (
               <Dropdown
                 trigger={['click']}
                 menu={{
@@ -150,9 +157,11 @@ export function JobListPage() {
             <Switch checked={includeArchived} onChange={setIncludeArchived} />
             <Text>显示已归档</Text>
           </Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/jobs/new')}>
-            新建职位
-          </Button>
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/jobs/new')}>
+              新建职位
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -190,9 +199,11 @@ export function JobListPage() {
             image={<FileSearchOutlined className="empty-icon" />}
             description={includeArchived ? '没有职位记录' : '暂无进行中的职位'}
           >
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/jobs/new')}>
-              创建第一个职位
-            </Button>
+            {canCreate && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/jobs/new')}>
+                创建第一个职位
+              </Button>
+            )}
           </Empty>
         </section>
       )}

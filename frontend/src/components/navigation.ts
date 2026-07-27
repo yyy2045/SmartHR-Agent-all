@@ -9,6 +9,7 @@ export type BusinessModule =
   | 'settings'
 
 export function businessModuleForPath(pathname: string): BusinessModule {
+  if (pathname.startsWith('/settings/')) return 'settings'
   if (pathname.endsWith('/batches') || pathname.endsWith('/results') || pathname.endsWith('/compare')) {
     return 'screening'
   }

@@ -9,6 +9,9 @@ const user = {
   id: '03f8ba31-0a83-4466-bc4c-143bd3279680',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
 }
 
 const timestamp = '2026-07-22T12:00:00Z'
@@ -44,6 +47,8 @@ describe('job and criteria flow', () => {
         }
         job = {
           id: 'job-1',
+          recruiter_id: user.id,
+          hiring_manager_id: null,
           ...payload,
           status: 'active',
           archived_at: null,
@@ -163,6 +168,8 @@ describe('job and criteria flow', () => {
     }
     const job: JobDetail = {
       id: 'job-ai',
+      recruiter_id: user.id,
+      hiring_manager_id: null,
       title: '后端工程师',
       department: '研发中心',
       original_jd: '负责 Python 服务开发。',

@@ -11,9 +11,18 @@ import type {
 } from './api/client'
 
 const timestamp = '2026-07-23T03:00:00Z'
-const user = { id: 'user-1', username: 'recruiter', display_name: '招聘专员' }
+const user = {
+  id: 'user-1',
+  username: 'recruiter',
+  display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
+}
 const job = {
   id: 'job-1',
+  recruiter_id: user.id,
+  hiring_manager_id: null,
   title: '平台工程师',
   department: '研发中心',
   original_jd: '负责平台工程建设。',

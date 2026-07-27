@@ -18,10 +18,15 @@ const user = {
   id: 'user-1',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
 }
 
 const job: JobDetail = {
   id: 'job-1',
+  recruiter_id: user.id,
+  hiring_manager_id: null,
   title: '高级后端工程师',
   department: '研发中心',
   original_jd: '负责核心服务设计与开发。',

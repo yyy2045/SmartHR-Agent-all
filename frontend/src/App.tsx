@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react'
 
 import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
+import { RoleRoute } from './auth/RoleRoute'
 import { AppLayout } from './components/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
@@ -54,6 +55,11 @@ const InterviewEvaluationPage = lazy(() =>
     default: module.InterviewEvaluationPage,
   })),
 )
+const UserManagementPage = lazy(() =>
+  import('./pages/UserManagementPage').then((module) => ({
+    default: module.UserManagementPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -69,28 +75,39 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="/change-password" element={<ChangePasswordPage />} />
               <Route element={<AppLayout />}>
-                <Route path="/" element={<JobListPage />} />
-                <Route path="/jobs/:jobId" element={<JobListPage />} />
-                <Route path="/jobs/new" element={<JobFormPage />} />
-                <Route path="/jobs/:jobId/edit" element={<JobFormPage />} />
-                <Route path="/jobs/:jobId/criteria" element={<CriteriaPage />} />
-                <Route path="/jobs/:jobId/batches" element={<BatchPage />} />
-                <Route path="/jobs/:jobId/results" element={<ScreeningResultsPage />} />
-                <Route path="/jobs/:jobId/compare" element={<CandidateComparisonPage />} />
-                <Route path="/jobs/:jobId/pipeline" element={<CandidateProcessPage />} />
-                <Route path="/jobs/:jobId/interview-plan" element={<InterviewPlanPage />} />
                 <Route
-                  path="/jobs/:jobId/candidates/:documentId/interview-schedule"
-                  element={<InterviewSchedulePage />}
-                />
-                <Route
-                  path="/jobs/:jobId/candidates/:documentId/interview-evaluations/:roundId"
-                  element={<InterviewEvaluationPage />}
-                />
-                <Route
-                  path="/jobs/:jobId/batches/:batchId/documents/:documentId/history"
-                  element={<CandidateHistoryPage />}
-                />
+                  element={
+                    <RoleRoute roles={['administrator', 'recruiter', 'hiring_manager']} />
+                  }
+                >
+                  <Route path="/" element={<JobListPage />} />
+                  <Route path="/jobs/:jobId" element={<JobListPage />} />
+                  <Route path="/jobs/:jobId/edit" element={<JobFormPage />} />
+                  <Route path="/jobs/:jobId/criteria" element={<CriteriaPage />} />
+                  <Route path="/jobs/:jobId/batches" element={<BatchPage />} />
+                  <Route path="/jobs/:jobId/results" element={<ScreeningResultsPage />} />
+                  <Route path="/jobs/:jobId/compare" element={<CandidateComparisonPage />} />
+                  <Route path="/jobs/:jobId/pipeline" element={<CandidateProcessPage />} />
+                  <Route path="/jobs/:jobId/interview-plan" element={<InterviewPlanPage />} />
+                  <Route
+                    path="/jobs/:jobId/candidates/:documentId/interview-schedule"
+                    element={<InterviewSchedulePage />}
+                  />
+                  <Route
+                    path="/jobs/:jobId/candidates/:documentId/interview-evaluations/:roundId"
+                    element={<InterviewEvaluationPage />}
+                  />
+                  <Route
+                    path="/jobs/:jobId/batches/:batchId/documents/:documentId/history"
+                    element={<CandidateHistoryPage />}
+                  />
+                </Route>
+                <Route element={<RoleRoute roles={['administrator', 'recruiter']} />}>
+                  <Route path="/jobs/new" element={<JobFormPage />} />
+                </Route>
+                <Route element={<RoleRoute roles={['administrator']} />}>
+                  <Route path="/settings/users" element={<UserManagementPage />} />
+                </Route>
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

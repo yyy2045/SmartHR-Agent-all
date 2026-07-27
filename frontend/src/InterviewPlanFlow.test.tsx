@@ -14,6 +14,9 @@ const user = {
   id: '03f8ba31-0a83-4466-bc4c-143bd3279680',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -26,6 +29,8 @@ function jsonResponse(body: unknown, status = 200) {
 function job(status: 'active' | 'archived' = 'active'): JobDetail {
   return {
     id: 'job-interview',
+    recruiter_id: user.id,
+    hiring_manager_id: null,
     title: '高级后端工程师',
     department: '研发中心',
     original_jd: '负责核心服务设计与开发。',
