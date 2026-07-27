@@ -1,6 +1,5 @@
 import {
   ArrowDownOutlined,
-  ArrowLeftOutlined,
   ArrowUpOutlined,
   CheckOutlined,
   CopyOutlined,
@@ -29,7 +28,7 @@ import {
   message,
 } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 
 import {
   ApiError,
@@ -689,7 +688,6 @@ function ConfirmedInterviewPlanView({ version }: { version: InterviewPlanVersion
 
 export function InterviewPlanPage() {
   const { jobId } = useParams()
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
@@ -765,12 +763,6 @@ export function InterviewPlanPage() {
             {job.data.department || '未填写部门'} · 配置面试轮次、问题和结构化评分表
           </Text>
         </div>
-        <Space wrap>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
-            返回职位列表
-          </Button>
-          <Button onClick={() => navigate(`/jobs/${jobId}/criteria`)}>筛选标准</Button>
-        </Space>
       </div>
 
       {archived && (

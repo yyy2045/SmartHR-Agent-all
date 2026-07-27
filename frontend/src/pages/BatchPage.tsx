@@ -1,5 +1,4 @@
 import {
-  ArrowLeftOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
   DownloadOutlined,
@@ -7,12 +6,10 @@ import {
   FileDoneOutlined,
   FileExcelOutlined,
   FileOutlined,
-  FileSearchOutlined,
   HistoryOutlined,
   RedoOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
-  SettingOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -58,6 +55,7 @@ import {
   type ResumeDocumentRecord,
   type ScreeningBatchRecord,
 } from '../api/client'
+import { ScreeningModuleNav } from '../components/ScreeningModuleNav'
 
 const { Title, Text } = Typography
 const { Dragger } = Upload
@@ -663,25 +661,9 @@ export function BatchPage() {
           </Space>
           <Text type="secondary">批量接收简历，并逐文件跟踪安全校验与处理状态</Text>
         </div>
-        <Space wrap>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
-            返回职位列表
-          </Button>
-          <Button
-            icon={<SettingOutlined />}
-            onClick={() => navigate(`/jobs/${jobId}/criteria`)}
-          >
-            筛选标准
-          </Button>
-          <Button
-            type="primary"
-            icon={<FileSearchOutlined />}
-            onClick={() => navigate(`/jobs/${jobId}/results`)}
-          >
-            筛选结果
-          </Button>
-        </Space>
       </div>
+
+      <ScreeningModuleNav jobId={jobId} activeKey="batches" />
 
       {archived && (
         <Alert

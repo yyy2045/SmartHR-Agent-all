@@ -1,5 +1,4 @@
 import {
-  ArrowLeftOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
@@ -51,6 +50,7 @@ import {
   type ScreeningResultFilters,
   type ScreeningResultSummary,
 } from '../api/client'
+import { ScreeningModuleNav } from '../components/ScreeningModuleNav'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -366,17 +366,12 @@ export function ScreeningResultsPage() {
           </Space>
           <Text type="secondary">查看 AI 匹配依据，并保存最终人工筛选结论</Text>
         </div>
-        <Space wrap>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
-            返回职位列表
-          </Button>
-          <Button onClick={() => navigate(`/jobs/${jobId}/batches`)}>简历批次</Button>
-          <Button onClick={() => navigate(`/jobs/${jobId}/pipeline`)}>流程看板</Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void results.refetch()}>
-            刷新结果
-          </Button>
-        </Space>
+        <Button icon={<ReloadOutlined />} onClick={() => void results.refetch()}>
+          刷新结果
+        </Button>
       </div>
+
+      <ScreeningModuleNav jobId={jobId} activeKey="results" />
 
       <Card className="result-filter-card" title="筛选条件">
         <div className="result-filter-grid">

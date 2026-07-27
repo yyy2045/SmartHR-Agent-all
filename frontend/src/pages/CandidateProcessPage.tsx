@@ -1,5 +1,4 @@
 import {
-  ArrowLeftOutlined,
   CalendarOutlined,
   ClockCircleOutlined,
   EyeOutlined,
@@ -224,19 +223,13 @@ export function CandidateProcessPage() {
           <Title level={2}>{job.data?.title ?? '候选人流程看板'}</Title>
           <Text type="secondary">管理 AI 初筛完成后的人工联系与推进状态</Text>
         </div>
-        <Space wrap>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
-            返回职位
-          </Button>
-          <Button onClick={() => navigate(`/jobs/${jobId}/results`)}>筛选结果</Button>
-          <Button
-            icon={<ReloadOutlined />}
-            loading={candidates.isFetching}
-            onClick={() => void candidates.refetch()}
-          >
-            刷新
-          </Button>
-        </Space>
+        <Button
+          icon={<ReloadOutlined />}
+          loading={candidates.isFetching}
+          onClick={() => void candidates.refetch()}
+        >
+          刷新
+        </Button>
       </div>
 
       <Card className="candidate-board-filter-card" size="small">
