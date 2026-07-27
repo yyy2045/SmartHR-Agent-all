@@ -63,6 +63,26 @@ class RecruitmentRequestSubmit(BaseModel):
     version_id: uuid.UUID
 
 
+class RecruitmentRequestJobCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    department: str = Field(default="", max_length=100)
+    original_jd: str = Field(min_length=1, max_length=50_000)
+
+    @field_validator("department")
+    @classmethod
+    def normalize_department(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("original_jd")
+    @classmethod
+    def normalize_original_jd(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("职位描述不能为空")
+        return value
+
+
 class RecruitmentRequestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +154,7 @@ class RecruitmentRequestResponse(BaseModel):
     status: RecruitmentRequestStatus
     current_version_number: int
     current_version: RecruitmentRequestVersionResponse
+    linked_job_id: uuid.UUID | None
     versions: list[RecruitmentRequestVersionResponse]
     approvals: list[RecruitmentRequestApprovalResponse]
     created_at: datetime

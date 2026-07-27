@@ -73,6 +73,7 @@ class JobResponse(BaseModel):
     id: uuid.UUID
     recruiter_id: uuid.UUID = Field(validation_alias="owner_id")
     hiring_manager_id: uuid.UUID | None
+    recruitment_request_id: uuid.UUID | None
     title: str
     department: str
     original_jd: str

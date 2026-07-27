@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.dependencies.auth import CurrentUser
 from app.database import get_db
 from app.models import (
+    Job,
     RecruitmentRequest,
     RecruitmentRequestApproval,
     RecruitmentRequestVersion,
@@ -16,10 +17,12 @@ from app.models import (
     User,
     UserRole,
 )
+from app.schemas.job import JobResponse
 from app.schemas.recruitment_request import (
     RecruitmentRequestContent,
     RecruitmentRequestCreate,
     RecruitmentRequestDecision,
+    RecruitmentRequestJobCreate,
     RecruitmentRequestResponse,
     RecruitmentRequestStatus,
     RecruitmentRequestSubmit,
@@ -36,6 +39,7 @@ _LOAD_OPTIONS = (
     selectinload(RecruitmentRequest.created_by),
     selectinload(RecruitmentRequest.versions),
     selectinload(RecruitmentRequest.approvals),
+    selectinload(RecruitmentRequest.job),
 )
 _CONTENT_FIELDS = (
     "job_title",
@@ -319,6 +323,92 @@ def get_recruitment_request(
     db: DbSession,
 ) -> RecruitmentRequest:
     return _get_request(db, request_id, current_user)
+
+
+@router.post(
+    "/{request_id}/job",
+    response_model=JobResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_job_from_recruitment_request(
+    request_id: uuid.UUID,
+    payload: RecruitmentRequestJobCreate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Job:
+    request = _get_request(db, request_id, current_user, for_update=True)
+    can_convert = current_user.has_role("administrator") or (
+        current_user.has_role("recruiter") and request.recruiter_id == current_user.id
+    )
+    if not can_convert:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有指定招聘专员可以创建关联职位",
+        )
+    if request.job is not None:
+        return request.job
+    if request.status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="只有已批准的招聘需求可以创建关联职位",
+        )
+
+    _get_active_user_with_role(
+        db,
+        request.requester_id,
+        "hiring_manager",
+        detail="需求用人经理不存在、已停用或角色不匹配",
+    )
+    _get_active_user_with_role(
+        db,
+        request.recruiter_id,
+        "recruiter",
+        detail="需求招聘专员不存在、已停用或角色不匹配",
+    )
+    current_version = request.current_version
+    job = Job(
+        owner_id=request.recruiter_id,
+        hiring_manager_id=request.requester_id,
+        recruitment_request_id=request.id,
+        title=current_version.job_title,
+        department=payload.department,
+        original_jd=payload.original_jd,
+    )
+    request.job = job
+    request.status = "converted"
+    db.add(job)
+    db.flush()
+    record_audit(
+        db,
+        action="job.created",
+        target_type="job",
+        target_id=job.id,
+        job_id=job.id,
+        result="success",
+        actor=current_user,
+        details={
+            "recruitment_request_id": str(request.id),
+            "recruiter_id": str(request.recruiter_id),
+            "hiring_manager_id": str(request.requester_id),
+        },
+    )
+    record_audit(
+        db,
+        action="recruitment_request.converted",
+        target_type="recruitment_request",
+        target_id=request.id,
+        job_id=job.id,
+        result="success",
+        actor=current_user,
+        details={
+            "job_id": str(job.id),
+            "version_id": str(current_version.id),
+            "version_number": current_version.version_number,
+        },
+    )
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 @router.post(

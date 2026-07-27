@@ -22,6 +22,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.interview import InterviewPlanVersion
+    from app.models.recruitment_request import RecruitmentRequest
     from app.models.resume import ScreeningBatch, ScreeningResult
     from app.models.user import User
 
@@ -30,6 +31,10 @@ class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         CheckConstraint("status IN ('active', 'archived')", name="ck_jobs_status"),
+        UniqueConstraint(
+            "recruitment_request_id",
+            name="uq_jobs_recruitment_request_id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -40,6 +45,9 @@ class Job(Base):
     )
     hiring_manager_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    recruitment_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("recruitment_requests.id", ondelete="RESTRICT")
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     department: Mapped[str] = mapped_column(String(100), nullable=False, default="")
@@ -74,6 +82,9 @@ class Job(Base):
         order_by="InterviewPlanVersion.version_number",
     )
     hiring_manager: Mapped[User | None] = relationship(foreign_keys=[hiring_manager_id])
+    recruitment_request: Mapped[RecruitmentRequest | None] = relationship(
+        back_populates="job"
+    )
 
 
 class JobCriteriaVersion(Base):

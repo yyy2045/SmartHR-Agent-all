@@ -13,6 +13,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     AuditLog,
+    Job,
     RecruitmentRequest,
     RecruitmentRequestApproval,
     RecruitmentRequestVersion,
@@ -121,6 +122,40 @@ def version_payload(source_version_id: str, **changes: object) -> dict[str, obje
     }
     payload.update(changes)
     return payload
+
+
+async def create_approved_request(
+    transport: httpx.ASGITransport,
+) -> tuple[str, str, str]:
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as manager:
+        await login(manager, "manager")
+        recruiter_id = next(
+            item["id"]
+            for item in (await manager.get("/users/options", params={"role": "recruiter"})).json()
+            if item["username"] == "recruiter"
+        )
+        created = await manager.post(
+            "/recruitment-requests",
+            json=request_payload(recruiter_id=recruiter_id),
+        )
+        request_id = created.json()["id"]
+        manager_id = created.json()["requester"]["id"]
+        version_id = created.json()["current_version"]["id"]
+        submitted = await manager.post(
+            f"/recruitment-requests/{request_id}/submit",
+            json={"version_id": version_id},
+        )
+        assert submitted.status_code == 200
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as approver:
+        await login(approver, "approver")
+        approved = await approver.post(
+            f"/recruitment-requests/{request_id}/decision",
+            json={"version_id": version_id, "decision": "approved", "comment": "同意"},
+        )
+        assert approved.status_code == 200
+
+    return request_id, recruiter_id, manager_id
 
 
 @pytest.mark.asyncio
@@ -420,3 +455,114 @@ async def test_creation_validates_roles_and_permissions(request_dependencies: No
             json=request_payload(recruiter_id=recruiter_id),
         )
     assert forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_approved_request_creates_exactly_one_linked_job(
+    request_dependencies: sessionmaker[Session],
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    request_id, recruiter_id, manager_id = await create_approved_request(transport)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as recruiter:
+        await login(recruiter, "recruiter")
+        created = await recruiter.post(
+            f"/recruitment-requests/{request_id}/job",
+            json={"department": "平台研发", "original_jd": "负责核心平台建设。"},
+        )
+        repeated = await recruiter.post(
+            f"/recruitment-requests/{request_id}/job",
+            json={"department": "其他部门", "original_jd": "重复请求不应覆盖。"},
+        )
+        request_detail = await recruiter.get(f"/recruitment-requests/{request_id}")
+
+    assert created.status_code == 201
+    assert created.json()["title"] == "高级后端工程师"
+    assert created.json()["department"] == "平台研发"
+    assert created.json()["recruiter_id"] == recruiter_id
+    assert created.json()["hiring_manager_id"] == manager_id
+    assert created.json()["recruitment_request_id"] == request_id
+    assert repeated.status_code == 201
+    assert repeated.json()["id"] == created.json()["id"]
+    assert repeated.json()["original_jd"] == "负责核心平台建设。"
+    assert request_detail.json()["status"] == "converted"
+    assert request_detail.json()["linked_job_id"] == created.json()["id"]
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as manager:
+        await login(manager, "manager")
+        visible_job = await manager.get(f"/jobs/{created.json()['id']}")
+    assert visible_job.status_code == 200
+
+    with request_dependencies() as db:
+        assert db.scalar(select(func.count(Job.id))) == 1
+        assert (
+            db.scalar(
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.action == "recruitment_request.converted"
+                )
+            )
+            == 1
+        )
+        assert (
+            db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == "job.created")) == 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_only_assigned_recruiter_can_convert_an_approved_request(
+    request_dependencies: sessionmaker[Session],
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as manager:
+        await login(manager, "manager")
+        recruiter_id = next(
+            item["id"]
+            for item in (await manager.get("/users/options", params={"role": "recruiter"})).json()
+            if item["username"] == "recruiter"
+        )
+        created = await manager.post(
+            "/recruitment-requests",
+            json=request_payload(recruiter_id=recruiter_id),
+        )
+        request_id = created.json()["id"]
+        version_id = created.json()["current_version"]["id"]
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as recruiter:
+        await login(recruiter, "recruiter")
+        draft_blocked = await recruiter.post(
+            f"/recruitment-requests/{request_id}/job",
+            json={"department": "", "original_jd": "尚未批准。"},
+        )
+    assert draft_blocked.status_code == 409
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as manager:
+        await login(manager, "manager")
+        await manager.post(
+            f"/recruitment-requests/{request_id}/submit",
+            json={"version_id": version_id},
+        )
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as approver:
+        await login(approver, "approver")
+        await approver.post(
+            f"/recruitment-requests/{request_id}/decision",
+            json={"version_id": version_id, "decision": "approved", "comment": "同意"},
+        )
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as manager:
+        await login(manager, "manager")
+        manager_blocked = await manager.post(
+            f"/recruitment-requests/{request_id}/job",
+            json={"department": "", "original_jd": "不能创建。"},
+        )
+    assert manager_blocked.status_code == 403
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as other:
+        await login(other, "other-recruiter")
+        hidden = await other.post(
+            f"/recruitment-requests/{request_id}/job",
+            json={"department": "", "original_jd": "不能看到。"},
+        )
+    assert hidden.status_code == 404
+
+    with request_dependencies() as db:
+        assert db.scalar(select(func.count(Job.id))) == 0

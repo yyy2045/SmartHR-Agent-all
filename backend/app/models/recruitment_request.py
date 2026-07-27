@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.job import Job
     from app.models.user import User
 
 
@@ -78,6 +79,10 @@ class RecruitmentRequest(Base):
         cascade="all, delete-orphan",
         order_by="RecruitmentRequestApproval.decided_at",
     )
+    job: Mapped[Job | None] = relationship(
+        back_populates="recruitment_request",
+        uselist=False,
+    )
 
     @property
     def current_version(self) -> RecruitmentRequestVersion:
@@ -85,6 +90,10 @@ class RecruitmentRequest(Base):
             if version.version_number == self.current_version_number:
                 return version
         raise RuntimeError("招聘需求当前版本不存在")
+
+    @property
+    def linked_job_id(self) -> uuid.UUID | None:
+        return self.job.id if self.job is not None else None
 
 
 class RecruitmentRequestVersion(Base):
