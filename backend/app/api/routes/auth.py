@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import CurrentUser
+from app.api.dependencies.auth import AuthenticatedUser
 from app.config import settings
 from app.database import get_db
 from app.models import User
 from app.redis_client import get_session_store
-from app.schemas.auth import LoginRequest, UserResponse
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, UserResponse
 from app.services.audit import record_audit
-from app.services.security import verify_password
+from app.services.security import hash_password, verify_password
 from app.services.session_store import SessionStore
 
 router = APIRouter()
@@ -50,7 +50,7 @@ def login(
         session_store.delete(existing_token)
 
     try:
-        token = session_store.create(user.id)
+        token = session_store.create(user.id, user.session_version)
     except Exception:
         record_audit(
             db,
@@ -117,5 +117,57 @@ def logout(
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: CurrentUser) -> User:
+def me(current_user: AuthenticatedUser) -> User:
+    return current_user
+
+
+@router.post("/password", response_model=UserResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    current_user: AuthenticatedUser,
+    db: Annotated[Session, Depends(get_db)],
+    session_store: Annotated[SessionStore, Depends(get_session_store)],
+) -> User:
+    if not verify_password(
+        payload.current_password.get_secret_value(), current_user.password_hash
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前密码错误",
+        )
+
+    current_user.password_hash = hash_password(payload.new_password.get_secret_value())
+    current_user.must_change_password = False
+    current_user.session_version += 1
+    record_audit(
+        db,
+        action="auth.password_changed",
+        target_type="user",
+        target_id=current_user.id,
+        result="success",
+        actor=current_user,
+    )
+    db.flush()
+
+    new_token = session_store.create(current_user.id, current_user.session_version)
+    try:
+        db.commit()
+    except Exception:
+        session_store.delete(new_token)
+        raise
+
+    old_token = request.cookies.get(settings.app_session_cookie)
+    if old_token:
+        session_store.delete(old_token)
+    response.set_cookie(
+        key=settings.app_session_cookie,
+        value=new_token,
+        max_age=settings.app_session_expire_minutes * 60,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
     return current_user

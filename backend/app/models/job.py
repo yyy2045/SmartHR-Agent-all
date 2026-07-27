@@ -23,6 +23,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.interview import InterviewPlanVersion
     from app.models.resume import ScreeningBatch, ScreeningResult
+    from app.models.user import User
 
 
 class Job(Base):
@@ -36,6 +37,9 @@ class Job(Base):
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
+    )
+    hiring_manager_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     department: Mapped[str] = mapped_column(String(100), nullable=False, default="")
@@ -69,6 +73,7 @@ class Job(Base):
         cascade="all, delete-orphan",
         order_by="InterviewPlanVersion.version_number",
     )
+    hiring_manager: Mapped[User | None] = relationship(foreign_keys=[hiring_manager_id])
 
 
 class JobCriteriaVersion(Base):

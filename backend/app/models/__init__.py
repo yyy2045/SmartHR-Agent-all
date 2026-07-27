@@ -25,7 +25,7 @@ from app.models.resume import (
     ScreeningBatch,
     ScreeningResult,
 )
-from app.models.user import User
+from app.models.user import Role, User, UserRole
 
 __all__ = [
     "AuditLog",
@@ -52,8 +52,10 @@ __all__ = [
     "ResumeEmbeddingChunk",
     "ResumeRedaction",
     "ResumeTextSegment",
+    "Role",
     "ScoringDimension",
     "ScreeningBatch",
     "ScreeningResult",
     "User",
+    "UserRole",
 ]

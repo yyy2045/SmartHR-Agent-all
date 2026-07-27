@@ -11,9 +11,11 @@ from app.models import (  # noqa: F401
     JobCriteriaVersion,
     ResumeDocument,
     ResumeTextSegment,
+    Role,
     ScoringDimension,
     ScreeningBatch,
     User,
+    UserRole,
 )
 
 config = context.config
