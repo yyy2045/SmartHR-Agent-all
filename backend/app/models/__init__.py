@@ -13,6 +13,7 @@ from app.models.interview import (
     InterviewScoreAnchor,
     InterviewScoreDimension,
 )
+from app.models.interview_report import InterviewReport, InterviewReportVersion
 from app.models.job import HardRequirement, Job, JobCriteriaVersion, ScoringDimension
 from app.models.knowledge import ResumeEmbeddingChunk
 from app.models.recruitment_request import (
@@ -50,6 +51,8 @@ __all__ = [
     "InterviewPlanVersion",
     "InterviewQuestion",
     "InterviewQuestionResponse",
+    "InterviewReport",
+    "InterviewReportVersion",
     "InterviewRound",
     "InterviewScoreAnchor",
     "InterviewScoreDimension",
