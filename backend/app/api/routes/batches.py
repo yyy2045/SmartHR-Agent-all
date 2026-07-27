@@ -42,6 +42,7 @@ from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job
 from app.services.batch_deletion import BatchDeletionError, stage_batch_files
 from app.services.batch_status import refresh_batch_status
+from app.services.candidate_duplicates import detect_candidate_duplicates
 from app.services.file_storage import (
     FileValidationError,
     delete_private_file,
@@ -177,27 +178,6 @@ def get_latest_screening_result(
         )
         .limit(1)
     )
-
-
-def is_duplicate_resume(
-    db: Session,
-    *,
-    job_id: uuid.UUID,
-    sha256: str,
-    excluded_document_id: uuid.UUID,
-) -> bool:
-    existing_id = db.scalar(
-        select(ResumeDocument.id)
-        .join(ScreeningBatch)
-        .where(
-            ScreeningBatch.job_id == job_id,
-            ResumeDocument.sha256 == sha256,
-            ResumeDocument.storage_key.is_not(None),
-            ResumeDocument.id != excluded_document_id,
-        )
-        .limit(1)
-    )
-    return existing_id is not None
 
 
 def document_response(document: ResumeDocument) -> ResumeDocumentResponse:
@@ -365,16 +345,6 @@ async def process_upload(
             batch_id=batch.id,
             max_size_bytes=settings.max_resume_file_size_mb * 1024 * 1024,
         )
-        if is_duplicate_resume(
-            db,
-            job_id=batch.job_id,
-            sha256=stored.sha256,
-            excluded_document_id=document.id,
-        ):
-            delete_private_file(settings.file_storage_root, stored.storage_key)
-            stored = None
-            raise FileValidationError("duplicate_file", "同一职位下已存在内容相同的简历")
-
         document.original_filename = stored.original_filename
         document.file_extension = stored.file_extension
         document.content_type = stored.content_type
@@ -385,6 +355,8 @@ async def process_upload(
         document.status = "uploaded"
         document.failure_code = None
         document.failure_message = None
+        db.flush()
+        detect_candidate_duplicates(db, document=document)
     except FileValidationError as error:
         document.status = "failed"
         document.failure_code = error.code

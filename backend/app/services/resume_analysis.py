@@ -32,6 +32,7 @@ from app.services.ai_client import (
     get_ai_client,
 )
 from app.services.audit import record_audit
+from app.services.candidate_duplicates import detect_candidate_duplicates
 from app.services.model_payload import (
     ModelPayloadSecurityError,
     build_resume_analysis_payload,
@@ -540,6 +541,7 @@ async def analyze_resume_document(
                 )
                 db.add(profile)
             result.candidate_profile = profile
+            detect_candidate_duplicates(db, document=document, profile=profile)
 
             requirement_map = {item.id: item for item in criteria.hard_requirements}
             result.hard_requirement_results = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable
 
 from app.models import Candidate
@@ -39,6 +40,28 @@ def _is_contact_phone(value: str) -> bool:
     return re.fullmatch(r"0\d{2,3}[- ]?\d{7,8}", phone) is not None
 
 
+def normalize_candidate_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    compact = "".join(character for character in normalized if character.isalnum())
+    return compact or None
+
+
+def normalize_candidate_phone(value: str | None) -> str | None:
+    if value is None or not _is_contact_phone(value):
+        return None
+    digits = re.sub(r"\D", "", value)
+    return digits or None
+
+
+def normalize_candidate_email(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = unicodedata.normalize("NFKC", value).strip().casefold()
+    return normalized or None
+
+
 def sync_candidate_identity(candidate: Candidate | None, result: RedactionResult) -> None:
     if candidate is None:
         return
@@ -47,3 +70,6 @@ def sync_candidate_identity(candidate: Candidate | None, result: RedactionResult
     candidate.full_name = names[0] if names else None
     candidate.phone = _preferred_phone(_values_for(result, "phone"))
     candidate.email = emails[0].lower() if emails else None
+    candidate.full_name_normalized = normalize_candidate_name(candidate.full_name)
+    candidate.phone_normalized = normalize_candidate_phone(candidate.phone)
+    candidate.email_normalized = normalize_candidate_email(candidate.email)

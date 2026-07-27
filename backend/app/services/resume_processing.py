@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import ResumeDocument, ResumeRedaction, ResumeTextSegment, ScreeningBatch
 from app.services.batch_status import refresh_batch_status
+from app.services.candidate_duplicates import detect_candidate_duplicates
 from app.services.candidate_identity import sync_candidate_identity
 from app.services.file_storage import resolve_private_file
 from app.services.resume_parser import ParseResult, ResumeParseError, parse_resume_file
@@ -185,6 +186,7 @@ def process_resume_document(
         )
         document.redaction_count = redaction_result.redaction_count
         sync_candidate_identity(document.candidate, redaction_result)
+        detect_candidate_duplicates(db, document=document)
         document.status = "completed"
         document.failure_code = None
         document.failure_message = None

@@ -20,6 +20,7 @@ from app.main import app
 from app.models import (
     AuditLog,
     Candidate,
+    CandidateDuplicateReview,
     CandidateProfile,
     Job,
     JobApplication,
@@ -369,16 +370,26 @@ async def test_partial_failure_download_duplicate_and_retry(
             files={"files": ("duplicate.pdf", VALID_PDF, "application/pdf")},
         )
         assert duplicate.status_code == 201
-        assert duplicate.json()["status"] == "failed"
-        assert duplicate.json()["documents"][0]["failure_code"] == "duplicate_file"
+        assert duplicate.json()["status"] == "processing"
+        assert duplicate.json()["documents"][0]["status"] == "queued"
+        assert duplicate.json()["documents"][0]["failure_code"] is None
 
     stored_files = [path for path in settings.file_storage_root.rglob("*") if path.is_file()]
-    assert len(stored_files) == 2
+    assert len(stored_files) == 3
     assert all(path.name not in {"private.pdf", "replacement.png"} for path in stored_files)
     with batch_dependencies.session_factory() as db:
+        duplicate_review = db.scalar(select(CandidateDuplicateReview))
         audit = db.scalar(
             select(AuditLog).where(AuditLog.action == "resume.file_viewed")
         )
+        duplicate_audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "candidate.duplicate_detected")
+        )
+    assert duplicate_review is not None
+    assert duplicate_review.status == "pending"
+    assert duplicate_review.confidence == "strong"
+    assert duplicate_review.signals == ["resume_sha256_exact"]
+    assert duplicate_audit is not None
     assert audit is not None
     assert audit.actor_username == "recruiter"
     assert str(audit.target_id) == valid_document["id"]
