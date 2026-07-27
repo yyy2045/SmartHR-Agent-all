@@ -9,7 +9,15 @@ from sqlalchemy.pool import StaticPool
 
 from app.config import settings
 from app.database import Base
-from app.models import Job, JobCriteriaVersion, ResumeDocument, ScreeningBatch, User
+from app.models import (
+    Candidate,
+    Job,
+    JobApplication,
+    JobCriteriaVersion,
+    ResumeDocument,
+    ScreeningBatch,
+    User,
+)
 from app.services.model_payload import send_resume_model_payload
 from app.services.resume_parser import ParsedSegment, ParseResult, ResumeParseError
 from app.services.resume_processing import process_resume_document
@@ -59,8 +67,12 @@ def processing_dependencies(
         )
         db.add(batch)
         db.flush()
+        candidate = Candidate()
+        application = JobApplication(candidate=candidate, job_id=job.id)
         document = ResumeDocument(
             batch_id=batch.id,
+            candidate=candidate,
+            application=application,
             original_filename="resume.pdf",
             file_extension=".pdf",
             content_type="application/pdf",
@@ -148,6 +160,44 @@ def test_processing_saves_stable_segments_and_completes_batch(
         parser=lambda *_: pytest.fail("完成的文件不应重复解析"),
     )
     assert repeated["status"] == "completed"
+
+
+def test_processing_syncs_candidate_identity_from_redactions(
+    processing_dependencies: tuple[sessionmaker[Session], uuid.UUID],
+) -> None:
+    testing_session, document_id = processing_dependencies
+
+    def parser(_: Path, __: str) -> ParseResult:
+        text = (
+            "姓名：张三\n工作时间：2023.09-2027.06\n"
+            "电话：13800138000\n邮箱：ZHANGSAN@example.com"
+        )
+        return ParseResult(
+            extraction_method="pdf_text",
+            segments=[
+                ParsedSegment(
+                    source_type="pdf_page",
+                    source_index=1,
+                    page_number=1,
+                    raw_text=text,
+                    normalized_text=text,
+                )
+            ],
+        )
+
+    result = process_resume_document(
+        document_id,
+        session_factory=testing_session,
+        parser=parser,
+    )
+
+    assert result["status"] == "completed"
+    with testing_session() as db:
+        document = db.get(ResumeDocument, document_id)
+        assert document is not None and document.candidate is not None
+        assert document.candidate.full_name == "张三"
+        assert document.candidate.phone == "13800138000"
+        assert document.candidate.email == "zhangsan@example.com"
 
 
 def test_processing_keeps_redaction_but_raw_batch_sends_original_text(

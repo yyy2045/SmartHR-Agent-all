@@ -10,8 +10,10 @@ from app.api.dependencies.auth import CurrentUser
 from app.config import settings
 from app.database import get_db
 from app.models import (
+    Candidate,
     CandidateProfile,
     DimensionScore,
+    JobApplication,
     JobCriteriaVersion,
     RecruiterDecision,
     ResumeDocument,
@@ -92,7 +94,7 @@ def get_owned_batch(
         )
         .options(
             selectinload(ScreeningBatch.criteria_version),
-            selectinload(ScreeningBatch.documents),
+            selectinload(ScreeningBatch.documents).selectinload(ResumeDocument.candidate),
         )
     )
     if batch is None:
@@ -202,6 +204,8 @@ def document_response(document: ResumeDocument) -> ResumeDocumentResponse:
     return ResumeDocumentResponse(
         id=document.id,
         batch_id=document.batch_id,
+        candidate_id=document.candidate_id,
+        application_id=document.application_id,
         original_filename=document.original_filename,
         file_extension=document.file_extension,
         content_type=document.content_type,
@@ -411,7 +415,7 @@ def list_batches(
         .where(ScreeningBatch.job_id == job_id)
         .options(
             selectinload(ScreeningBatch.criteria_version),
-            selectinload(ScreeningBatch.documents),
+            selectinload(ScreeningBatch.documents).selectinload(ResumeDocument.candidate),
         )
         .order_by(ScreeningBatch.created_at.desc())
     ).all()
@@ -454,8 +458,12 @@ async def create_batch(
     db.flush()
 
     for upload in files:
+        candidate = Candidate()
+        application = JobApplication(candidate=candidate, job_id=job_id)
         document = ResumeDocument(
             batch_id=batch.id,
+            candidate=candidate,
+            application=application,
             original_filename=safe_original_filename(upload.filename),
             content_type=(upload.content_type or "")[:150],
             status="failed",
@@ -819,8 +827,47 @@ def delete_screening_batch(
 
     document_count = len(batch.documents)
     file_count = len(staged_files.files)
+    application_ids = {
+        document.application_id
+        for document in batch.documents
+        if document.application_id is not None
+    }
+    candidate_ids = {
+        document.candidate_id
+        for document in batch.documents
+        if document.candidate_id is not None
+    }
     try:
         db.delete(batch)
+        db.flush()
+        for application_id in application_ids:
+            remaining_documents = db.scalar(
+                select(func.count(ResumeDocument.id)).where(
+                    ResumeDocument.application_id == application_id
+                )
+            )
+            application = db.get(JobApplication, application_id)
+            if application is not None and remaining_documents == 0:
+                db.delete(application)
+        db.flush()
+        for candidate_id in candidate_ids:
+            remaining_documents = db.scalar(
+                select(func.count(ResumeDocument.id)).where(
+                    ResumeDocument.candidate_id == candidate_id
+                )
+            )
+            remaining_applications = db.scalar(
+                select(func.count(JobApplication.id)).where(
+                    JobApplication.candidate_id == candidate_id
+                )
+            )
+            candidate = db.get(Candidate, candidate_id)
+            if (
+                candidate is not None
+                and remaining_documents == 0
+                and remaining_applications == 0
+            ):
+                db.delete(candidate)
         record_audit(
             db,
             action="batch.permanent_delete",

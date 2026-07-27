@@ -21,6 +21,8 @@ class ResumeDocumentResponse(BaseModel):
 
     id: uuid.UUID
     batch_id: uuid.UUID
+    candidate_id: uuid.UUID | None
+    application_id: uuid.UUID | None
     original_filename: str
     file_extension: str
     content_type: str

@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import ResumeDocument, ResumeRedaction, ResumeTextSegment, ScreeningBatch
 from app.services.batch_status import refresh_batch_status
+from app.services.candidate_identity import sync_candidate_identity
 from app.services.file_storage import resolve_private_file
 from app.services.resume_parser import ParseResult, ResumeParseError, parse_resume_file
 from app.services.resume_redactor import RedactionResult, redact_resume_segments
@@ -183,6 +184,7 @@ def process_resume_document(
             len(segment.normalized_text) for segment in result.segments
         )
         document.redaction_count = redaction_result.redaction_count
+        sync_candidate_identity(document.candidate, redaction_result)
         document.status = "completed"
         document.failure_code = None
         document.failure_message = None

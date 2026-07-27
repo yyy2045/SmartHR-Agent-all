@@ -25,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.candidate import Candidate, JobApplication
     from app.models.candidate_process import CandidateProcess
     from app.models.interview import CandidateInterviewSchedule
     from app.models.job import Job, JobCriteriaVersion
@@ -104,6 +105,14 @@ class ResumeDocument(Base):
         nullable=False,
         index=True,
     )
+    candidate_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("candidates.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    application_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("job_applications.id", ondelete="RESTRICT"),
+        index=True,
+    )
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_extension: Mapped[str] = mapped_column(String(16), nullable=False, default="")
     content_type: Mapped[str] = mapped_column(String(150), nullable=False, default="")
@@ -139,6 +148,8 @@ class ResumeDocument(Base):
     )
 
     batch: Mapped[ScreeningBatch] = relationship(back_populates="documents")
+    candidate: Mapped[Candidate | None] = relationship(back_populates="documents")
+    application: Mapped[JobApplication | None] = relationship(back_populates="documents")
     text_segments: Mapped[list[ResumeTextSegment]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
@@ -171,6 +182,8 @@ class ResumeDocument(Base):
 
     @property
     def candidate_code(self) -> str:
+        if self.candidate is not None:
+            return self.candidate.candidate_code
         return f"CAND-{self.id.hex[:12].upper()}"
 
 
