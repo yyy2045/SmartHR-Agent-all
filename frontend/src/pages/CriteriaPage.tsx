@@ -46,6 +46,8 @@ import {
   type JDAIDraft,
   type ScoringDimensionInput,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import { canManageRecruitment } from '../auth/permissions'
 import { ScreeningModuleNav } from '../components/ScreeningModuleNav'
 
 const { Title, Text, Paragraph } = Typography
@@ -190,7 +192,7 @@ function DraftCriteriaEditor({
         disabled={disabled}
         className="criteria-form"
       >
-        <Card className="criteria-section ai-draft-card">
+        {!disabled && <Card className="criteria-section ai-draft-card">
           <div className="ai-draft-heading">
             <div>
               <Title level={4}>AI 辅助生成筛选草稿</Title>
@@ -223,7 +225,7 @@ function DraftCriteriaEditor({
               description={aiDraft.summary}
             />
           )}
-        </Card>
+        </Card>}
 
         <Card
           title="基本评分规则"
@@ -256,7 +258,7 @@ function DraftCriteriaEditor({
                     size="small"
                     key={field.key}
                     title={`硬性要求 ${index + 1}`}
-                    extra={
+                    extra={!disabled ? (
                       <Space size="small">
                         <Button
                           aria-label={`上移硬性要求 ${index + 1}`}
@@ -277,7 +279,7 @@ function DraftCriteriaEditor({
                           onClick={() => remove(field.name)}
                         />
                       </Space>
-                    }
+                    ) : undefined}
                   >
                     <div className="criteria-field-grid">
                       <Form.Item
@@ -335,7 +337,7 @@ function DraftCriteriaEditor({
                     </Form.Item>
                   </Card>
                 ))}
-                <Button
+                {!disabled && <Button
                   type="dashed"
                   block
                   icon={<PlusOutlined />}
@@ -350,7 +352,7 @@ function DraftCriteriaEditor({
                   }
                 >
                   添加硬性要求
-                </Button>
+                </Button>}
               </Space>
             )}
           </Form.List>
@@ -366,7 +368,7 @@ function DraftCriteriaEditor({
                     size="small"
                     key={field.key}
                     title={`评分维度 ${index + 1}`}
-                    extra={
+                    extra={!disabled ? (
                       <Space size="small">
                         <Button
                           aria-label={`上移评分维度 ${index + 1}`}
@@ -387,7 +389,7 @@ function DraftCriteriaEditor({
                           onClick={() => remove(field.name)}
                         />
                       </Space>
-                    }
+                    ) : undefined}
                   >
                     <div className="criteria-dimension-grid">
                       <Form.Item
@@ -410,20 +412,20 @@ function DraftCriteriaEditor({
                     </Form.Item>
                   </Card>
                 ))}
-                <Button
+                {!disabled && <Button
                   type="dashed"
                   block
                   icon={<PlusOutlined />}
                   onClick={() => add({ name: '', description: '', weight_percent: 0 })}
                 >
                   添加评分维度
-                </Button>
+                </Button>}
               </Space>
             )}
           </Form.List>
         </Card>
 
-        <div className="sticky-actions">
+        {!disabled && <div className="sticky-actions">
           <Space wrap>
             <Button
               icon={<SaveOutlined />}
@@ -448,7 +450,7 @@ function DraftCriteriaEditor({
               </Button>
             </Popconfirm>
           </Space>
-        </div>
+        </div>}
       </Form>
     </>
   )
@@ -506,6 +508,7 @@ function ConfirmedCriteriaView({ version }: { version: CriteriaVersion }) {
 
 export function CriteriaPage() {
   const { jobId } = useParams()
+  const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
@@ -558,6 +561,7 @@ export function CriteriaPage() {
   }
 
   const archived = job.data.status === 'archived'
+  const canWrite = canManageRecruitment(auth.user) && !archived
 
   return (
     <>
@@ -572,18 +576,18 @@ export function CriteriaPage() {
             {job.data.department || '未填写部门'} · 配置硬性要求、评分维度和语义通过线
           </Text>
         </div>
-        {!archived && (
+        {canWrite && (
           <Button onClick={() => navigate(`/jobs/${jobId}/edit`)}>编辑职位信息</Button>
         )}
       </div>
 
       <ScreeningModuleNav jobId={jobId} activeKey="criteria" />
 
-      {archived && (
+      {!canWrite && (
         <Alert
           type="warning"
           showIcon
-          message="该职位已归档，筛选标准仅供查看"
+          message={archived ? '该职位已归档，筛选标准仅供查看' : '当前角色可查看筛选标准，但不能修改'}
           className="page-alert"
         />
       )}
@@ -591,15 +595,14 @@ export function CriteriaPage() {
       {versions.length === 0 ? (
         <section className="empty-workspace">
           <Empty description="尚未建立筛选标准">
-            <Button
+            {canWrite && <Button
               type="primary"
               icon={<PlusOutlined />}
               loading={createMutation.isPending}
-              disabled={archived}
               onClick={() => createMutation.mutate(undefined)}
             >
               创建筛选标准草稿
-            </Button>
+            </Button>}
           </Empty>
         </section>
       ) : (
@@ -616,7 +619,7 @@ export function CriteriaPage() {
                 <Tag color={selectedVersion.status === 'draft' ? 'processing' : 'success'}>
                   {selectedVersion.status === 'draft' ? '草稿' : '已确认'}
                 </Tag>
-                {selectedVersion.status === 'confirmed' && !archived && (
+                {selectedVersion.status === 'confirmed' && canWrite && (
                   <Button
                     icon={<CopyOutlined />}
                     loading={createMutation.isPending}
@@ -629,7 +632,7 @@ export function CriteriaPage() {
             </div>
 
             {selectedVersion.status === 'draft' ? (
-              <DraftCriteriaEditor jobId={jobId!} version={selectedVersion} disabled={archived} />
+              <DraftCriteriaEditor jobId={jobId!} version={selectedVersion} disabled={!canWrite} />
             ) : (
               <ConfirmedCriteriaView version={selectedVersion} />
             )}

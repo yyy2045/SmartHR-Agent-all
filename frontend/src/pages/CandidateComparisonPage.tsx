@@ -40,6 +40,11 @@ import {
   type RequirementStatus,
   type ScreeningResultDetail,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import {
+  canManageRecruitment,
+  canViewSensitiveRecruitmentData,
+} from '../auth/permissions'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -94,6 +99,7 @@ interface ComparisonRow {
 
 export function CandidateComparisonPage() {
   const { jobId } = useParams()
+  const auth = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -137,7 +143,9 @@ export function CandidateComparisonPage() {
         evidenceTarget!.resultId,
         evidenceTarget!.citationId,
       ),
-    enabled: Boolean(jobId && evidenceTarget),
+    enabled: Boolean(
+      jobId && evidenceTarget && canViewSensitiveRecruitmentData(auth.user),
+    ),
   })
   const decisionMutation = useMutation({
     mutationFn: () =>
@@ -164,6 +172,9 @@ export function CandidateComparisonPage() {
     decisionTarget?.aiGroup === 'auto_rejected' &&
       ['shortlisted', 'pending'].includes(decisionTarget.action),
   )
+  const canWrite =
+    canManageRecruitment(auth.user) && job.data?.status !== 'archived'
+  const canViewSensitive = canViewSensitiveRecruitmentData(auth.user)
 
   function submitDecision() {
     if (requiresRecoveryReason && !decisionReason.trim()) {
@@ -212,7 +223,7 @@ export function CandidateComparisonPage() {
             <Tag color={decisionMeta[candidate.current_decision].color}>
               {decisionMeta[candidate.current_decision].label}
             </Tag>
-            <Space wrap size="small">
+            {canWrite && <Space wrap size="small">
               <Button
                 size="small"
                 type="primary"
@@ -254,7 +265,7 @@ export function CandidateComparisonPage() {
               >
                 淘汰
               </Button>
-            </Space>
+            </Space>}
           </Space>
         ),
       },
@@ -276,7 +287,7 @@ export function CandidateComparisonPage() {
               {item.missing_items.length > 0 && (
                 <div>{item.missing_items.map((value) => <Tag key={value} color="warning">{value}</Tag>)}</div>
               )}
-              <div className="evidence-button-list">
+              {canViewSensitive && <div className="evidence-button-list">
                 {item.evidence.map((citation) => (
                   <Button
                     key={citation.id}
@@ -289,7 +300,7 @@ export function CandidateComparisonPage() {
                     {citation.segment_key} · {evidenceLocation(citation)}
                   </Button>
                 ))}
-              </div>
+              </div>}
             </div>
           )
         },
@@ -313,7 +324,7 @@ export function CandidateComparisonPage() {
                 {requirementMeta[item.status].label}
               </Tag>
               <Paragraph>{item.rationale}</Paragraph>
-              <div className="evidence-button-list">
+              {canViewSensitive && <div className="evidence-button-list">
                 {citations.map((citation) => (
                   <Button
                     key={citation.id}
@@ -326,7 +337,7 @@ export function CandidateComparisonPage() {
                     {citation.segment_key}
                   </Button>
                 ))}
-              </div>
+              </div>}
             </div>
           )
         },
@@ -335,7 +346,7 @@ export function CandidateComparisonPage() {
       { key: 'gaps', label: '差距', render: (candidate) => <TextList items={candidate.gaps} /> },
       { key: 'missing', label: '缺失项', render: (candidate) => <TextList items={candidate.missing_items} /> },
     ]
-  }, [comparison.data?.candidates])
+  }, [canViewSensitive, canWrite, comparison.data?.candidates])
 
   const columns = useMemo(() => {
     const candidates = comparison.data?.candidates ?? []
@@ -427,7 +438,7 @@ export function CandidateComparisonPage() {
         </>
       )}
 
-      <Modal
+      {canWrite && <Modal
         title={`保存人工结论：${decisionTarget ? decisionMeta[decisionTarget.action].label : ''}`}
         open={Boolean(decisionTarget)}
         okText="保存结论"
@@ -458,9 +469,9 @@ export function CandidateComparisonPage() {
           value={decisionReason}
           onChange={(event) => setDecisionReason(event.target.value)}
         />
-      </Modal>
+      </Modal>}
 
-      <Modal
+      {canViewSensitive && <Modal
         title={evidence.data ? `${evidence.data.segment_key} · 授权原文证据` : '授权原文证据'}
         open={Boolean(evidenceTarget)}
         footer={null}
@@ -485,7 +496,7 @@ export function CandidateComparisonPage() {
             <pre>{evidence.data.original_text}</pre>
           </div>
         )}
-      </Modal>
+      </Modal>}
     </>
   )
 }

@@ -22,6 +22,13 @@ const user = {
   must_change_password: false,
   roles: ['recruiter'],
 }
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
+}
 
 const job: JobDetail = {
   id: 'job-1',
@@ -152,6 +159,34 @@ describe('interview evaluation flow', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('用人经理只能查看面试评价草稿', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') {
+        return jsonResponse({ ...job, hiring_manager_id: manager.id })
+      }
+      if (path === '/api/jobs/job-1/candidate-processes') return jsonResponse([candidate])
+      if (path === evaluationPath) return jsonResponse(baseContext)
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    window.history.replaceState(
+      {},
+      '',
+      '/jobs/job-1/candidates/document-1/interview-evaluations/round-1',
+    )
+    renderApp()
+
+    expect(await screen.findByText('当前角色可查看面试评价，但不能填写或提交')).toBeInTheDocument()
+    expect(
+      await screen.findByLabelText('回答摘要：请介绍一个高并发系统设计案例'),
+    ).toBeDisabled()
+    expect(await screen.findByLabelText('评分依据：系统设计')).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '保存草稿' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '正式提交并锁定' })).not.toBeInTheDocument()
   })
 
   it('保存不完整草稿并在完整填写后提交锁定', async () => {

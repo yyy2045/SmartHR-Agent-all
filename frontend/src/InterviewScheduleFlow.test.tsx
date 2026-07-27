@@ -21,6 +21,13 @@ const user = {
   must_change_password: false,
   roles: ['recruiter'],
 }
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -140,6 +147,57 @@ describe('candidate interview scheduling flow', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('用人经理只能查看已有面试安排和评价', async () => {
+    const schedule: InterviewScheduleRecord = {
+      id: 'schedule-1',
+      document_id: candidate.document_id,
+      candidate_code: candidate.candidate_code,
+      plan_version_id: plan.id,
+      plan_version_number: plan.version_number,
+      status: 'scheduled',
+      created_by_id: user.id,
+      created_at: timestamp,
+      updated_at: timestamp,
+      rounds: [
+        roundFromInput(
+          {
+            plan_round_id: 'plan-round-1',
+            scheduled_start_at: timestamp,
+            interview_method: 'online',
+            location: null,
+            meeting_url: 'https://meeting.example.com/room',
+          },
+          0,
+        ),
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') {
+        return jsonResponse({ ...job(), hiring_manager_id: manager.id })
+      }
+      if (path === '/api/jobs/job-1/candidate-processes') return jsonResponse([candidate])
+      if (path === '/api/jobs/job-1/interview-plans/versions') return jsonResponse([plan])
+      if (path === '/api/jobs/job-1/candidate-processes/document-1/interview-schedule') {
+        return jsonResponse(schedule)
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    window.history.replaceState(
+      {},
+      '',
+      '/jobs/job-1/candidates/document-1/interview-schedule',
+    )
+    renderApp()
+
+    expect(await screen.findByText('当前角色可查看面试安排，但不能创建、改期或取消')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /查看评价/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '改期' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消本轮' })).not.toBeInTheDocument()
   })
 
   it('按确认方案创建完整轮次并支持改期和取消', async () => {

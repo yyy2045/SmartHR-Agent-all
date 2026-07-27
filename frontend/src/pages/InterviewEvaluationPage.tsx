@@ -37,6 +37,8 @@ import {
   type InterviewEvaluationDraftInput,
   type OverallRecommendation,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import { canManageRecruitment } from '../auth/permissions'
 
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -163,6 +165,7 @@ function validateForSubmit(
 
 export function InterviewEvaluationPage() {
   const { jobId, documentId, roundId } = useParams()
+  const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
@@ -193,7 +196,8 @@ export function InterviewEvaluationPage() {
   const archived = job.data?.status === 'archived'
   const submitted = evaluation.data?.evaluation?.status === 'submitted'
   const cancelled = evaluation.data?.round_status === 'cancelled'
-  const readOnly = Boolean(archived || submitted || cancelled)
+  const roleReadOnly = !canManageRecruitment(auth.user)
+  const readOnly = Boolean(roleReadOnly || archived || submitted || cancelled)
   const pageError = job.error ?? candidates.error ?? evaluation.error
   const loading = job.isPending || candidates.isPending || evaluation.isPending
 
@@ -316,6 +320,14 @@ export function InterviewEvaluationPage() {
           type="warning"
           showIcon
           message="该职位已归档，面试评价仅供查看"
+        />
+      )}
+      {roleReadOnly && !archived && (
+        <Alert
+          className="page-alert"
+          type="warning"
+          showIcon
+          message="当前角色可查看面试评价，但不能填写或提交"
         />
       )}
       {cancelled && (
@@ -571,8 +583,12 @@ export function InterviewEvaluationPage() {
                   <Alert
                     type="info"
                     showIcon
-                    message="草稿可随时保存"
-                    description="正式提交后服务端计算加权总分并永久锁定。"
+                    message={readOnly ? '评价草稿仅供查看' : '草稿可随时保存'}
+                    description={
+                      readOnly
+                        ? '当前角色不能修改或提交该评价。'
+                        : '正式提交后服务端计算加权总分并永久锁定。'
+                    }
                   />
                 )}
 
@@ -673,7 +689,7 @@ export function InterviewEvaluationPage() {
         <Empty image={<FileDoneOutlined />} description="没有可用的面试评价上下文" />
       )}
 
-      <Modal
+      {!readOnly && <Modal
         title="确认提交面试评价？"
         open={submitConfirmOpen}
         okText="确认提交"
@@ -683,7 +699,7 @@ export function InterviewEvaluationPage() {
         onCancel={() => setSubmitConfirmOpen(false)}
       >
         <Paragraph>提交后评价将永久锁定，不能继续修改。</Paragraph>
-      </Modal>
+      </Modal>}
     </>
   )
 }

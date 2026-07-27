@@ -50,6 +50,11 @@ import {
   type ScreeningResultFilters,
   type ScreeningResultSummary,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import {
+  canManageRecruitment,
+  canViewSensitiveRecruitmentData,
+} from '../auth/permissions'
 import { ScreeningModuleNav } from '../components/ScreeningModuleNav'
 
 const { Title, Text, Paragraph } = Typography
@@ -121,6 +126,7 @@ function TextItems({ title, items, tone }: { title: string; items: string[]; ton
 
 export function ScreeningResultsPage() {
   const { jobId } = useParams()
+  const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
@@ -180,7 +186,9 @@ export function ScreeningResultsPage() {
         evidenceTarget!.resultId,
         evidenceTarget!.citationId,
       ),
-    enabled: Boolean(jobId && evidenceTarget),
+    enabled: Boolean(
+      jobId && evidenceTarget && canViewSensitiveRecruitmentData(auth.user),
+    ),
   })
   const decisionMutation = useMutation({
     mutationFn: () =>
@@ -218,6 +226,9 @@ export function ScreeningResultsPage() {
       }),
     [results.data, selectedResultIds],
   )
+  const canWrite =
+    canManageRecruitment(auth.user) && job.data?.status !== 'archived'
+  const canViewSensitive = canViewSensitiveRecruitmentData(auth.user)
 
   useEffect(() => {
     if (!results.data) return
@@ -615,7 +626,7 @@ export function ScreeningResultsPage() {
                         ))}
                       </div>
                     )}
-                    <div className="evidence-button-list">
+                    {canViewSensitive && <div className="evidence-button-list">
                       {item.evidence.map((citation) => (
                         <Button
                           key={citation.id}
@@ -628,7 +639,7 @@ export function ScreeningResultsPage() {
                           {citation.segment_key} · {evidenceLocation(citation)}
                         </Button>
                       ))}
-                    </div>
+                    </div>}
                   </Card>
                 ))}
               </div>
@@ -660,7 +671,7 @@ export function ScreeningResultsPage() {
                           <Paragraph>{item.rationale}</Paragraph>
                           <Text type="secondary">期望：{item.expected_value}</Text>
                         </div>
-                        <div className="evidence-button-list">
+                        {canViewSensitive && <div className="evidence-button-list">
                           {citations.map((citation) => (
                             <Button
                               key={citation.id}
@@ -676,7 +687,7 @@ export function ScreeningResultsPage() {
                               {citation.segment_key}
                             </Button>
                           ))}
-                        </div>
+                        </div>}
                       </div>
                     </List.Item>
                   )
@@ -692,7 +703,7 @@ export function ScreeningResultsPage() {
             </Row>
 
             <Card title="人工决策" className="decision-panel">
-              <Space wrap>
+              {canWrite && <Space wrap>
                 <Button
                   type="primary"
                   icon={<CheckCircleOutlined />}
@@ -716,7 +727,7 @@ export function ScreeningResultsPage() {
                 >
                   人工淘汰
                 </Button>
-              </Space>
+              </Space>}
               <Timeline
                 className="decision-timeline"
                 items={detail.data.decision_history.map((item) => ({
@@ -741,7 +752,7 @@ export function ScreeningResultsPage() {
         )}
       </Drawer>
 
-      <Modal
+      {canWrite && <Modal
         title={`保存人工结论：${decisionAction ? decisionMeta[decisionAction].label : ''}`}
         open={Boolean(decisionAction)}
         okText="保存结论"
@@ -773,9 +784,9 @@ export function ScreeningResultsPage() {
           placeholder="说明判断依据或需要后续核实的事项"
           onChange={(event) => setDecisionReason(event.target.value)}
         />
-      </Modal>
+      </Modal>}
 
-      <Modal
+      {canViewSensitive && <Modal
         title={evidence.data ? `${evidence.data.segment_key} · 授权原文证据` : '授权原文证据'}
         open={Boolean(evidenceTarget)}
         footer={null}
@@ -807,7 +818,7 @@ export function ScreeningResultsPage() {
             <pre>{evidence.data.original_text}</pre>
           </div>
         )}
-      </Modal>
+      </Modal>}
     </>
   )
 }
