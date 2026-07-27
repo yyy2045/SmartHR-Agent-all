@@ -10,11 +10,11 @@ from app.api.routes.batches import screening_result_response
 from app.database import get_db
 from app.models import (
     DimensionScore,
-    Job,
     RecruiterDecision,
     ResumeDocument,
     ScreeningBatch,
     ScreeningResult,
+    User,
 )
 from app.schemas.screening import (
     AIGroup,
@@ -29,6 +29,7 @@ from app.schemas.screening import (
     ScreeningResultSummaryResponse,
 )
 from app.services.audit import record_audit
+from app.services.authorization import ensure_job_writable, get_visible_job
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -57,18 +58,20 @@ def _get_owned_result(
     *,
     job_id: uuid.UUID,
     result_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
+    writable: bool = False,
     for_update: bool = False,
 ) -> ScreeningResult:
+    job = get_visible_job(db, job_id, user)
+    if writable:
+        ensure_job_writable(job, user)
     statement = (
         select(ScreeningResult)
         .join(ResumeDocument)
         .join(ScreeningBatch)
-        .join(Job)
         .where(
             ScreeningResult.id == result_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(*_result_options())
     )
@@ -123,6 +126,7 @@ def list_screening_results(
     max_score: Annotated[float | None, Query(ge=0, le=100)] = None,
     decision: ManualDecision | None = None,
 ) -> list[ScreeningResultSummaryResponse]:
+    get_visible_job(db, job_id, current_user)
     if min_score is not None and max_score is not None and min_score > max_score:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -133,11 +137,7 @@ def list_screening_results(
         select(ScreeningResult)
         .join(ResumeDocument)
         .join(ScreeningBatch)
-        .join(Job)
-        .where(
-            ScreeningBatch.job_id == job_id,
-            Job.owner_id == current_user.id,
-        )
+        .where(ScreeningBatch.job_id == job_id)
         .options(*_result_options())
     )
     all_results = list(db.scalars(statement).unique().all())
@@ -225,15 +225,14 @@ def compare_screening_results(
     current_user: CurrentUser,
     db: DbSession,
 ) -> CandidateComparisonResponse:
+    get_visible_job(db, job_id, current_user)
     results = list(
         db.scalars(
             select(ScreeningResult)
             .join(ResumeDocument)
             .join(ScreeningBatch)
-            .join(Job)
             .where(
                 ScreeningResult.id.in_(payload.result_ids),
-                Job.owner_id == current_user.id,
             )
             .options(*_result_options())
         )
@@ -291,7 +290,7 @@ def get_screening_result(
         db,
         job_id=job_id,
         result_id=result_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     return screening_result_response(result, result.document.candidate_code)
 
@@ -311,7 +310,8 @@ def get_original_evidence(
         db,
         job_id=job_id,
         result_id=result_id,
-        owner_id=current_user.id,
+        user=current_user,
+        writable=True,
     )
     citation = next(
         (item for item in result.evidence_citations if item.id == citation_id),
@@ -358,7 +358,8 @@ def create_recruiter_decision(
         db,
         job_id=job_id,
         result_id=result_id,
-        owner_id=current_user.id,
+        user=current_user,
+        writable=True,
         for_update=True,
     )
     if result.status != "completed":

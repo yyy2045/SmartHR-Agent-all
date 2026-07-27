@@ -30,7 +30,11 @@ export function LoginPage() {
   async function handleSubmit(credentials: LoginCredentials) {
     setFormError(null)
     try {
-      await auth.login(credentials)
+      const user = await auth.login(credentials)
+      if (user.must_change_password) {
+        navigate('/change-password', { replace: true })
+        return
+      }
       const destination = (location.state as LocationState | null)?.from || '/'
       navigate(destination, { replace: true })
     } catch (error) {

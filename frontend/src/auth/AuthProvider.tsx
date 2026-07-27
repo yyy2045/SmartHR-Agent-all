@@ -2,11 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, type ReactNode } from 'react'
 
 import {
+  changePassword as changePasswordRequest,
   fetchCurrentUser,
   login as loginRequest,
   logout as logoutRequest,
   AUTH_UNAUTHORIZED_EVENT,
   type AuthUser,
+  type ChangePasswordInput,
   type LoginCredentials,
 } from '../api/client'
 import { AuthContext } from './context'
@@ -23,6 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
   const loginMutation = useMutation({ mutationFn: loginRequest })
   const logoutMutation = useMutation({ mutationFn: logoutRequest })
+  const changePasswordMutation = useMutation({ mutationFn: changePasswordRequest })
 
   useEffect(() => {
     function handleUnauthorized() {
@@ -43,6 +46,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.setQueryData(currentUserQueryKey, null)
   }
 
+  async function changePassword(payload: ChangePasswordInput): Promise<AuthUser> {
+    const user = await changePasswordMutation.mutateAsync(payload)
+    queryClient.setQueryData(currentUserQueryKey, user)
+    return user
+  }
+
   async function retry(): Promise<void> {
     await currentUser.refetch()
   }
@@ -54,9 +63,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading: currentUser.isPending,
         isLoggingIn: loginMutation.isPending,
         isLoggingOut: logoutMutation.isPending,
+        isChangingPassword: changePasswordMutation.isPending,
         error: currentUser.error instanceof Error ? currentUser.error : null,
         login,
         logout,
+        changePassword,
         retry,
       }}
     >

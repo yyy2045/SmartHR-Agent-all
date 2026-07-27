@@ -68,6 +68,9 @@ function pageMeta(pathname: string) {
   if (pathname.endsWith('/history') && pathname.includes('/documents/')) {
     return { title: '候选人资料与版本', subtitle: '修正结构化资料并追踪每次分析结果' }
   }
+  if (pathname.startsWith('/settings/users')) {
+    return { title: '用户与权限', subtitle: '管理账号、角色和登录状态' }
+  }
   return { title: '职位管理', subtitle: '管理招聘职位与版本化筛选标准' }
 }
 
@@ -80,6 +83,13 @@ export function AppLayout() {
   const meta = pageMeta(location.pathname)
   const activeModule = businessModuleForPath(location.pathname)
   const jobId = jobIdFromPath(location.pathname)
+  const canAccessJobs = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
+  )
+  const canCreateJobs = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter'].includes(role),
+  )
+  const isAdministrator = auth.user?.roles.includes('administrator') ?? false
   const navigationItems: NavigationItem[] = [
     {
       key: 'workbench',
@@ -87,30 +97,39 @@ export function AppLayout() {
       icon: <AppstoreOutlined />,
       badge: '待开发',
     },
-    { key: 'jobs', label: '岗位管理', icon: <ProfileOutlined />, path: '/' },
-    {
-      key: 'screening',
-      label: '智能筛选',
-      icon: <FileSearchOutlined />,
-      path: jobId ? `/jobs/${jobId}/batches` : undefined,
-      badge: jobId ? undefined : '先选岗位',
-    },
-    {
-      key: 'candidate-process',
-      label: '候选人流程',
-      icon: <TeamOutlined />,
-      path: jobId ? `/jobs/${jobId}/pipeline` : undefined,
-      badge: jobId ? undefined : '先选岗位',
-    },
-    {
-      key: 'interviews',
-      label: '面试管理',
-      icon: <CalendarOutlined />,
-      path: jobId ? `/jobs/${jobId}/interview-plan` : undefined,
-      badge: jobId ? undefined : '先选岗位',
-    },
-    { key: 'talent', label: '人才库', icon: <DatabaseOutlined />, badge: '待开发' },
-    { key: 'analytics', label: '数据分析', icon: <BarChartOutlined />, badge: '待开发' },
+    ...(canAccessJobs
+      ? [
+          { key: 'jobs' as const, label: '岗位管理', icon: <ProfileOutlined />, path: '/' },
+          {
+            key: 'screening' as const,
+            label: '智能筛选',
+            icon: <FileSearchOutlined />,
+            path: jobId ? `/jobs/${jobId}/batches` : undefined,
+            badge: jobId ? undefined : '先选岗位',
+          },
+          {
+            key: 'candidate-process' as const,
+            label: '候选人流程',
+            icon: <TeamOutlined />,
+            path: jobId ? `/jobs/${jobId}/pipeline` : undefined,
+            badge: jobId ? undefined : '先选岗位',
+          },
+          {
+            key: 'interviews' as const,
+            label: '面试管理',
+            icon: <CalendarOutlined />,
+            path: jobId ? `/jobs/${jobId}/interview-plan` : undefined,
+            badge: jobId ? undefined : '先选岗位',
+          },
+          { key: 'talent' as const, label: '人才库', icon: <DatabaseOutlined />, badge: '待开发' },
+          {
+            key: 'analytics' as const,
+            label: '数据分析',
+            icon: <BarChartOutlined />,
+            badge: '待开发',
+          },
+        ]
+      : []),
   ]
   const health = useQuery({
     queryKey: ['health', 'live'],
@@ -190,10 +209,20 @@ export function AppLayout() {
         </nav>
 
         <div className="sidebar-footer">
-          <button type="button" className="nav-item" aria-label="系统设置" disabled>
+          <button
+            type="button"
+            className={`nav-item${activeModule === 'settings' ? ' is-active' : ''}`}
+            aria-label="系统设置"
+            aria-current={activeModule === 'settings' ? 'page' : undefined}
+            disabled={!isAdministrator}
+            onClick={() => {
+              if (!isAdministrator) return
+              navigate('/settings/users')
+              setMobileNavOpen(false)
+            }}
+          >
             <SettingOutlined />
             <span>系统设置</span>
-            <small>待开发</small>
           </button>
           <div className="sidebar-service-card" aria-label="服务状态">
             <span className="service-dot" />
@@ -254,14 +283,16 @@ export function AppLayout() {
           </div>
 
           <Space size="middle" className="header-actions">
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              className="header-primary-action"
-              onClick={() => navigate('/jobs/new')}
-            >
-              发布职位
-            </Button>
+            {canCreateJobs && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                className="header-primary-action"
+                onClick={() => navigate('/jobs/new')}
+              >
+                发布职位
+              </Button>
+            )}
             <Tooltip title="消息中心将在后续功能开放">
               <Button aria-label="消息中心" icon={<BellOutlined />} disabled />
             </Tooltip>

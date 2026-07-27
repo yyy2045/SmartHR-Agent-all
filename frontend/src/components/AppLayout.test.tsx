@@ -8,23 +8,32 @@ import { AppLayout } from './AppLayout'
 import { businessModuleForPath, defaultPathForModule, jobIdFromPath } from './navigation'
 
 const auth: AuthContextValue = {
-  user: { id: 'user-1', username: 'recruiter', display_name: '招聘专员' },
+  user: {
+    id: 'user-1',
+    username: 'recruiter',
+    display_name: '招聘专员',
+    is_active: true,
+    must_change_password: false,
+    roles: ['recruiter'],
+  },
   isLoading: false,
   isLoggingIn: false,
   isLoggingOut: false,
+  isChangingPassword: false,
   error: null,
   login: vi.fn(),
   logout: vi.fn(),
+  changePassword: vi.fn(),
   retry: vi.fn(),
 }
 
-function renderLayout(path: string) {
+function renderLayout(path: string, authValue: AuthContextValue = auth) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <QueryClientProvider client={queryClient}>
-      <AuthContext.Provider value={auth}>
+      <AuthContext.Provider value={authValue}>
         <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route element={<AppLayout />}>
@@ -45,6 +54,8 @@ function LocationProbe() {
 const jobs = [
   {
     id: 'job-1',
+    recruiter_id: 'user-1',
+    hiring_manager_id: null,
     title: '后端工程师',
     department: '技术平台部',
     original_jd: '负责平台研发',
@@ -55,6 +66,8 @@ const jobs = [
   },
   {
     id: 'job-2',
+    recruiter_id: 'user-1',
+    hiring_manager_id: null,
     title: '产品经理',
     department: '企业产品部',
     original_jd: '负责招聘产品',
@@ -128,6 +141,20 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: /人才库/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /数据分析/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /系统设置/ })).toBeDisabled()
+  })
+
+  it('管理员可进入系统设置并保持菜单高亮', () => {
+    mockApi()
+    renderLayout('/settings/users', {
+      ...auth,
+      user: { ...auth.user!, roles: ['administrator'] },
+    })
+
+    expect(screen.getByRole('button', { name: '系统设置' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '系统设置' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
   })
 
   it('新建岗位页没有错误的岗位上下文', () => {

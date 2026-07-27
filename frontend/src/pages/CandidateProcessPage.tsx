@@ -43,6 +43,11 @@ import {
   type CandidateProcessFilters,
   type CandidateStage,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import {
+  canManageRecruitment,
+  canViewSensitiveRecruitmentData,
+} from '../auth/permissions'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -114,6 +119,7 @@ function stageDuration(value: string) {
 
 export function CandidateProcessPage() {
   const { jobId } = useParams()
+  const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
@@ -190,6 +196,9 @@ export function CandidateProcessPage() {
     return result
   }, [candidates.data])
   const pageError = job.error ?? candidates.error ?? batches.error
+  const canWrite =
+    canManageRecruitment(auth.user) && job.data?.status === 'active'
+  const canViewSensitive = canViewSensitiveRecruitmentData(auth.user)
   const rank = (value: CandidateStage) => stageOrder.indexOf(value)
   const reasonRequired = Boolean(
     changeTarget &&
@@ -231,6 +240,16 @@ export function CandidateProcessPage() {
           刷新
         </Button>
       </div>
+
+      {job.data && !canWrite && (
+        <Alert
+          type="warning"
+          showIcon
+          className="page-alert"
+          message="当前候选人流程仅供查看"
+          description="当前角色不能调整候选人阶段或填写面试评价。"
+        />
+      )}
 
       <Card className="candidate-board-filter-card" size="small">
         <Space wrap size="middle">
@@ -337,12 +356,12 @@ export function CandidateProcessPage() {
                     <Paragraph ellipsis={{ rows: 1 }} title={candidate.original_filename}>
                       {candidate.original_filename}
                     </Paragraph>
-                    <Text
+                    {canViewSensitive && <Text
                       type={candidate.phone ? undefined : 'secondary'}
                       className="candidate-flow-phone"
                     >
                       <PhoneOutlined /> {candidate.phone || '未识别电话'}
-                    </Text>
+                    </Text>}
                     <Space wrap size={[4, 6]}>
                       <Tag color={aiGroupMeta[candidate.ai_group].color}>
                         {aiGroupMeta[candidate.ai_group].label}
@@ -403,7 +422,7 @@ export function CandidateProcessPage() {
                               )
                             }
                           >
-                            {candidate.interview_evaluation.action_evaluation_status ===
+                            {!canWrite || candidate.interview_evaluation.action_evaluation_status ===
                             'submitted'
                               ? '查看评价'
                               : candidate.interview_evaluation.action_evaluation_status ===
@@ -441,7 +460,7 @@ export function CandidateProcessPage() {
                         面试安排
                       </Button>
                       <div className="candidate-flow-actions-secondary">
-                        {allowedTransitions[candidate.current_stage].length > 0 && (
+                        {canWrite && allowedTransitions[candidate.current_stage].length > 0 && (
                           <Button
                             size="small"
                             type="primary"
@@ -482,7 +501,7 @@ export function CandidateProcessPage() {
         </div>
       )}
 
-      <Modal
+      {canWrite && <Modal
         title={changeTarget ? `调整 ${changeTarget.candidate_code} 的阶段` : '调整候选人阶段'}
         open={Boolean(changeTarget)}
         okText="确认调整"
@@ -539,7 +558,7 @@ export function CandidateProcessPage() {
             />
           </div>
         </Space>
-      </Modal>
+      </Modal>}
 
       <Drawer
         title={timelineTarget ? `${timelineTarget.candidate_code} · 操作时间线` : '操作时间线'}

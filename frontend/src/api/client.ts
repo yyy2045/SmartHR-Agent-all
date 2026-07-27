@@ -6,11 +6,21 @@ export interface AuthUser {
   id: string
   username: string
   display_name: string
+  is_active: boolean
+  must_change_password: boolean
+  roles: RoleKey[]
 }
+
+export type RoleKey = 'administrator' | 'recruiter' | 'hiring_manager' | 'approver'
 
 export interface LoginCredentials {
   username: string
   password: string
+}
+
+export interface ChangePasswordInput {
+  current_password: string
+  new_password: string
 }
 
 export type JobStatus = 'active' | 'archived'
@@ -28,10 +38,14 @@ export interface JobInput {
   title: string
   department: string
   original_jd: string
+  recruiter_id?: string
+  hiring_manager_id?: string | null
 }
 
 export interface JobRecord extends JobInput {
   id: string
+  recruiter_id: string
+  hiring_manager_id: string | null
   status: JobStatus
   archived_at: string | null
   created_at: string
@@ -721,6 +735,87 @@ export function logout(): Promise<void> {
       method: 'POST',
     },
     '退出失败，请稍后重试',
+  )
+}
+
+export interface ManagedUser {
+  id: string
+  username: string
+  display_name: string
+  is_active: boolean
+  must_change_password: boolean
+  roles: RoleKey[]
+  created_at: string
+  updated_at: string
+}
+
+export interface UserOption {
+  id: string
+  username: string
+  display_name: string
+  roles: RoleKey[]
+}
+
+export interface UserCreateInput {
+  username: string
+  display_name: string
+  temporary_password: string
+  roles: RoleKey[]
+}
+
+export interface UserUpdateInput {
+  display_name?: string
+  is_active?: boolean
+  roles?: RoleKey[]
+}
+
+export function changePassword(payload: ChangePasswordInput): Promise<AuthUser> {
+  return apiRequest<AuthUser>(
+    '/api/auth/password',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    '修改密码失败',
+  )
+}
+
+export function fetchUsers(): Promise<ManagedUser[]> {
+  return apiRequest('/api/users', {}, '无法读取用户列表')
+}
+
+export function createUser(payload: UserCreateInput): Promise<ManagedUser> {
+  return apiRequest(
+    '/api/users',
+    { method: 'POST', body: JSON.stringify(payload) },
+    '创建用户失败',
+  )
+}
+
+export function updateUser(userId: string, payload: UserUpdateInput): Promise<ManagedUser> {
+  return apiRequest(
+    `/api/users/${userId}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+    '更新用户失败',
+  )
+}
+
+export function resetUserPassword(
+  userId: string,
+  temporaryPassword: string,
+): Promise<ManagedUser> {
+  return apiRequest(
+    `/api/users/${userId}/reset-password`,
+    { method: 'POST', body: JSON.stringify({ temporary_password: temporaryPassword }) },
+    '重置临时密码失败',
+  )
+}
+
+export function fetchUserOptions(role: RoleKey): Promise<UserOption[]> {
+  return apiRequest(
+    `/api/users/options?role=${encodeURIComponent(role)}`,
+    {},
+    '无法读取负责人选项',
   )
 }
 

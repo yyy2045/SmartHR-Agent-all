@@ -12,12 +12,12 @@ from app.database import get_db
 from app.models import (
     CandidateProfile,
     DimensionScore,
-    Job,
     JobCriteriaVersion,
     RecruiterDecision,
     ResumeDocument,
     ScreeningBatch,
     ScreeningResult,
+    User,
 )
 from app.schemas.batch import (
     BatchDeletionRequest,
@@ -37,6 +37,7 @@ from app.schemas.screening import (
     ScreeningResultResponse,
 )
 from app.services.audit import record_audit
+from app.services.authorization import ensure_job_writable, get_visible_job
 from app.services.batch_deletion import BatchDeletionError, stage_batch_files
 from app.services.batch_status import refresh_batch_status
 from app.services.file_storage import (
@@ -50,13 +51,6 @@ from app.workers.dispatcher import enqueue_resume_analysis, enqueue_resume_parsi
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
-
-
-def get_owned_job(db: Session, job_id: uuid.UUID, owner_id: uuid.UUID) -> Job:
-    job = db.scalar(select(Job).where(Job.id == job_id, Job.owner_id == owner_id))
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="职位不存在")
-    return job
 
 
 def get_confirmed_version(
@@ -83,15 +77,18 @@ def get_owned_batch(
     db: Session,
     job_id: uuid.UUID,
     batch_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
+    *,
+    writable: bool = False,
 ) -> ScreeningBatch:
+    job = get_visible_job(db, job_id, user)
+    if writable:
+        ensure_job_writable(job, user)
     batch = db.scalar(
         select(ScreeningBatch)
-        .join(Job)
         .where(
             ScreeningBatch.id == batch_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(
             selectinload(ScreeningBatch.criteria_version),
@@ -108,17 +105,20 @@ def get_owned_document(
     job_id: uuid.UUID,
     batch_id: uuid.UUID,
     document_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
+    *,
+    writable: bool = False,
 ) -> ResumeDocument:
+    job = get_visible_job(db, job_id, user)
+    if writable:
+        ensure_job_writable(job, user)
     document = db.scalar(
         select(ResumeDocument)
         .join(ScreeningBatch)
-        .join(Job)
         .where(
             ResumeDocument.id == document_id,
             ResumeDocument.batch_id == batch_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
     )
     if document is None:
@@ -131,17 +131,17 @@ def get_owned_document_detail(
     job_id: uuid.UUID,
     batch_id: uuid.UUID,
     document_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
 ) -> ResumeDocument:
+    job = get_visible_job(db, job_id, user)
+    ensure_job_writable(job, user)
     document = db.scalar(
         select(ResumeDocument)
         .join(ScreeningBatch)
-        .join(Job)
         .where(
             ResumeDocument.id == document_id,
             ResumeDocument.batch_id == batch_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(selectinload(ResumeDocument.text_segments))
     )
@@ -405,7 +405,7 @@ def list_batches(
     current_user: CurrentUser,
     db: DbSession,
 ) -> list[ScreeningBatchResponse]:
-    get_owned_job(db, job_id, current_user.id)
+    get_visible_job(db, job_id, current_user)
     batches = db.scalars(
         select(ScreeningBatch)
         .where(ScreeningBatch.job_id == job_id)
@@ -438,7 +438,8 @@ async def create_batch(
             detail=f"单批最多上传 {settings.max_batch_file_count} 份简历",
         )
 
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     if job.status == "archived":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="已归档职位不能上传简历")
     get_confirmed_version(db, job_id, criteria_version_id)
@@ -468,11 +469,11 @@ async def create_batch(
 
     refresh_batch_status(batch)
     db.commit()
-    batch = get_owned_batch(db, job_id, batch.id, current_user.id)
+    batch = get_owned_batch(db, job_id, batch.id, current_user)
     for document in batch.documents:
         if document.status == "uploaded":
             queue_document(db, document)
-    return batch_response(get_owned_batch(db, job_id, batch.id, current_user.id))
+    return batch_response(get_owned_batch(db, job_id, batch.id, current_user))
 
 
 @router.get("/{job_id}/batches/{batch_id}", response_model=ScreeningBatchResponse)
@@ -482,7 +483,7 @@ def get_batch(
     current_user: CurrentUser,
     db: DbSession,
 ) -> ScreeningBatchResponse:
-    return batch_response(get_owned_batch(db, job_id, batch_id, current_user.id))
+    return batch_response(get_owned_batch(db, job_id, batch_id, current_user))
 
 
 @router.put(
@@ -497,13 +498,14 @@ async def retry_failed_document(
     db: DbSession,
     file: Annotated[UploadFile, File()],
 ) -> ResumeDocumentResponse:
-    batch = get_owned_batch(db, job_id, batch_id, current_user.id)
+    batch = get_owned_batch(db, job_id, batch_id, current_user, writable=True)
     document = get_owned_document(
         db,
         job_id,
         batch_id,
         document_id,
-        current_user.id,
+        current_user,
+        writable=True,
     )
     if document.status != "failed":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有失败文件可以重试")
@@ -550,7 +552,8 @@ def retry_document_parsing(
         job_id,
         batch_id,
         document_id,
-        current_user.id,
+        current_user,
+        writable=True,
     )
     if document.status != "failed":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="只有失败文件可以重试")
@@ -592,7 +595,7 @@ def get_document_detail(
         job_id,
         batch_id,
         document_id,
-        current_user.id,
+        current_user,
     )
     return ResumeDocumentDetailResponse(
         **document_response(document).model_dump(),
@@ -619,7 +622,7 @@ def get_document_analysis(
         job_id,
         batch_id,
         document_id,
-        current_user.id,
+        current_user,
     )
     result = get_latest_screening_result(db, document.id)
     if result is None:
@@ -644,7 +647,8 @@ def retry_document_analysis(
         job_id,
         batch_id,
         document_id,
-        current_user.id,
+        current_user,
+        writable=True,
     )
     if document.status != "completed" or document.redacted_at is None:
         raise HTTPException(
@@ -728,7 +732,8 @@ def download_resume_file(
         job_id,
         batch_id,
         document_id,
-        current_user.id,
+        current_user,
+        writable=True,
     )
     if not document.storage_key:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原始文件不可用")
@@ -764,7 +769,7 @@ def delete_screening_batch(
     current_user: CurrentUser,
     db: DbSession,
 ) -> BatchDeletionResponse:
-    batch = get_owned_batch(db, job_id, batch_id, current_user.id)
+    batch = get_owned_batch(db, job_id, batch_id, current_user, writable=True)
     if payload.confirmation != "永久删除":
         record_audit(
             db,

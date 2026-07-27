@@ -8,6 +8,9 @@ const user = {
   id: '03f8ba31-0a83-4466-bc4c-143bd3279680',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
 }
 
 describe('authentication flow', () => {
@@ -73,5 +76,64 @@ describe('authentication flow', () => {
     await waitFor(() => expect(queryClient.getQueryData(['auth', 'current-user'])).toBeNull())
     await waitFor(() => expect(window.location.pathname).toBe('/login'))
     expect(await screen.findByRole('heading', { name: '登录' })).toBeInTheDocument()
+  })
+
+  it('临时密码登录后强制修改密码再进入业务页面', async () => {
+    const temporaryUser = { ...user, must_change_password: true }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') {
+        return new Response(JSON.stringify(temporaryUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (path === '/api/auth/password' && init?.method === 'POST') {
+        return new Response(JSON.stringify(user), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (path === '/api/health/live') {
+        return new Response(JSON.stringify({ status: 'ok' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (path.startsWith('/api/jobs')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(null, { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState({}, '', '/')
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '设置新密码' })).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/change-password')
+    fireEvent.change(screen.getByLabelText('当前临时密码'), {
+      target: { value: 'temporary-password' },
+    })
+    fireEvent.change(screen.getByLabelText('新密码'), {
+      target: { value: 'new-password-123' },
+    })
+    fireEvent.change(screen.getByLabelText('确认新密码'), {
+      target: { value: 'new-password-123' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存并进入工作台' }))
+
+    expect(await screen.findByRole('heading', { name: '岗位管理' })).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/')
   })
 })

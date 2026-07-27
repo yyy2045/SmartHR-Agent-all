@@ -55,6 +55,11 @@ import {
   type ResumeDocumentRecord,
   type ScreeningBatchRecord,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import {
+  canManageRecruitment,
+  canViewSensitiveRecruitmentData,
+} from '../auth/permissions'
 import { ScreeningModuleNav } from '../components/ScreeningModuleNav'
 
 const { Title, Text } = Typography
@@ -121,12 +126,14 @@ function segmentLocation(
 function BatchCard({
   batch,
   jobId,
-  archived,
+  canWrite,
+  canViewSensitive,
   criteriaVersions,
 }: {
   batch: ScreeningBatchRecord
   jobId: string
-  archived: boolean
+  canWrite: boolean
+  canViewSensitive: boolean
   criteriaVersions: CriteriaVersion[]
 }) {
   const navigate = useNavigate()
@@ -217,7 +224,7 @@ function BatchCard({
 
   const documentActions = (document: ResumeDocumentRecord): ReactNode[] => {
     const actions: ReactNode[] = []
-    if (document.status === 'completed') {
+    if (document.status === 'completed' && canViewSensitive) {
       actions.push(
         <Button
           key="detail"
@@ -228,6 +235,8 @@ function BatchCard({
           查看文本
         </Button>,
       )
+    }
+    if (document.status === 'completed') {
       actions.push(
         <Button
           key="history"
@@ -243,13 +252,12 @@ function BatchCard({
         </Button>,
       )
     }
-    if (document.status === 'failed' && document.has_original_file) {
+    if (canWrite && document.status === 'failed' && document.has_original_file) {
       actions.push(
         <Button
           key="parse-retry"
           type="link"
           icon={<RedoOutlined />}
-          disabled={archived}
           loading={parseRetryMutation.isPending}
           onClick={() => parseRetryMutation.mutate(document.id)}
         >
@@ -257,14 +265,14 @@ function BatchCard({
         </Button>,
       )
     }
-    if (document.status === 'failed' && !document.has_original_file) {
+    if (canWrite && document.status === 'failed' && !document.has_original_file) {
       actions.push(
         <Upload
           key="upload-retry"
           accept=".pdf,.docx,.jpg,.jpeg,.png"
           maxCount={1}
           showUploadList={false}
-          disabled={archived || retryMutation.isPending}
+          disabled={retryMutation.isPending}
           beforeUpload={(file) => {
             retryMutation.mutate({ documentId: document.id, file })
             return Upload.LIST_IGNORE
@@ -280,7 +288,7 @@ function BatchCard({
         </Upload>,
       )
     }
-    if (document.has_original_file) {
+    if (canViewSensitive && document.has_original_file) {
       actions.push(
         <Button
           key="download"
@@ -315,28 +323,29 @@ function BatchCard({
             <Text type="secondary">批次处理进度</Text>
             <Progress percent={processedPercent} size="small" />
           </div>
-          <Button
-            icon={<ReloadOutlined />}
-            disabled={
-              archived ||
-              !batch.documents.some(
-                (document) => document.status === 'completed' && document.redacted_at,
-              )
-            }
-            onClick={() => {
-              setReanalysisCriteriaVersionId(criteriaVersions[0]?.id)
-              setReanalysisOpen(true)
-            }}
-          >
-            整批重新分析
-          </Button>
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => setDeleteOpen(true)}
-          >
-            永久删除
-          </Button>
+          {canWrite && (
+            <>
+              <Button
+                icon={<ReloadOutlined />}
+                disabled={!batch.documents.some(
+                  (document) => document.status === 'completed' && document.redacted_at,
+                )}
+                onClick={() => {
+                  setReanalysisCriteriaVersionId(criteriaVersions[0]?.id)
+                  setReanalysisOpen(true)
+                }}
+              >
+                整批重新分析
+              </Button>
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => setDeleteOpen(true)}
+              >
+                永久删除
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -406,7 +415,7 @@ function BatchCard({
         )}
       />
 
-      <Drawer
+      {canViewSensitive && <Drawer
         className="resume-text-drawer"
         width={720}
         open={Boolean(selectedDocumentId)}
@@ -494,9 +503,9 @@ function BatchCard({
             />
           </>
         )}
-      </Drawer>
+      </Drawer>}
 
-      <Modal
+      {canWrite && <Modal
         title={`整批重新分析 · ${batch.name}`}
         open={reanalysisOpen}
         okText="确认整批重跑"
@@ -530,9 +539,9 @@ function BatchCard({
             />
           </div>
         </Space>
-      </Modal>
+      </Modal>}
 
-      <Modal
+      {canWrite && <Modal
         title={`永久删除批次 · ${batch.name}`}
         open={deleteOpen}
         okText="确认永久删除"
@@ -568,13 +577,14 @@ function BatchCard({
             />
           </div>
         </Space>
-      </Modal>
+      </Modal>}
     </Card>
   )
 }
 
 export function BatchPage() {
   const { jobId } = useParams()
+  const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
@@ -648,6 +658,8 @@ export function BatchPage() {
   }
 
   const archived = job.data.status === 'archived'
+  const canWrite = canManageRecruitment(auth.user) && !archived
+  const canViewSensitive = canViewSensitiveRecruitmentData(auth.user)
   const selectedFiles = fileList.flatMap((item) => (item.originFileObj ? [item.originFileObj] : []))
 
   return (
@@ -665,16 +677,20 @@ export function BatchPage() {
 
       <ScreeningModuleNav jobId={jobId} activeKey="batches" />
 
-      {archived && (
+      {!canWrite && (
         <Alert
           type="warning"
           showIcon
-          message="该职位已归档，历史批次可查看，但不能继续上传或重试"
+          message={
+            archived
+              ? '该职位已归档，历史批次可查看，但不能继续上传或重试'
+              : '当前角色可查看批次和候选人资料，但不能上传、重试或删除'
+          }
           className="page-alert"
         />
       )}
 
-      <Card className="upload-panel" title="新建简历批次">
+      {canWrite && <Card className="upload-panel" title="新建简历批次">
         {confirmedVersions.length === 0 ? (
           <Empty
             image={<SafetyCertificateOutlined className="empty-icon" />}
@@ -696,7 +712,6 @@ export function BatchPage() {
                   label: `V${version.version_number} · 已确认`,
                   value: version.id,
                 }))}
-                disabled={archived}
               />
               <label htmlFor="batch-name">批次名称</label>
               <Input
@@ -704,7 +719,6 @@ export function BatchPage() {
                 value={batchName}
                 maxLength={200}
                 placeholder="例如：7 月校招第一批"
-                disabled={archived}
                 onChange={(event) => setBatchName(event.target.value)}
               />
               <label htmlFor="ai-input-mode">AI 输入方式</label>
@@ -712,7 +726,6 @@ export function BatchPage() {
                 id="ai-input-mode"
                 value={aiInputMode}
                 onChange={setAIInputMode}
-                disabled={archived}
                 options={[
                   {
                     value: 'raw',
@@ -746,7 +759,7 @@ export function BatchPage() {
                 multiple
                 accept=".pdf,.docx,.jpg,.jpeg,.png"
                 fileList={fileList}
-                disabled={archived || uploadMutation.isPending}
+                disabled={uploadMutation.isPending}
                 beforeUpload={() => false}
                 onChange={({ fileList: nextList }) =>
                   setFileList(nextList.slice(0, MAX_BATCH_FILE_COUNT))
@@ -770,7 +783,7 @@ export function BatchPage() {
                   type="primary"
                   icon={<CloudUploadOutlined />}
                   loading={uploadMutation.isPending}
-                  disabled={archived || !criteriaVersionId || selectedFiles.length === 0}
+                  disabled={!criteriaVersionId || selectedFiles.length === 0}
                   onClick={() => uploadMutation.mutate()}
                 >
                   开始上传
@@ -779,7 +792,7 @@ export function BatchPage() {
             </div>
           </div>
         )}
-      </Card>
+      </Card>}
 
       <section className="batch-history" aria-label="简历批次历史">
         <div className="section-heading">
@@ -812,7 +825,8 @@ export function BatchPage() {
                 key={batch.id}
                 batch={batch}
                 jobId={jobId!}
-                archived={archived}
+                canWrite={canWrite}
+                canViewSensitive={canViewSensitive}
                 criteriaVersions={confirmedVersions}
               />
             ))}

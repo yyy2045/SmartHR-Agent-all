@@ -33,13 +33,18 @@ import {
   fetchCandidateAnalysisHistory,
   fetchCandidateProfiles,
   fetchJob,
-  fetchResumeDocumentDetail,
+  fetchScreeningBatches,
   reanalyzeCandidate,
   type AnalysisStatus,
   type CandidateProfileInput,
   type CandidateProfileRecord,
   type ScreeningResultDetail,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import {
+  canManageRecruitment,
+  canViewSensitiveRecruitmentData,
+} from '../auth/permissions'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -157,11 +162,13 @@ function ProfileRecord({
   subtitle,
   summary,
   item,
+  showEvidence,
 }: {
   title: string
   subtitle?: ReactNode
   summary?: string
   item: ProfileItem
+  showEvidence: boolean
 }) {
   return (
     <div className="profile-record">
@@ -170,7 +177,7 @@ function ProfileRecord({
         {subtitle && <Text type="secondary">{subtitle}</Text>}
       </div>
       {summary && <Paragraph className="profile-record-summary">{summary}</Paragraph>}
-      <ProfileEvidence item={item} />
+      {showEvidence && <ProfileEvidence item={item} />}
     </div>
   )
 }
@@ -178,9 +185,11 @@ function ProfileRecord({
 function ProfileSectionContent({
   section,
   items,
+  showEvidence,
 }: {
   section: ProfileSection
   items: ProfileItem[]
+  showEvidence: boolean
 }) {
   if (section === 'skills' || section === 'languages') {
     return (
@@ -193,7 +202,7 @@ function ProfileSectionContent({
               <Tag color={section === 'skills' ? 'blue' : 'cyan'}>
                 {joinProfileFields(name || '未命名', level)}
               </Tag>
-              <ProfileEvidence item={item} />
+              {showEvidence && <ProfileEvidence item={item} />}
             </div>
           )
         })}
@@ -236,6 +245,7 @@ function ProfileSectionContent({
             subtitle={subtitle}
             summary={summary}
             item={item}
+            showEvidence={showEvidence}
           />
         )
       })}
@@ -243,13 +253,23 @@ function ProfileSectionContent({
   )
 }
 
-function ProfileSnapshot({ profile }: { profile: CandidateProfileRecord }) {
+function ProfileSnapshot({
+  profile,
+  showEvidence,
+}: {
+  profile: CandidateProfileRecord
+  showEvidence: boolean
+}) {
   return (
     <div className="profile-snapshot-grid">
       {profileSections.map(([key, label]) => (
         <Card key={key} size="small" title={label} className="profile-section-card">
           {profile[key].length ? (
-            <ProfileSectionContent section={key} items={profile[key]} />
+            <ProfileSectionContent
+              section={key}
+              items={profile[key]}
+              showEvidence={showEvidence}
+            />
           ) : (
             <Text type="secondary">暂无</Text>
           )}
@@ -343,6 +363,7 @@ function AnalysisHistoryCard({ result }: { result: ScreeningResultDetail }) {
 
 export function CandidateHistoryPage() {
   const { jobId, batchId, documentId } = useParams()
+  const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
@@ -361,10 +382,10 @@ export function CandidateHistoryPage() {
     queryFn: () => fetchJob(jobId!),
     enabled: Boolean(jobId),
   })
-  const document = useQuery({
-    queryKey: ['resume-document', jobId, batchId, documentId],
-    queryFn: () => fetchResumeDocumentDetail(jobId!, batchId!, documentId!),
-    enabled: Boolean(jobId && batchId && documentId),
+  const batches = useQuery({
+    queryKey: ['batches', jobId],
+    queryFn: () => fetchScreeningBatches(jobId!),
+    enabled: Boolean(jobId),
   })
   const profiles = useQuery({
     queryKey: ['candidate-profiles', jobId, batchId, documentId],
@@ -386,6 +407,8 @@ export function CandidateHistoryPage() {
     [job.data?.criteria_versions],
   )
   const latestProfile = profiles.data?.[0]
+  const batch = batches.data?.find((item) => item.id === batchId)
+  const document = batch?.documents.find((item) => item.id === documentId)
 
   useEffect(() => {
     if (criteriaVersionId || !confirmedCriteria.length || history.isPending) return
@@ -499,26 +522,29 @@ export function CandidateHistoryPage() {
     }
   }
 
-  if (job.isPending || document.isPending) return <Skeleton active paragraph={{ rows: 12 }} />
-  if (job.isError || document.isError || !job.data || !document.data) {
+  if (job.isPending || batches.isPending) return <Skeleton active paragraph={{ rows: 12 }} />
+  if (job.isError || batches.isError || !job.data || !document) {
     return (
       <Alert
         type="error"
         showIcon
         message="无法读取候选人资料"
-        description={job.error?.message ?? document.error?.message}
+        description={job.error?.message ?? batches.error?.message ?? '候选人不存在'}
       />
     )
   }
+
+  const canWrite = canManageRecruitment(auth.user) && job.data.status !== 'archived'
+  const canViewSensitive = canViewSensitiveRecruitmentData(auth.user)
 
   return (
     <>
       {contextHolder}
       <div className="page-heading">
         <div>
-          <Title level={2}>{document.data.candidate_code}</Title>
+          <Title level={2}>{document.candidate_code}</Title>
           <Text type="secondary">
-            {job.data.title} · {document.data.original_filename} · 结构化资料与分析版本
+            {job.data.title} · {document.original_filename} · 结构化资料与分析版本
           </Text>
         </div>
         <Space wrap>
@@ -528,23 +554,37 @@ export function CandidateHistoryPage() {
           >
             返回简历批次
           </Button>
-          <Button
-            icon={<ReloadOutlined />}
-            disabled={!latestProfile || job.data.status === 'archived'}
-            onClick={() => setReanalysisOpen(true)}
-          >
-            单人重新分析
-          </Button>
-          <Button
-            type="primary"
-            icon={<EditOutlined />}
-            disabled={!latestProfile || job.data.status === 'archived'}
-            onClick={() => latestProfile && openEditor(latestProfile)}
-          >
-            修正结构化资料
-          </Button>
+          {canWrite && (
+            <>
+              <Button
+                icon={<ReloadOutlined />}
+                disabled={!latestProfile}
+                onClick={() => setReanalysisOpen(true)}
+              >
+                单人重新分析
+              </Button>
+              <Button
+                type="primary"
+                icon={<EditOutlined />}
+                disabled={!latestProfile}
+                onClick={() => latestProfile && openEditor(latestProfile)}
+              >
+                修正结构化资料
+              </Button>
+            </>
+          )}
         </Space>
       </div>
+
+      {!canWrite && (
+        <Alert
+          type="warning"
+          showIcon
+          message="当前候选人资料仅供查看"
+          description="当前角色不能修正档案或重新运行分析。"
+          className="page-alert"
+        />
+      )}
 
       <Alert
         type="info"
@@ -580,7 +620,7 @@ export function CandidateHistoryPage() {
                     </Space>
                   ),
                   extra:
-                    profile.id === latestProfile?.id && job.data.status !== 'archived' ? (
+                    profile.id === latestProfile?.id && canWrite ? (
                       <Button
                         size="small"
                         icon={<EditOutlined />}
@@ -607,7 +647,7 @@ export function CandidateHistoryPage() {
                           },
                         ]}
                       />
-                      <ProfileSnapshot profile={profile} />
+                      <ProfileSnapshot profile={profile} showEvidence={canViewSensitive} />
                     </>
                   ),
                 }))}
@@ -634,7 +674,7 @@ export function CandidateHistoryPage() {
         ]}
       />
 
-      <Modal
+      {canWrite && <Modal
         title={editingProfile ? `修正结构化资料 · 基于档案 V${editingProfile.version_number}` : '修正结构化资料'}
         open={Boolean(editingProfile)}
         width={980}
@@ -683,9 +723,9 @@ export function CandidateHistoryPage() {
               </div>
             ))}
         </div>
-      </Modal>
+      </Modal>}
 
-      <Modal
+      {canWrite && <Modal
         title="单人重新分析"
         open={reanalysisOpen}
         okText="确认重跑"
@@ -719,7 +759,7 @@ export function CandidateHistoryPage() {
             当前档案：{latestProfile ? `V${latestProfile.version_number}` : '无可用档案'}
           </Text>
         </Space>
-      </Modal>
+      </Modal>}
     </>
   )
 }

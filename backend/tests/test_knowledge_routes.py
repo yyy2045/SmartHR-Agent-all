@@ -20,8 +20,10 @@ from app.models import (
     JobCriteriaVersion,
     ResumeDocument,
     ResumeEmbeddingChunk,
+    Role,
     ScreeningBatch,
     User,
+    UserRole,
 )
 from app.redis_client import get_session_store
 from app.services.security import hash_password
@@ -50,17 +52,20 @@ def knowledge_route_dependencies(
     Base.metadata.create_all(engine)
 
     with testing_session() as db:
+        recruiter_role = Role(key="recruiter", display_name="招聘专员")
         owner = User(
             username="job-owner",
             password_hash=hash_password("owner-password"),
             display_name="职位负责人",
+            role_assignments=[UserRole(role=recruiter_role)],
         )
         recruiter = User(
             username="shared-recruiter",
             password_hash=hash_password("correct-password"),
             display_name="共享招聘专员",
+            role_assignments=[UserRole(role=recruiter_role)],
         )
-        db.add_all([owner, recruiter])
+        db.add_all([recruiter_role, owner, recruiter])
         db.flush()
         job = Job(
             owner_id=owner.id,

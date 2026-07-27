@@ -13,9 +13,21 @@ const user = {
   id: 'user-1',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
+}
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
 }
 const job = {
   id: 'job-1',
+  recruiter_id: user.id,
+  hiring_manager_id: null,
   title: '平台工程师',
   department: '研发中心',
   original_jd: '负责平台工程建设。',
@@ -37,6 +49,63 @@ describe('candidate process board', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('用人经理看不到电话和阶段调整命令', async () => {
+    const candidate: CandidateProcessCardRecord = {
+      process_id: 'process-1',
+      screening_result_id: 'result-1',
+      batch_id: 'batch-1',
+      batch_name: '社招批次',
+      document_id: 'document-1',
+      candidate_code: 'CAND-0001',
+      original_filename: 'candidate.pdf',
+      phone: '13800138000',
+      ai_group: 'passed',
+      total_score: 88,
+      current_decision: 'shortlisted',
+      current_stage: 'to_interview',
+      stage_entered_at: timestamp,
+      skills: ['Python'],
+      analysis_created_at: timestamp,
+      interview_evaluation: {
+        status: 'in_progress',
+        total_rounds: 1,
+        submitted_count: 0,
+        draft_count: 1,
+        pending_count: 0,
+        cancelled_count: 0,
+        action_round_id: 'round-1',
+        action_round_name: '技术一面',
+        action_evaluation_status: 'draft',
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') {
+        return jsonResponse({ ...job, hiring_manager_id: manager.id })
+      }
+      if (path === '/api/jobs/job-1/batches') return jsonResponse([])
+      if (path.startsWith('/api/jobs/job-1/candidate-processes')) return jsonResponse([candidate])
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    window.history.replaceState({}, '', '/jobs/job-1/pipeline')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('CAND-0001')).toBeInTheDocument()
+    expect(screen.queryByText('13800138000')).not.toBeInTheDocument()
+    expect(screen.queryByText('未识别电话')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /调整阶段/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /查看评价 · 技术一面/ })).toBeInTheDocument()
   })
 
   it('按阶段展示候选人并保存人工流程变化与时间线', async () => {

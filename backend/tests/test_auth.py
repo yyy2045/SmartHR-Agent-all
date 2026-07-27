@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import AuditLog, User
+from app.models import AuditLog, Role, User, UserRole
 from app.redis_client import get_session_store
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
@@ -26,12 +26,29 @@ def auth_dependencies() -> Generator[sessionmaker[Session], None, None]:
     Base.metadata.create_all(engine)
 
     with testing_session() as db:
-        db.add(
-            User(
-                username="recruiter",
-                password_hash=hash_password("correct-password"),
-                display_name="测试招聘专员",
-            )
+        administrator = Role(key="administrator", display_name="企业管理员")
+        recruiter = Role(key="recruiter", display_name="招聘专员")
+        db.add_all([administrator, recruiter])
+        db.flush()
+        db.add_all(
+            [
+                User(
+                    username="recruiter",
+                    password_hash=hash_password("correct-password"),
+                    display_name="测试招聘专员",
+                    role_assignments=[
+                        UserRole(role=administrator),
+                        UserRole(role=recruiter),
+                    ],
+                ),
+                User(
+                    username="temporary",
+                    password_hash=hash_password("temporary-password"),
+                    display_name="临时账号",
+                    must_change_password=True,
+                    role_assignments=[UserRole(role=recruiter)],
+                ),
+            ]
         )
         db.commit()
 
@@ -65,6 +82,8 @@ async def test_login_me_and_logout(
         )
         assert login_response.status_code == 200
         assert login_response.json()["display_name"] == "测试招聘专员"
+        assert login_response.json()["roles"] == ["administrator", "recruiter"]
+        assert login_response.json()["must_change_password"] is False
         assert "smarthr_session" in client.cookies
 
         me_response = await client.get("/auth/me")
@@ -106,3 +125,58 @@ async def test_login_rejects_wrong_password(
     assert log.result == "failure"
     assert log.actor_username == "recruiter"
     assert log.details == {"reason": "invalid_credentials"}
+
+
+@pytest.mark.asyncio
+async def test_temporary_password_blocks_business_until_changed(
+    auth_dependencies: sessionmaker[Session],
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        login_response = await client.post(
+            "/auth/login",
+            json={"username": "temporary", "password": "temporary-password"},
+        )
+        assert login_response.status_code == 200
+        assert login_response.json()["must_change_password"] is True
+        old_token = client.cookies["smarthr_session"]
+
+        blocked_response = await client.get("/jobs")
+        assert blocked_response.status_code == 403
+        assert blocked_response.json() == {"detail": "请先修改临时密码"}
+
+        wrong_password_response = await client.post(
+            "/auth/password",
+            json={"current_password": "wrong-password", "new_password": "new-password-123"},
+        )
+        assert wrong_password_response.status_code == 400
+
+        changed_response = await client.post(
+            "/auth/password",
+            json={
+                "current_password": "temporary-password",
+                "new_password": "new-password-123",
+            },
+        )
+        assert changed_response.status_code == 200
+        assert changed_response.json()["must_change_password"] is False
+        assert client.cookies["smarthr_session"] != old_token
+
+        allowed_response = await client.get("/jobs")
+        assert allowed_response.status_code == 200
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as old_client:
+        old_client.cookies.set("smarthr_session", old_token)
+        expired_response = await old_client.get("/auth/me")
+        assert expired_response.status_code == 401
+
+    with auth_dependencies() as db:
+        user = db.scalar(select(User).where(User.username == "temporary"))
+        audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "auth.password_changed")
+        )
+    assert user is not None
+    assert user.must_change_password is False
+    assert user.session_version == 2
+    assert audit is not None
+    assert audit.actor_username == "temporary"

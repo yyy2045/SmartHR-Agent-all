@@ -2275,3 +2275,79 @@ input {
     padding-inline: 6px;
   }
 }
+.password-change-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: #f3f6f8;
+}
+
+.password-change-panel {
+  width: min(100%, 440px);
+  padding: 36px;
+  border: 1px solid #dce3e8;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgb(15 36 48 / 10%);
+}
+
+.password-change-panel h2 {
+  margin: 18px 0 6px;
+}
+
+.password-change-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  background: #e8f2ef;
+  color: #176b5b;
+  font-size: 24px;
+}
+
+.password-change-form {
+  margin-top: 28px;
+}
+
+.job-owner-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.job-owner-grid > .ant-form-item:only-child {
+  grid-column: 1 / -1;
+}
+
+.user-table-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.user-table-panel .ant-table-cell {
+  vertical-align: middle;
+}
+
+.user-identity-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 150px;
+}
+
+@media (max-width: 560px) {
+  .password-change-shell {
+    align-items: start;
+    padding: 24px 16px;
+  }
+
+  .password-change-panel {
+    padding: 24px 20px;
+  }
+
+  .job-owner-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}

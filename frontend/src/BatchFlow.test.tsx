@@ -10,9 +10,21 @@ const user = {
   id: 'user-1',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
+}
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
 }
 const job = {
   id: 'job-1',
+  recruiter_id: user.id,
+  hiring_manager_id: null,
   title: '平台工程师',
   department: '研发中心',
   original_jd: '负责平台工程建设。',
@@ -214,6 +226,79 @@ describe('resume batch flow', () => {
     await waitFor(() => expect(screen.queryByText('文件特征不完整或文件已经损坏')).toBeNull())
     expect(await screen.findByText('replacement.png')).toBeInTheDocument()
     expect(screen.getByText(/第 2 次尝试/)).toBeInTheDocument()
+  })
+
+  it('用人经理只查看批次摘要和结构化资料入口', async () => {
+    const batch: ScreeningBatchRecord = {
+      id: 'batch-1',
+      job_id: job.id,
+      criteria_version_id: 'version-1',
+      criteria_version_number: 1,
+      name: '社招批次',
+      ai_input_mode: 'raw',
+      status: 'completed',
+      total_count: 1,
+      success_count: 1,
+      failed_count: 0,
+      processing_count: 0,
+      created_at: timestamp,
+      updated_at: timestamp,
+      documents: [{
+        id: 'document-1',
+        batch_id: 'batch-1',
+        original_filename: 'candidate.pdf',
+        file_extension: '.pdf',
+        content_type: 'application/pdf',
+        detected_type: 'pdf',
+        size_bytes: 1024,
+        sha256: 'a'.repeat(64),
+        has_original_file: true,
+        extraction_method: 'pdf_text',
+        segment_count: 1,
+        text_character_count: 120,
+        candidate_code: 'CAND-0001',
+        redaction_count: 0,
+        status: 'completed',
+        failure_code: null,
+        failure_message: null,
+        attempt_count: 1,
+        processing_attempt_count: 1,
+        processing_started_at: timestamp,
+        parsed_at: timestamp,
+        redacted_at: timestamp,
+        created_at: timestamp,
+        updated_at: timestamp,
+      }],
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') {
+        return jsonResponse({ ...job, hiring_manager_id: manager.id })
+      }
+      if (path === '/api/jobs/job-1/batches') return jsonResponse([batch])
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState({}, '', '/jobs/job-1/batches')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '社招批次' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /资料与版本/ })).toBeInTheDocument()
+    expect(screen.queryByText('新建简历批次')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /查看文本/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /下载原文件/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /整批重新分析/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /永久删除/ })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([path]) => path.toString().endsWith('/document-1'))).toBe(false)
   })
 
   it('创建批次时可以选择脱敏后发送', async () => {

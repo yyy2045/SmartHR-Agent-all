@@ -11,7 +11,21 @@ import type {
 } from './api/client'
 
 const timestamp = '2026-07-23T04:00:00Z'
-const user = { id: 'user-1', username: 'recruiter', display_name: '招聘专员' }
+const user = {
+  id: 'user-1',
+  username: 'recruiter',
+  display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
+}
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
+}
 const criteriaVersions = [
   {
     id: 'criteria-2',
@@ -44,6 +58,8 @@ const criteriaVersions = [
 ]
 const job = {
   id: 'job-1',
+  recruiter_id: user.id,
+  hiring_manager_id: null,
   title: '平台工程师',
   department: '研发中心',
   original_jd: '负责平台工程建设。',
@@ -186,6 +202,53 @@ describe('candidate profile versions and reanalysis flow', () => {
     window.history.replaceState({}, '', '/')
   })
 
+  it('用人经理通过安全摘要查看档案且不显示修正和证据入口', async () => {
+    const profileV1 = profile('profile-1', 1, 'ai', null)
+    const batch = {
+      id: 'batch-1',
+      job_id: job.id,
+      criteria_version_id: 'criteria-1',
+      criteria_version_number: 1,
+      name: '候选人批次',
+      ai_input_mode: 'raw',
+      status: 'completed',
+      total_count: 1,
+      success_count: 1,
+      failed_count: 0,
+      processing_count: 0,
+      created_at: timestamp,
+      updated_at: timestamp,
+      documents: [document],
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') {
+        return jsonResponse({ ...job, hiring_manager_id: manager.id })
+      }
+      if (path === '/api/jobs/job-1/batches') return jsonResponse([batch])
+      if (path.endsWith('/profiles')) return jsonResponse([profileV1])
+      if (path.endsWith('/analysis-history')) {
+        return jsonResponse([analysis('result-1', 1, 'completed', profileV1)])
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderApp('/jobs/job-1/batches/batch-1/documents/document-1/history')
+
+    expect(await screen.findByRole('heading', { name: 'CAND-0001' })).toBeInTheDocument()
+    expect(screen.getByText('示例大学')).toBeInTheDocument()
+    expect(screen.queryByText(/查看原文证据/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /修正结构化资料/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /单人重新分析/ })).not.toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.some(([path]) =>
+        path.toString().endsWith('/documents/document-1'),
+      ),
+    ).toBe(false)
+  })
+
   it('保留档案与分析历史，并只修正和重跑目标候选人', async () => {
     const profileV1 = profile('profile-1', 1, 'ai', null)
     let profiles = [profileV1]
@@ -201,8 +264,25 @@ describe('candidate profile versions and reanalysis flow', () => {
       if (path === '/api/auth/me') return jsonResponse(user)
       if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
       if (path === '/api/jobs/job-1') return jsonResponse(job)
-      if (path === '/api/jobs/job-1/batches/batch-1/documents/document-1') {
-        return jsonResponse({ ...document, text_segments: [] })
+      if (path === '/api/jobs/job-1/batches' && method === 'GET') {
+        return jsonResponse([
+          {
+            id: 'batch-1',
+            job_id: job.id,
+            criteria_version_id: 'criteria-1',
+            criteria_version_number: 1,
+            name: '候选人批次',
+            ai_input_mode: 'raw',
+            status: 'completed',
+            total_count: 1,
+            success_count: 1,
+            failed_count: 0,
+            processing_count: 0,
+            created_at: timestamp,
+            updated_at: timestamp,
+            documents: [document],
+          },
+        ])
       }
       if (
         path === '/api/jobs/job-1/batches/batch-1/documents/document-1/profiles' &&

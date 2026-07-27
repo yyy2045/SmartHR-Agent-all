@@ -29,9 +29,11 @@ from app.models import (
     ResumeDocument,
     ResumeRedaction,
     ResumeTextSegment,
+    Role,
     ScreeningBatch,
     ScreeningResult,
     User,
+    UserRole,
 )
 from app.redis_client import get_session_store
 from app.services.security import hash_password
@@ -58,14 +60,44 @@ def candidate_process_dependencies() -> Generator[CandidateProcessDependencies, 
     Base.metadata.create_all(engine)
 
     with testing_session() as db:
+        roles = {
+            "administrator": Role(key="administrator", display_name="企业管理员"),
+            "recruiter": Role(key="recruiter", display_name="招聘专员"),
+            "hiring_manager": Role(key="hiring_manager", display_name="用人经理"),
+        }
         user = User(
             username="recruiter",
             password_hash=hash_password("correct-password"),
             display_name="招聘专员",
+            role_assignments=[UserRole(role=roles["recruiter"])],
         )
-        db.add(user)
+        manager = User(
+            username="manager",
+            password_hash=hash_password("manager-password"),
+            display_name="用人经理",
+            role_assignments=[UserRole(role=roles["hiring_manager"])],
+        )
+        other_manager = User(
+            username="other-manager",
+            password_hash=hash_password("other-manager-password"),
+            display_name="其他用人经理",
+            role_assignments=[UserRole(role=roles["hiring_manager"])],
+        )
+        administrator = User(
+            username="administrator",
+            password_hash=hash_password("administrator-password"),
+            display_name="企业管理员",
+            role_assignments=[UserRole(role=roles["administrator"])],
+        )
+        db.add_all([*roles.values(), user, manager, other_manager, administrator])
         db.flush()
-        job = Job(owner_id=user.id, title="后端工程师", department="研发", original_jd="JD")
+        job = Job(
+            owner_id=user.id,
+            hiring_manager_id=manager.id,
+            title="后端工程师",
+            department="研发",
+            original_jd="JD",
+        )
         db.add(job)
         db.flush()
         criteria = JobCriteriaVersion(
@@ -189,12 +221,66 @@ def candidate_process_dependencies() -> Generator[CandidateProcessDependencies, 
     engine.dispose()
 
 
-async def login(client: httpx.AsyncClient) -> None:
+async def login(
+    client: httpx.AsyncClient,
+    username: str = "recruiter",
+    password: str = "correct-password",
+) -> None:
     response = await client.post(
         "/auth/login",
-        json={"username": "recruiter", "password": "correct-password"},
+        json={"username": username, "password": password},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_deep_job_permissions_and_contact_field_scope(
+    candidate_process_dependencies: CandidateProcessDependencies,
+) -> None:
+    dependency = candidate_process_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as manager:
+        await login(manager, "manager", "manager-password")
+        board = await manager.get(f"/jobs/{dependency.job_id}/candidate-processes")
+        batches = await manager.get(f"/jobs/{dependency.job_id}/batches")
+        analysis = await manager.get(
+            f"/jobs/{dependency.job_id}/batches/{dependency.batch_id}/documents/"
+            f"{dependency.document_id}/analysis"
+        )
+        raw_detail = await manager.get(
+            f"/jobs/{dependency.job_id}/batches/{dependency.batch_id}/documents/"
+            f"{dependency.document_id}"
+        )
+        raw_file = await manager.get(
+            f"/jobs/{dependency.job_id}/batches/{dependency.batch_id}/documents/"
+            f"{dependency.document_id}/file"
+        )
+        stage_change = await manager.post(
+            f"/jobs/{dependency.job_id}/candidate-processes/"
+            f"{dependency.document_id}/stage",
+            json={"expected_stage": "unprocessed", "target_stage": "pending"},
+        )
+
+    assert board.status_code == 200
+    assert board.json()[0]["phone"] is None
+    assert batches.status_code == 200
+    assert analysis.status_code == 200
+    assert raw_detail.status_code == 403
+    assert raw_file.status_code == 403
+    assert stage_change.status_code == 403
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as other:
+        await login(other, "other-manager", "other-manager-password")
+        assert (
+            await other.get(f"/jobs/{dependency.job_id}/candidate-processes")
+        ).status_code == 404
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as admin:
+        await login(admin, "administrator", "administrator-password")
+        board = await admin.get(f"/jobs/{dependency.job_id}/candidate-processes")
+
+    assert board.status_code == 200
+    assert board.json()[0]["phone"] == "13800138000"
 
 
 @pytest.mark.asyncio

@@ -38,6 +38,8 @@ import {
   type InterviewRound,
   type InterviewScheduleRoundRecord,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import { canManageRecruitment } from '../auth/permissions'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -122,6 +124,7 @@ function validateArrangement(draft: RoundDraft): string | undefined {
 
 export function InterviewSchedulePage() {
   const { jobId, documentId } = useParams()
+  const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
@@ -161,6 +164,7 @@ export function InterviewSchedulePage() {
   )
   const selectedPlan = confirmedPlans.find((item) => item.id === selectedPlanId)
   const archived = job.data?.status === 'archived'
+  const canWrite = canManageRecruitment(auth.user) && job.data?.status === 'active'
   const pageError = job.error ?? candidates.error ?? plans.error ?? schedule.error
 
   useEffect(() => {
@@ -302,12 +306,12 @@ export function InterviewSchedulePage() {
         </Space>
       </div>
 
-      {archived && (
+      {!canWrite && job.data && (
         <Alert
           type="warning"
           showIcon
           className="page-alert"
-          message="该职位已归档，候选人面试安排仅供查看"
+          message={archived ? '该职位已归档，候选人面试安排仅供查看' : '当前角色可查看面试安排，但不能创建、改期或取消'}
         />
       )}
       {pageError && (
@@ -321,7 +325,13 @@ export function InterviewSchedulePage() {
       )}
       {loading && <Skeleton active paragraph={{ rows: 8 }} />}
 
-      {!loading && !pageError && !schedule.data && (
+      {!loading && !pageError && !schedule.data && !canWrite && (
+        <Card className="panel-card interview-schedule-create-card">
+          <Empty description="该候选人尚未创建面试安排" />
+        </Card>
+      )}
+
+      {!loading && !pageError && !schedule.data && canWrite && (
         <Card className="panel-card interview-schedule-create-card">
           <div className="section-heading">
             <div>
@@ -338,13 +348,12 @@ export function InterviewSchedulePage() {
                 value: plan.id,
               }))}
               onChange={setSelectedPlanId}
-              disabled={archived}
             />
           </div>
 
           {!confirmedPlans.length && (
             <Empty description="当前职位还没有已确认的面试方案">
-              {!archived && (
+              {canWrite && (
                 <Button type="primary" onClick={() => navigate(`/jobs/${jobId}/interview-plan`)}>
                   前往配置面试方案
                 </Button>
@@ -376,7 +385,6 @@ export function InterviewSchedulePage() {
                           onChange={(event) =>
                             updateDraft(index, { scheduledStartAt: event.target.value })
                           }
-                          disabled={archived}
                         />
                       </label>
                       <label>
@@ -389,7 +397,6 @@ export function InterviewSchedulePage() {
                             label: meta.label,
                           }))}
                           onChange={(value) => updateDraft(index, { interviewMethod: value })}
-                          disabled={archived}
                         />
                       </label>
                       {draft.interviewMethod === 'onsite' && (
@@ -399,7 +406,6 @@ export function InterviewSchedulePage() {
                             aria-label={`${round.name}面试地点`}
                             value={draft.location}
                             onChange={(event) => updateDraft(index, { location: event.target.value })}
-                            disabled={archived}
                           />
                         </label>
                       )}
@@ -413,7 +419,6 @@ export function InterviewSchedulePage() {
                             onChange={(event) =>
                               updateDraft(index, { meetingUrl: event.target.value })
                             }
-                            disabled={archived}
                           />
                         </label>
                       )}
@@ -421,7 +426,7 @@ export function InterviewSchedulePage() {
                   </Card>
                 )
               })}
-              {!archived && (
+              {canWrite && (
                 <div className="sticky-actions">
                   <Button
                     type="primary"
@@ -510,9 +515,9 @@ export function InterviewSchedulePage() {
                       )
                     }
                   >
-                    {archived || round.status === 'cancelled' ? '查看评价' : '面试评价'}
+                    {!canWrite || round.status === 'cancelled' ? '查看评价' : '面试评价'}
                   </Button>
-                  {!archived && round.status !== 'cancelled' && (
+                  {canWrite && round.status !== 'cancelled' && (
                     <>
                       <Button icon={<CalendarOutlined />} onClick={() => openReschedule(round)}>
                         改期
@@ -536,7 +541,7 @@ export function InterviewSchedulePage() {
         </div>
       )}
 
-      <Modal
+      {canWrite && <Modal
         title={editingRound ? `改期：${editingRound.name}` : '面试改期'}
         open={Boolean(editingRound && editDraft)}
         okText="确认改期"
@@ -603,9 +608,9 @@ export function InterviewSchedulePage() {
             </label>
           </Space>
         )}
-      </Modal>
+      </Modal>}
 
-      <Modal
+      {canWrite && <Modal
         title={cancellingRound ? `取消：${cancellingRound.name}` : '取消面试轮次'}
         open={Boolean(cancellingRound)}
         okText="确认取消本轮"
@@ -626,7 +631,7 @@ export function InterviewSchedulePage() {
           maxLength={2_000}
           onChange={(event) => setCancelReason(event.target.value)}
         />
-      </Modal>
+      </Modal>}
     </>
   )
 }

@@ -10,16 +10,21 @@ from app.redis_client import get_session_store
 from app.services.session_store import SessionStore
 
 
-def get_current_user(
+def get_authenticated_user(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     session_store: Annotated[SessionStore, Depends(get_session_store)],
 ) -> User:
     token = request.cookies.get(settings.app_session_cookie)
-    user_id = session_store.get_user_id(token) if token else None
-    user = db.get(User, user_id) if user_id else None
+    identity = session_store.get_identity(token) if token else None
+    user = db.get(User, identity.user_id) if identity else None
 
-    if user is None or not user.is_active:
+    if (
+        user is None
+        or not user.is_active
+        or identity is None
+        or identity.session_version != user.session_version
+    ):
         if token:
             session_store.delete(token)
         raise HTTPException(
@@ -31,4 +36,28 @@ def get_current_user(
     return user
 
 
+AuthenticatedUser = Annotated[User, Depends(get_authenticated_user)]
+
+
+def get_current_user(user: AuthenticatedUser) -> User:
+    if user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="请先修改临时密码",
+        )
+    return user
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_administrator(user: CurrentUser) -> User:
+    if not user.has_role("administrator"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要企业管理员权限",
+        )
+    return user
+
+
+AdministratorUser = Annotated[User, Depends(get_administrator)]

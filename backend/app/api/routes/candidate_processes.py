@@ -8,20 +8,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
-from app.api.routes.jobs import get_owned_job
 from app.database import get_db
 from app.models import (
     CandidateInterviewRound,
     CandidateInterviewSchedule,
     CandidateProcess,
     CandidateProcessEvent,
-    Job,
     RecruiterDecision,
     ResumeDocument,
     ResumeRedaction,
     ResumeTextSegment,
     ScreeningBatch,
     ScreeningResult,
+    User,
 )
 from app.schemas.candidate_process import (
     CandidateProcessCardResponse,
@@ -33,6 +32,7 @@ from app.schemas.candidate_process import (
 )
 from app.schemas.screening import AIGroup, ManualDecision
 from app.services.audit import record_audit
+from app.services.authorization import ensure_job_writable, get_visible_job
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -256,17 +256,18 @@ def _get_owned_document(
     *,
     job_id: uuid.UUID,
     document_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
     for_update: bool = False,
 ) -> ResumeDocument:
+    job = get_visible_job(db, job_id, user)
+    if for_update:
+        ensure_job_writable(job, user)
     statement = (
         select(ResumeDocument)
         .join(ScreeningBatch)
-        .join(Job)
         .where(
             ResumeDocument.id == document_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(
             selectinload(ResumeDocument.batch),
@@ -313,7 +314,7 @@ def list_candidate_processes(
     max_score: Annotated[float | None, Query(ge=0, le=100)] = None,
     query: Annotated[str | None, Query(max_length=200)] = None,
 ) -> list[CandidateProcessCardResponse]:
-    get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
     if min_score is not None and max_score is not None and min_score > max_score:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -335,9 +336,13 @@ def list_candidate_processes(
         .all()
     )
     latest_results = _latest_results_by_document(results)
-    phones_by_document = _phones_by_document(
-        db,
-        [result.document_id for result, _ in latest_results],
+    phones_by_document = (
+        _phones_by_document(
+            db,
+            [result.document_id for result, _ in latest_results],
+        )
+        if current_user.has_role("administrator") or job.owner_id == current_user.id
+        else {}
     )
     cards: list[CandidateProcessCardResponse] = []
     normalized_query = query.strip().lower() if query else None
@@ -416,7 +421,7 @@ def update_candidate_stage(
         db,
         job_id=job_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
         for_update=True,
     )
     document_results = _completed_document_results(db, document_id)
@@ -545,7 +550,7 @@ def get_candidate_process_timeline(
         db,
         job_id=job_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     decisions = list(
         db.scalars(

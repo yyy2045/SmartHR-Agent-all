@@ -8,14 +8,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
 from app.api.routes.interview_plans import get_owned_plan_version
-from app.api.routes.jobs import ensure_job_active, get_owned_job
+from app.api.routes.jobs import ensure_job_active
 from app.database import get_db
 from app.models import (
     CandidateInterviewRound,
     CandidateInterviewSchedule,
-    Job,
     ResumeDocument,
     ScreeningBatch,
+    User,
 )
 from app.schemas.interview_schedule import (
     InterviewRoundCancel,
@@ -24,6 +24,7 @@ from app.schemas.interview_schedule import (
     InterviewScheduleResponse,
 )
 from app.services.audit import record_audit
+from app.services.authorization import ensure_job_writable, get_visible_job
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -44,16 +45,15 @@ def get_owned_document(
     *,
     job_id: uuid.UUID,
     document_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
 ) -> ResumeDocument:
+    get_visible_job(db, job_id, user)
     document = db.scalar(
         select(ResumeDocument)
         .join(ScreeningBatch)
-        .join(Job)
         .where(
             ResumeDocument.id == document_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
     )
     if document is None:
@@ -66,18 +66,19 @@ def get_owned_schedule(
     *,
     job_id: uuid.UUID,
     document_id: uuid.UUID,
-    owner_id: uuid.UUID,
+    user: User,
     for_update: bool = False,
 ) -> CandidateInterviewSchedule:
+    job = get_visible_job(db, job_id, user)
+    if for_update:
+        ensure_job_writable(job, user)
     statement = (
         select(CandidateInterviewSchedule)
         .join(ResumeDocument)
         .join(ScreeningBatch)
-        .join(Job)
         .where(
             CandidateInterviewSchedule.document_id == document_id,
             ScreeningBatch.job_id == job_id,
-            Job.owner_id == owner_id,
         )
         .options(*schedule_load_options())
     )
@@ -133,12 +134,12 @@ def get_candidate_interview_schedule(
     current_user: CurrentUser,
     db: DbSession,
 ) -> CandidateInterviewSchedule | None:
-    get_owned_job(db, job_id, current_user.id)
+    get_visible_job(db, job_id, current_user)
     get_owned_document(
         db,
         job_id=job_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     return db.scalar(
         select(CandidateInterviewSchedule)
@@ -159,13 +160,14 @@ def create_candidate_interview_schedule(
     current_user: CurrentUser,
     db: DbSession,
 ) -> CandidateInterviewSchedule:
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     ensure_job_active(job)
     document = get_owned_document(
         db,
         job_id=job_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
     )
     existing = db.scalar(
         select(CandidateInterviewSchedule.id).where(
@@ -179,7 +181,7 @@ def create_candidate_interview_schedule(
         db,
         job_id,
         payload.plan_version_id,
-        current_user.id,
+        current_user,
     )
     if plan_version.status != "confirmed":
         raise HTTPException(
@@ -248,13 +250,14 @@ def reschedule_candidate_interview_round(
     current_user: CurrentUser,
     db: DbSession,
 ) -> CandidateInterviewSchedule:
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     ensure_job_active(job)
     schedule = get_owned_schedule(
         db,
         job_id=job_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
         for_update=True,
     )
     round_item = get_schedule_round(schedule, round_id)
@@ -308,13 +311,14 @@ def cancel_candidate_interview_round(
     current_user: CurrentUser,
     db: DbSession,
 ) -> CandidateInterviewSchedule:
-    job = get_owned_job(db, job_id, current_user.id)
+    job = get_visible_job(db, job_id, current_user)
+    ensure_job_writable(job, current_user)
     ensure_job_active(job)
     schedule = get_owned_schedule(
         db,
         job_id=job_id,
         document_id=document_id,
-        owner_id=current_user.id,
+        user=current_user,
         for_update=True,
     )
     round_item = get_schedule_round(schedule, round_id)

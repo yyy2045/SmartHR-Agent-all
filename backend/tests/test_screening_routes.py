@@ -22,10 +22,12 @@ from app.models import (
     JobCriteriaVersion,
     ResumeDocument,
     ResumeTextSegment,
+    Role,
     ScoringDimension,
     ScreeningBatch,
     ScreeningResult,
     User,
+    UserRole,
 )
 from app.redis_client import get_session_store
 from app.services.security import hash_password
@@ -56,14 +58,31 @@ def screening_route_dependencies(
     Base.metadata.create_all(engine)
 
     with testing_session() as db:
+        roles = {
+            "recruiter": Role(key="recruiter", display_name="招聘专员"),
+            "hiring_manager": Role(key="hiring_manager", display_name="用人经理"),
+        }
         user = User(
             username="recruiter",
             password_hash=hash_password("correct-password"),
             display_name="招聘专员",
+            role_assignments=[UserRole(role=roles["recruiter"])],
         )
-        db.add(user)
+        manager = User(
+            username="manager",
+            password_hash=hash_password("manager-password"),
+            display_name="用人经理",
+            role_assignments=[UserRole(role=roles["hiring_manager"])],
+        )
+        db.add_all([*roles.values(), user, manager])
         db.flush()
-        job = Job(owner_id=user.id, title="工程师", department="研发", original_jd="JD")
+        job = Job(
+            owner_id=user.id,
+            hiring_manager_id=manager.id,
+            title="工程师",
+            department="研发",
+            original_jd="JD",
+        )
         db.add(job)
         db.flush()
         criteria = JobCriteriaVersion(
@@ -218,12 +237,39 @@ def screening_route_dependencies(
     engine.dispose()
 
 
-async def login(client: httpx.AsyncClient) -> None:
+async def login(
+    client: httpx.AsyncClient,
+    username: str = "recruiter",
+    password: str = "correct-password",
+) -> None:
     response = await client.post(
         "/auth/login",
-        json={"username": "recruiter", "password": "correct-password"},
+        json={"username": username, "password": password},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_hiring_manager_reads_screening_but_not_sensitive_evidence_or_decisions(
+    screening_route_dependencies: ScreeningRouteDependencies,
+) -> None:
+    dependency = screening_route_dependencies
+    result_path = f"/jobs/{dependency.job_id}/screening-results/{dependency.result_id}"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "manager", "manager-password")
+        listed = await client.get(f"/jobs/{dependency.job_id}/screening-results")
+        detail = await client.get(result_path)
+        evidence = await client.get(f"{result_path}/evidence/{dependency.citation_id}")
+        decision = await client.post(
+            f"{result_path}/decisions",
+            json={"decision": "shortlisted", "reason": "越权操作"},
+        )
+
+    assert listed.status_code == 200
+    assert detail.status_code == 200
+    assert evidence.status_code == 403
+    assert decision.status_code == 403
 
 
 @pytest.mark.asyncio

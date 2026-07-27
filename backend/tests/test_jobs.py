@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import AuditLog, User
+from app.models import AuditLog, Role, User, UserRole
 from app.redis_client import get_session_store
 from app.schemas.job import JDAIDraft
 from app.services.ai_client import AIUpstreamError, get_ai_client
@@ -28,12 +28,46 @@ def job_dependencies() -> Generator[sessionmaker[Session], None, None]:
     Base.metadata.create_all(engine)
 
     with testing_session() as db:
-        db.add(
-            User(
-                username="recruiter",
-                password_hash=hash_password("correct-password"),
-                display_name="测试招聘专员",
-            )
+        roles = {
+            "administrator": Role(key="administrator", display_name="企业管理员"),
+            "recruiter": Role(key="recruiter", display_name="招聘专员"),
+            "hiring_manager": Role(key="hiring_manager", display_name="用人经理"),
+            "approver": Role(key="approver", display_name="审批人"),
+        }
+        db.add_all(
+            [
+                *roles.values(),
+                User(
+                    username="recruiter",
+                    password_hash=hash_password("correct-password"),
+                    display_name="测试招聘专员",
+                    role_assignments=[UserRole(role=roles["recruiter"])],
+                ),
+                User(
+                    username="other-recruiter",
+                    password_hash=hash_password("other-password"),
+                    display_name="其他招聘专员",
+                    role_assignments=[UserRole(role=roles["recruiter"])],
+                ),
+                User(
+                    username="manager",
+                    password_hash=hash_password("manager-password"),
+                    display_name="用人经理",
+                    role_assignments=[UserRole(role=roles["hiring_manager"])],
+                ),
+                User(
+                    username="administrator",
+                    password_hash=hash_password("administrator-password"),
+                    display_name="企业管理员",
+                    role_assignments=[UserRole(role=roles["administrator"])],
+                ),
+                User(
+                    username="approver",
+                    password_hash=hash_password("approver-password"),
+                    display_name="审批人",
+                    role_assignments=[UserRole(role=roles["approver"])],
+                ),
+            ]
         )
         db.commit()
 
@@ -58,9 +92,13 @@ def job_dependencies() -> Generator[sessionmaker[Session], None, None]:
 
 
 async def login(client: httpx.AsyncClient) -> None:
+    await login_as(client, "recruiter", "correct-password")
+
+
+async def login_as(client: httpx.AsyncClient, username: str, password: str) -> None:
     response = await client.post(
         "/auth/login",
-        json={"username": "recruiter", "password": "correct-password"},
+        json={"username": username, "password": password},
     )
     assert response.status_code == 200
 
@@ -335,3 +373,92 @@ async def test_auto_reject_is_limited_to_objective_requirements(job_dependencies
 
     assert response.status_code == 422
     assert "只有客观硬性条件允许自动淘汰" in response.text
+
+
+@pytest.mark.asyncio
+async def test_job_assignments_and_role_scopes(job_dependencies: None) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as recruiter:
+        await login(recruiter)
+        manager_options = await recruiter.get(
+            "/users/options", params={"role": "hiring_manager"}
+        )
+        recruiter_options = await recruiter.get(
+            "/users/options", params={"role": "recruiter"}
+        )
+        manager_id = manager_options.json()[0]["id"]
+        other_recruiter_id = next(
+            item["id"]
+            for item in recruiter_options.json()
+            if item["username"] == "other-recruiter"
+        )
+        created = await recruiter.post(
+            "/jobs",
+            json={
+                "title": "平台工程师",
+                "department": "研发",
+                "original_jd": "负责平台工程。",
+                "hiring_manager_id": manager_id,
+            },
+        )
+        forbidden_assignment = await recruiter.post(
+            "/jobs",
+            json={
+                "title": "越权职位",
+                "original_jd": "不应创建。",
+                "recruiter_id": other_recruiter_id,
+            },
+        )
+
+    assert created.status_code == 201
+    job_id = created.json()["id"]
+    assert created.json()["hiring_manager_id"] == manager_id
+    assert forbidden_assignment.status_code == 403
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as manager:
+        await login_as(manager, "manager", "manager-password")
+        assert [item["id"] for item in (await manager.get("/jobs")).json()] == [job_id]
+        assert (await manager.get(f"/jobs/{job_id}")).status_code == 200
+        assert (
+            await manager.get(f"/jobs/{job_id}/criteria/versions")
+        ).status_code == 200
+        read_only = await manager.patch(f"/jobs/{job_id}", json={"title": "不能修改"})
+        create_criteria = await manager.post(
+            f"/jobs/{job_id}/criteria/versions", json={}
+        )
+
+    assert read_only.status_code == 403
+    assert create_criteria.status_code == 403
+    assert read_only.json() == {"detail": "当前角色只能查看该职位"}
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as other:
+        await login_as(other, "other-recruiter", "other-password")
+        assert (await other.get("/jobs")).json() == []
+        assert (await other.get(f"/jobs/{job_id}")).status_code == 404
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as approver:
+        await login_as(approver, "approver", "approver-password")
+        assert (await approver.get("/jobs")).json() == []
+        assert (await approver.get(f"/jobs/{job_id}")).status_code == 404
+        assert (
+            await approver.get("/users/options", params={"role": "recruiter"})
+        ).status_code == 403
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as admin:
+        await login_as(admin, "administrator", "administrator-password")
+        assert [item["id"] for item in (await admin.get("/jobs")).json()] == [job_id]
+        updated = await admin.patch(
+            f"/jobs/{job_id}", json={"recruiter_id": other_recruiter_id}
+        )
+        admin_created = await admin.post(
+            "/jobs",
+            json={
+                "title": "管理员创建职位",
+                "original_jd": "指定招聘专员。",
+                "recruiter_id": other_recruiter_id,
+            },
+        )
+
+    assert updated.status_code == 200
+    assert updated.json()["recruiter_id"] == other_recruiter_id
+    assert admin_created.status_code == 201

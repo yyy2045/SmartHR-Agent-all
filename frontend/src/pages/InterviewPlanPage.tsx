@@ -41,6 +41,8 @@ import {
   type InterviewPlanVersion,
   type InterviewRoundType,
 } from '../api/client'
+import { useAuth } from '../auth/context'
+import { canManageRecruitment } from '../auth/permissions'
 
 const { Title, Text, Paragraph } = Typography
 const anchorScores = [1, 2, 3, 4, 5]
@@ -265,7 +267,7 @@ function DraftInterviewPlanEditor({
                     key={roundField.key}
                     className="criteria-section interview-round-card"
                     title={`面试轮次 ${roundIndex + 1}`}
-                    extra={
+                    extra={!disabled ? (
                       <Space size="small">
                         <Button
                           aria-label={`上移面试轮次 ${roundIndex + 1}`}
@@ -287,7 +289,7 @@ function DraftInterviewPlanEditor({
                           onClick={() => removeRound(roundField.name)}
                         />
                       </Space>
-                    }
+                    ) : undefined}
                   >
                     <div className="interview-round-grid">
                       <Form.Item
@@ -352,7 +354,7 @@ function DraftInterviewPlanEditor({
                                 key={questionField.key}
                                 size="small"
                                 title={`问题 ${questionIndex + 1}`}
-                                extra={
+                                extra={!disabled ? (
                                   <Space size="small">
                                     <Button
                                       aria-label={`上移轮次 ${roundIndex + 1} 问题 ${questionIndex + 1}`}
@@ -376,7 +378,7 @@ function DraftInterviewPlanEditor({
                                       onClick={() => remove(questionField.name)}
                                     />
                                   </Space>
-                                }
+                                ) : undefined}
                               >
                                 <Form.Item
                                   label="问题正文"
@@ -401,7 +403,7 @@ function DraftInterviewPlanEditor({
                                 </Form.Item>
                               </Card>
                             ))}
-                            <Button
+                            {!disabled && <Button
                               type="dashed"
                               block
                               icon={<PlusOutlined />}
@@ -409,7 +411,7 @@ function DraftInterviewPlanEditor({
                               onClick={() => add({ question_text: '', evaluation_guide: '' })}
                             >
                               添加面试问题
-                            </Button>
+                            </Button>}
                           </Space>
                         )}
                       </Form.List>
@@ -433,7 +435,7 @@ function DraftInterviewPlanEditor({
                                 key={dimensionField.key}
                                 size="small"
                                 title={`评分维度 ${dimensionIndex + 1}`}
-                                extra={
+                                extra={!disabled ? (
                                   <Space size="small">
                                     <Button
                                       aria-label={`上移轮次 ${roundIndex + 1} 评分维度 ${dimensionIndex + 1}`}
@@ -457,7 +459,7 @@ function DraftInterviewPlanEditor({
                                       onClick={() => remove(dimensionField.name)}
                                     />
                                   </Space>
-                                }
+                                ) : undefined}
                               >
                                 <div className="criteria-dimension-grid">
                                   <Form.Item
@@ -525,7 +527,7 @@ function DraftInterviewPlanEditor({
                                 </Form.List>
                               </Card>
                             ))}
-                            <Button
+                            {!disabled && <Button
                               type="dashed"
                               block
                               icon={<PlusOutlined />}
@@ -540,7 +542,7 @@ function DraftInterviewPlanEditor({
                               }
                             >
                               添加评分维度
-                            </Button>
+                            </Button>}
                           </Space>
                         )}
                       </Form.List>
@@ -548,7 +550,7 @@ function DraftInterviewPlanEditor({
                   </Card>
                 )
               })}
-              <Button
+              {!disabled && <Button
                 type="dashed"
                 block
                 icon={<PlusOutlined />}
@@ -566,12 +568,12 @@ function DraftInterviewPlanEditor({
                 }
               >
                 添加面试轮次
-              </Button>
+              </Button>}
             </Space>
           )}
         </Form.List>
 
-        <div className="sticky-actions">
+        {!disabled && <div className="sticky-actions">
           <Space wrap>
             <Button
               icon={<SaveOutlined />}
@@ -598,7 +600,7 @@ function DraftInterviewPlanEditor({
               </Button>
             </Popconfirm>
           </Space>
-        </div>
+        </div>}
       </Form>
     </>
   )
@@ -688,6 +690,7 @@ function ConfirmedInterviewPlanView({ version }: { version: InterviewPlanVersion
 
 export function InterviewPlanPage() {
   const { jobId } = useParams()
+  const auth = useAuth()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
@@ -749,6 +752,7 @@ export function InterviewPlanPage() {
   }
 
   const archived = job.data.status === 'archived'
+  const canWrite = canManageRecruitment(auth.user) && !archived
 
   return (
     <>
@@ -765,11 +769,11 @@ export function InterviewPlanPage() {
         </div>
       </div>
 
-      {archived && (
+      {!canWrite && (
         <Alert
           type="warning"
           showIcon
-          message="该职位已归档，面试方案仅供查看"
+          message={archived ? '该职位已归档，面试方案仅供查看' : '当前角色可查看面试方案，但不能修改'}
           className="page-alert"
         />
       )}
@@ -777,15 +781,14 @@ export function InterviewPlanPage() {
       {versions.length === 0 ? (
         <section className="empty-workspace">
           <Empty description="尚未建立面试方案">
-            <Button
+            {canWrite && <Button
               type="primary"
               icon={<PlusOutlined />}
               loading={createMutation.isPending}
-              disabled={archived}
               onClick={() => createMutation.mutate(undefined)}
             >
               创建面试方案草稿
-            </Button>
+            </Button>}
           </Empty>
         </section>
       ) : (
@@ -802,7 +805,7 @@ export function InterviewPlanPage() {
                 <Tag color={selectedVersion.status === 'draft' ? 'processing' : 'success'}>
                   {selectedVersion.status === 'draft' ? '草稿' : '已确认'}
                 </Tag>
-                {selectedVersion.status === 'confirmed' && !archived && (
+                {selectedVersion.status === 'confirmed' && canWrite && (
                   <Button
                     icon={<CopyOutlined />}
                     loading={createMutation.isPending}
@@ -818,7 +821,7 @@ export function InterviewPlanPage() {
               <DraftInterviewPlanEditor
                 jobId={jobId!}
                 version={selectedVersion}
-                disabled={archived}
+                disabled={!canWrite}
               />
             ) : (
               <ConfirmedInterviewPlanView version={selectedVersion} />

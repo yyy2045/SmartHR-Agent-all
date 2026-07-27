@@ -11,9 +11,25 @@ import type {
 } from './api/client'
 
 const timestamp = '2026-07-23T03:00:00Z'
-const user = { id: 'user-1', username: 'recruiter', display_name: '招聘专员' }
+const user = {
+  id: 'user-1',
+  username: 'recruiter',
+  display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
+}
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
+}
 const job = {
   id: 'job-1',
+  recruiter_id: user.id,
+  hiring_manager_id: null,
   title: '平台工程师',
   department: '研发中心',
   original_jd: '负责平台工程建设。',
@@ -133,6 +149,50 @@ describe('candidate comparison flow', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('用人经理的候选人对比页不提供决策和原文入口', async () => {
+    const comparison: CandidateComparison = {
+      job_id: 'job-1',
+      criteria_version_id: 'criteria-1',
+      criteria_version_number: 1,
+      analysis_version: 1,
+      candidates: [
+        candidate('result-1', 'CAND-0001', 88),
+        candidate('result-2', 'CAND-0002', 72),
+      ],
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') {
+        return jsonResponse({ ...job, hiring_manager_id: manager.id })
+      }
+      if (path === '/api/jobs/job-1/screening-results/compare') return jsonResponse(comparison)
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState(
+      {},
+      '',
+      '/jobs/job-1/compare?ids=result-1,result-2',
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('评分 · 工程能力')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '入选' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '待定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '淘汰' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /SEG-0001/ })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([path]) => path.toString().includes('/evidence/'))).toBe(false)
   })
 
   it('限制同版本选择并支持对比页直接作出人工结论', async () => {

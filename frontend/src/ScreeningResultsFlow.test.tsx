@@ -14,9 +14,21 @@ const user = {
   id: 'user-1',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
+}
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
 }
 const job = {
   id: 'job-1',
+  recruiter_id: user.id,
+  hiring_manager_id: null,
   title: '平台工程师',
   department: '研发中心',
   original_jd: '负责平台工程建设。',
@@ -144,6 +156,39 @@ describe('screening results and recruiter decisions', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('用人经理可查看筛选结论但看不到决策和原文证据入口', async () => {
+    const detail = makeDetail()
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') {
+        return jsonResponse({ ...job, hiring_manager_id: manager.id })
+      }
+      if (path === '/api/jobs/job-1/screening-results') return jsonResponse([makeSummary()])
+      if (path === '/api/jobs/job-1/screening-results/result-1') return jsonResponse(detail)
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState({}, '', '/jobs/job-1/results')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /查看依据/ }))
+    expect(await screen.findByText('Python 工程能力扎实')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '标记入选' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '标记待定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '人工淘汰' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /SEG-0001/ })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([path]) => path.toString().includes('/evidence/'))).toBe(false)
   })
 
   it('展示评分证据并保存独立的人工结论历史', async () => {

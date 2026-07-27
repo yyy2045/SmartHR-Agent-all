@@ -14,6 +14,16 @@ const user = {
   id: '03f8ba31-0a83-4466-bc4c-143bd3279680',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
+}
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -26,6 +36,8 @@ function jsonResponse(body: unknown, status = 200) {
 function job(status: 'active' | 'archived' = 'active'): JobDetail {
   return {
     id: 'job-interview',
+    recruiter_id: user.id,
+    hiring_manager_id: null,
     title: '高级后端工程师',
     department: '研发中心',
     original_jd: '负责核心服务设计与开发。',
@@ -125,6 +137,36 @@ describe('interview plan and structured scorecard flow', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('用人经理只能查看面试方案草稿', async () => {
+    const draft: InterviewPlanVersion = {
+      ...confirmedVersion(),
+      status: 'draft',
+      confirmed_by_id: null,
+      confirmed_at: null,
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-interview') {
+        return jsonResponse({ ...job(), hiring_manager_id: manager.id })
+      }
+      if (path === '/api/jobs/job-interview/interview-plans/versions') {
+        return jsonResponse([draft])
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    window.history.replaceState({}, '', '/jobs/job-interview/interview-plan')
+    renderApp()
+
+    expect(await screen.findByText('当前角色可查看面试方案，但不能修改')).toBeInTheDocument()
+    expect(screen.getByLabelText('面试轮次 1 名称')).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '保存草稿' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认方案' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '添加面试轮次' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('删除面试轮次 1')).not.toBeInTheDocument()
   })
 
   it('创建、确认并基于不可变版本复制面试方案', async () => {

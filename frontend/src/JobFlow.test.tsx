@@ -9,6 +9,16 @@ const user = {
   id: '03f8ba31-0a83-4466-bc4c-143bd3279680',
   username: 'recruiter',
   display_name: '招聘专员',
+  is_active: true,
+  must_change_password: false,
+  roles: ['recruiter'],
+}
+const manager = {
+  ...user,
+  id: 'manager-1',
+  username: 'manager',
+  display_name: '用人经理',
+  roles: ['hiring_manager'],
 }
 
 const timestamp = '2026-07-22T12:00:00Z'
@@ -24,6 +34,59 @@ describe('job and criteria flow', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('用人经理只能查看筛选标准草稿', async () => {
+    const draft: CriteriaVersion = {
+      id: 'version-1',
+      job_id: 'job-1',
+      version_number: 1,
+      status: 'draft',
+      pass_threshold: 60,
+      source_version_id: null,
+      confirmed_by_id: null,
+      confirmed_at: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+      hard_requirements: [],
+      scoring_dimensions: [],
+    }
+    const managedJob: JobDetail = {
+      id: 'job-1',
+      recruiter_id: user.id,
+      hiring_manager_id: manager.id,
+      title: '平台工程师',
+      department: '研发中心',
+      original_jd: '负责平台工程建设。',
+      status: 'active',
+      archived_at: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+      criteria_versions: [draft],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(manager)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') return jsonResponse(managedJob)
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    window.history.replaceState({}, '', '/jobs/job-1/criteria')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('当前角色可查看筛选标准，但不能修改')).toBeInTheDocument()
+    expect(screen.getByLabelText('语义匹配通过线')).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'AI 生成草稿' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存草稿' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认标准' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '编辑职位信息' })).not.toBeInTheDocument()
   })
 
   it('支持创建职位、编辑草稿并确认不可变标准版本', async () => {
@@ -44,6 +107,8 @@ describe('job and criteria flow', () => {
         }
         job = {
           id: 'job-1',
+          recruiter_id: user.id,
+          hiring_manager_id: null,
           ...payload,
           status: 'active',
           archived_at: null,
@@ -163,6 +228,8 @@ describe('job and criteria flow', () => {
     }
     const job: JobDetail = {
       id: 'job-ai',
+      recruiter_id: user.id,
+      hiring_manager_id: null,
       title: '后端工程师',
       department: '研发中心',
       original_jd: '负责 Python 服务开发。',
