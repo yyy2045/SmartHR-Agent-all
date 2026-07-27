@@ -11,10 +11,12 @@ from app.api.routes.interview_schedules import router as interview_schedules_rou
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.knowledge import router as knowledge_router
 from app.api.routes.screening_results import router as screening_results_router
+from app.api.routes.users import router as users_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(health_router, prefix="/health", tags=["health"])
+api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
 api_router.include_router(
