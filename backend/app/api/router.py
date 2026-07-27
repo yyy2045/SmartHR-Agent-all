@@ -8,6 +8,7 @@ from app.api.routes.candidates import router as candidates_router
 from app.api.routes.health import router as health_router
 from app.api.routes.interview_evaluations import router as interview_evaluations_router
 from app.api.routes.interview_plans import router as interview_plans_router
+from app.api.routes.interview_reports import router as interview_reports_router
 from app.api.routes.interview_schedules import router as interview_schedules_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.knowledge import router as knowledge_router
@@ -31,6 +32,11 @@ api_router.include_router(
     interview_evaluations_router,
     prefix="/jobs",
     tags=["interview-evaluations"],
+)
+api_router.include_router(
+    interview_reports_router,
+    prefix="/jobs",
+    tags=["interview-reports"],
 )
 api_router.include_router(
     interview_plans_router,

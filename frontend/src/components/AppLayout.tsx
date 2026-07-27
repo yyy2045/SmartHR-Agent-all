@@ -73,6 +73,12 @@ function pageMeta(pathname: string) {
   if (pathname.endsWith('/interview-plan')) {
     return { title: '面试方案', subtitle: '配置职位面试轮次、问题和结构化评分表' }
   }
+  if (pathname.endsWith('/interview-reports')) {
+    return { title: '面试报告', subtitle: '汇总筛选与面试证据并形成最终报告' }
+  }
+  if (pathname.endsWith('/interview-report')) {
+    return { title: '面试报告详情', subtitle: '审阅证据、修订版本并确认报告' }
+  }
   if (pathname.endsWith('/history') && pathname.includes('/documents/')) {
     return { title: '候选人资料与版本', subtitle: '修正结构化资料并追踪每次分析结果' }
   }

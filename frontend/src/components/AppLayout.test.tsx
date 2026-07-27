@@ -108,6 +108,12 @@ describe('招聘业务导航', () => {
       '候选人流程',
     ],
     ['/jobs/job-1/interview-plan', 'interviews', '面试管理'],
+    ['/jobs/job-1/interview-reports', 'interviews', '面试管理'],
+    [
+      '/jobs/job-1/applications/application-1/interview-report',
+      'interviews',
+      '面试管理',
+    ],
     [
       '/jobs/job-1/candidates/document-1/interview-schedule',
       'interviews',

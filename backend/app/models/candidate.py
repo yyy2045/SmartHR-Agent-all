@@ -23,6 +23,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.candidate_process import CandidateProcess
     from app.models.interview import CandidateInterviewSchedule
+    from app.models.interview_report import InterviewReport
     from app.models.job import Job
     from app.models.resume import ResumeDocument
     from app.models.user import User
@@ -153,6 +154,11 @@ class JobApplication(Base):
         uselist=False,
     )
     interview_schedule: Mapped[CandidateInterviewSchedule | None] = relationship(
+        back_populates="application",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    interview_report: Mapped[InterviewReport | None] = relationship(
         back_populates="application",
         cascade="all, delete-orphan",
         uselist=False,
