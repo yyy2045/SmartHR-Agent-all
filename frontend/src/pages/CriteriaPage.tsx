@@ -1,6 +1,5 @@
 import {
   ArrowDownOutlined,
-  ArrowLeftOutlined,
   ArrowUpOutlined,
   CheckOutlined,
   CopyOutlined,
@@ -47,6 +46,7 @@ import {
   type JDAIDraft,
   type ScoringDimensionInput,
 } from '../api/client'
+import { ScreeningModuleNav } from '../components/ScreeningModuleNav'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -572,15 +572,12 @@ export function CriteriaPage() {
             {job.data.department || '未填写部门'} · 配置硬性要求、评分维度和语义通过线
           </Text>
         </div>
-        <Space wrap>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
-            返回职位列表
-          </Button>
-          {!archived && (
-            <Button onClick={() => navigate(`/jobs/${jobId}/edit`)}>编辑职位信息</Button>
-          )}
-        </Space>
+        {!archived && (
+          <Button onClick={() => navigate(`/jobs/${jobId}/edit`)}>编辑职位信息</Button>
+        )}
       </div>
+
+      <ScreeningModuleNav jobId={jobId} activeKey="criteria" />
 
       {archived && (
         <Alert
