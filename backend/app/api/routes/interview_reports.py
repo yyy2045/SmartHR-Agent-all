@@ -31,6 +31,7 @@ from app.schemas.interview_report import (
     InterviewReportCreateRequest,
     InterviewReportGenerateRequest,
     InterviewReportResponse,
+    InterviewReportSummaryResponse,
     InterviewReportUpdateRequest,
     InterviewReportVersionResponse,
     ReportDimensionEvidenceResponse,
@@ -356,6 +357,25 @@ def _report_response(report: InterviewReport) -> InterviewReportResponse:
     )
 
 
+def _report_summary_response(
+    report: InterviewReport,
+) -> InterviewReportSummaryResponse:
+    application = report.application
+    return InterviewReportSummaryResponse(
+        id=report.id,
+        application_id=application.id,
+        application_status=application.status,
+        candidate_id=application.candidate_id,
+        candidate_code=application.candidate.candidate_code,
+        candidate_name=application.candidate.full_name,
+        status=report.status,
+        current_version_number=report.current_version_number,
+        current_conclusion=report.current_version.conclusion,
+        confirmed_at=report.confirmed_at,
+        updated_at=report.updated_at,
+    )
+
+
 def _ensure_write_allowed(job: Job, application: JobApplication, user: User) -> None:
     ensure_job_writable(job, user)
     if job.status == "archived":
@@ -569,6 +589,28 @@ def get_interview_report_context(
         db, job_id, application_id, current_user
     )
     return _context_response(db, job, application)
+
+
+@router.get(
+    "/{job_id}/interview-reports",
+    response_model=list[InterviewReportSummaryResponse],
+)
+def list_interview_reports(
+    job_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[InterviewReportSummaryResponse]:
+    get_visible_job(db, job_id, current_user)
+    reports = list(
+        db.scalars(
+            select(InterviewReport)
+            .join(JobApplication)
+            .where(JobApplication.job_id == job_id)
+            .options(*_REPORT_LOAD_OPTIONS)
+            .order_by(InterviewReport.updated_at.desc(), InterviewReport.id)
+        ).all()
+    )
+    return [_report_summary_response(report) for report in reports]
 
 
 @router.get(

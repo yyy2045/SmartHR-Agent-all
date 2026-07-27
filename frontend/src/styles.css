@@ -1657,6 +1657,355 @@ input {
   width: 100%;
 }
 
+/* 面试报告 */
+.report-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 16px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.report-summary-strip > div,
+.report-evidence-overview > div {
+  display: grid;
+  gap: 5px;
+  padding: 18px 22px;
+  border-right: 1px solid #edf0f4;
+}
+
+.report-summary-strip > div:last-child,
+.report-evidence-overview > div:last-child {
+  border-right: 0;
+}
+
+.report-summary-strip strong,
+.report-evidence-overview strong {
+  color: #172033;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.report-list-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 420px) 180px;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.report-list-table {
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.report-list-table .ant-table-thead > tr > th {
+  color: #536176;
+  font-size: 12px;
+  background: #f8fafc;
+}
+
+.report-candidate-cell,
+.report-evaluation-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.report-start-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px;
+  margin-bottom: 18px;
+  background: #ffffff;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+}
+
+.report-start-panel > div:first-child {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.report-start-panel h3 {
+  margin: 0 0 4px;
+}
+
+.report-start-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  color: #1d72d8;
+  font-size: 22px;
+  background: #edf6ff;
+  border-radius: 8px;
+  place-items: center;
+}
+
+.report-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 18px;
+  align-items: start;
+}
+
+.report-main-panel,
+.report-version-history {
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.report-main-panel {
+  padding: 22px 24px 24px;
+}
+
+.report-version-heading,
+.report-section-heading,
+.report-list-field-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.report-version-heading {
+  padding-bottom: 16px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.report-version-heading h3,
+.report-section-heading h4 {
+  margin: 0;
+}
+
+.report-main-panel > .ant-tabs > .ant-tabs-nav {
+  margin: 0 0 20px;
+}
+
+.report-editor,
+.report-evidence {
+  display: grid;
+  gap: 22px;
+}
+
+.report-editor-section,
+.report-list-field {
+  display: grid;
+  gap: 10px;
+}
+
+.report-conclusion-control {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.report-conclusion-control .ant-radio-button-wrapper {
+  min-width: 92px;
+  text-align: center;
+}
+
+.report-editor-list-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.report-list-field {
+  min-width: 0;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+}
+
+.report-list-field-items {
+  width: 100%;
+}
+
+.report-list-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 8px;
+}
+
+.report-evidence-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  background: #f8fafc;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+}
+
+.report-evidence-section {
+  display: grid;
+  gap: 14px;
+  padding-top: 20px;
+  border-top: 1px solid #e5eaf0;
+}
+
+.report-screening-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.report-screening-grid > div {
+  min-width: 0;
+  padding: 14px;
+  background: #f8fafc;
+  border-radius: 6px;
+}
+
+.report-screening-grid .ant-typography {
+  margin: 5px 0 0;
+}
+
+.report-citation-list,
+.report-evaluation-evidence {
+  display: grid;
+  gap: 10px;
+}
+
+.report-citation-list blockquote,
+.report-evaluation-evidence blockquote {
+  padding: 10px 12px;
+  margin: 0;
+  color: #364152;
+  background: #f5f8fb;
+  border-left: 3px solid #7caee8;
+}
+
+.report-evaluation-evidence .ant-typography {
+  margin-bottom: 6px;
+}
+
+.report-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 24px;
+}
+
+.report-version-history {
+  position: sticky;
+  top: 92px;
+  padding: 18px;
+}
+
+.report-version-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.report-version-item {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-height: 72px;
+  padding: 11px 12px;
+  color: #273449;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid #dfe5ec;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.report-version-item:hover,
+.report-version-item.is-selected {
+  background: #f1f7ff;
+  border-color: #4c91e8;
+}
+
+.report-version-item > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.report-version-item small {
+  color: #6b778c;
+}
+
+@media (max-width: 900px) {
+  .report-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .report-version-history {
+    position: static;
+  }
+
+  .report-screening-grid,
+  .report-editor-list-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .report-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .report-summary-strip > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .report-summary-strip > div:nth-child(-n + 2) {
+    border-bottom: 1px solid #edf0f4;
+  }
+
+  .report-list-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .report-list-toolbar .ant-select {
+    width: 100%;
+  }
+
+  .report-start-panel,
+  .report-actions,
+  .report-version-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .report-start-panel > .ant-space,
+  .report-start-panel > .ant-space .ant-btn,
+  .report-actions > .ant-space,
+  .report-actions > .ant-space .ant-btn {
+    width: 100%;
+  }
+
+  .report-evidence-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .report-evidence-overview > div {
+    border-right: 0;
+    border-bottom: 1px solid #edf0f4;
+  }
+
+  .report-evidence-overview > div:last-child {
+    border-bottom: 0;
+  }
+
+  .report-main-panel {
+    padding: 18px 16px;
+  }
+}
+
 @media (max-width: 1180px) {
   .header-search {
     display: none;

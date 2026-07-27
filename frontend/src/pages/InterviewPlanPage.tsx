@@ -43,6 +43,7 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/context'
 import { canManageRecruitment } from '../auth/permissions'
+import { InterviewModuleNav } from '../components/InterviewModuleNav'
 
 const { Title, Text, Paragraph } = Typography
 const anchorScores = [1, 2, 3, 4, 5]
@@ -768,6 +769,8 @@ export function InterviewPlanPage() {
           </Text>
         </div>
       </div>
+
+      <InterviewModuleNav jobId={jobId} activeKey="plan" />
 
       {!canWrite && (
         <Alert

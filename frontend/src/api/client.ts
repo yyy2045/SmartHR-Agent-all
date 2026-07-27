@@ -389,6 +389,145 @@ export interface InterviewEvaluationContext {
   evaluation: InterviewEvaluationRecord | null
 }
 
+export type InterviewReportStatus = 'draft' | 'confirmed'
+export type InterviewReportConclusion = 'hire' | 'next_round' | 'reserve' | 'reject'
+
+export interface ReportScreeningCitation {
+  id: string
+  subject_type: string
+  subject_key: string
+  quote: string
+  source_type: string
+  page_number: number | null
+  paragraph_index: number | null
+}
+
+export interface ReportScreeningEvidence {
+  id: string
+  document_id: string
+  criteria_version_id: string
+  analysis_version: number
+  ai_group: 'passed' | 'low_match' | 'auto_rejected' | null
+  total_score: number | null
+  pass_threshold: number
+  current_decision: 'unprocessed' | 'shortlisted' | 'pending' | 'rejected'
+  strengths: string[]
+  gaps: string[]
+  missing_items: string[]
+  completed_at: string | null
+  citations: ReportScreeningCitation[]
+}
+
+export interface ReportQuestionEvidence {
+  question_id: string
+  question_text: string
+  answer_summary: string
+  evidence: string
+}
+
+export interface ReportDimensionEvidence {
+  dimension_id: string
+  dimension_name: string
+  score: number | null
+  evidence: string
+}
+
+export interface ReportSubmittedEvaluation {
+  evaluation_id: string
+  round_id: string
+  round_name: string
+  round_type: string
+  sort_order: number
+  total_score: number | null
+  passed: boolean | null
+  overall_recommendation: string
+  overall_comment: string
+  submitted_at: string
+  question_responses: ReportQuestionEvidence[]
+  dimension_ratings: ReportDimensionEvidence[]
+}
+
+export interface ReportMissingRound {
+  round_id: string
+  round_name: string
+  round_type: string
+  sort_order: number
+  round_status: InterviewScheduleRoundStatus
+  reason: 'not_submitted' | 'cancelled'
+}
+
+export interface InterviewReportContext {
+  application_id: string
+  application_status: 'active' | 'merged'
+  job_id: string
+  job_title: string
+  candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  latest_screening: ReportScreeningEvidence | null
+  submitted_evaluations: ReportSubmittedEvaluation[]
+  missing_rounds: ReportMissingRound[]
+}
+
+export interface InterviewReportContent {
+  conclusion: InterviewReportConclusion | null
+  executive_summary: string
+  strengths: string[]
+  concerns: string[]
+  follow_up_actions: string[]
+}
+
+export interface InterviewReportVersion extends InterviewReportContent {
+  id: string
+  version_number: number
+  source_version_id: string | null
+  generation_mode: 'ai' | 'manual'
+  screening_result_id: string | null
+  evaluation_ids: string[]
+  evidence_snapshot: InterviewReportContext
+  missing_rounds: ReportMissingRound[]
+  model_name: string | null
+  prompt_version: string | null
+  ai_failure_code: string | null
+  ai_failure_message: string | null
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+}
+
+export interface InterviewReportRecord {
+  id: string
+  application_id: string
+  application_status: 'active' | 'merged'
+  job_id: string
+  job_title: string
+  candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  status: InterviewReportStatus
+  current_version_number: number
+  confirmed_by_id: string | null
+  confirmed_at: string | null
+  created_at: string
+  updated_at: string
+  versions: InterviewReportVersion[]
+}
+
+export interface InterviewReportSummary {
+  id: string
+  application_id: string
+  application_status: 'active' | 'merged'
+  candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  status: InterviewReportStatus
+  current_version_number: number
+  current_conclusion: InterviewReportConclusion | null
+  confirmed_at: string | null
+  updated_at: string
+}
+
 export type BatchStatus =
   | 'uploading'
   | 'ready'
@@ -611,6 +750,7 @@ export interface ScreeningResultSummary {
 
 export interface CandidateProcessCardRecord {
   process_id: string | null
+  application_id: string
   screening_result_id: string
   batch_id: string
   batch_name: string
@@ -1266,6 +1406,108 @@ export function submitInterviewEvaluation(
     `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation/submit`,
     { method: 'POST' },
     '提交面试评价失败',
+  )
+}
+
+export function fetchInterviewReports(jobId: string): Promise<InterviewReportSummary[]> {
+  return apiRequest(
+    `/api/jobs/${jobId}/interview-reports`,
+    {},
+    '无法读取面试报告列表',
+  )
+}
+
+export function fetchInterviewReportContext(
+  jobId: string,
+  applicationId: string,
+): Promise<InterviewReportContext> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-report/context`,
+    {},
+    '无法读取面试报告证据',
+  )
+}
+
+export async function fetchInterviewReport(
+  jobId: string,
+  applicationId: string,
+): Promise<InterviewReportRecord | null> {
+  try {
+    return await apiRequest(
+      `/api/jobs/${jobId}/applications/${applicationId}/interview-report`,
+      {},
+      '无法读取面试报告',
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
+
+export function createManualInterviewReport(
+  jobId: string,
+  applicationId: string,
+  idempotencyKey: string,
+  content: InterviewReportContent,
+): Promise<InterviewReportRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-report/manual-draft`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: idempotencyKey, ...content }),
+    },
+    '创建人工面试报告失败',
+  )
+}
+
+export function generateAIInterviewReport(
+  jobId: string,
+  applicationId: string,
+  idempotencyKey: string,
+): Promise<InterviewReportRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-report/ai-draft`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: idempotencyKey }),
+    },
+    '生成 AI 面试报告失败',
+  )
+}
+
+export function createInterviewReportVersion(
+  jobId: string,
+  applicationId: string,
+  idempotencyKey: string,
+  sourceVersionId: string,
+  content: InterviewReportContent,
+): Promise<InterviewReportRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-report/versions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        source_version_id: sourceVersionId,
+        ...content,
+      }),
+    },
+    '保存面试报告新版本失败',
+  )
+}
+
+export function confirmInterviewReport(
+  jobId: string,
+  applicationId: string,
+  versionId: string,
+): Promise<InterviewReportRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-report/confirm`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ version_id: versionId }),
+    },
+    '确认面试报告失败',
   )
 }
 

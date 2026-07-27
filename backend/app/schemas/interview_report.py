@@ -170,3 +170,17 @@ class InterviewReportResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     versions: list[InterviewReportVersionResponse]
+
+
+class InterviewReportSummaryResponse(BaseModel):
+    id: uuid.UUID
+    application_id: uuid.UUID
+    application_status: Literal["active", "merged"]
+    candidate_id: uuid.UUID
+    candidate_code: str
+    candidate_name: str | None
+    status: Literal["draft", "confirmed"]
+    current_version_number: int
+    current_conclusion: InterviewReportConclusion | None
+    confirmed_at: datetime | None
+    updated_at: datetime

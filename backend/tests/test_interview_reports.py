@@ -619,12 +619,29 @@ async def test_manual_report_creation_is_idempotent_and_keeps_evidence_snapshot(
             json={**payload, "executive_summary": "相同幂等键的不同内容"},
         )
         detail = await client.get(report_path(dependency))
+        report_list = await client.get(f"/jobs/{dependency.job_id}/interview-reports")
 
     assert created.status_code == 201, created.text
     assert replayed.status_code == 201, replayed.text
     assert replayed.json()["id"] == created.json()["id"]
     assert conflict.status_code == 409
     assert detail.status_code == 200
+    assert report_list.status_code == 200
+    assert report_list.json() == [
+        {
+            "id": created.json()["id"],
+            "application_id": str(dependency.application_id),
+            "application_status": "active",
+            "candidate_id": created.json()["candidate_id"],
+            "candidate_code": created.json()["candidate_code"],
+            "candidate_name": "候选人A",
+            "status": "draft",
+            "current_version_number": 1,
+            "current_conclusion": "hire",
+            "confirmed_at": None,
+            "updated_at": created.json()["updated_at"],
+        }
+    ]
     body = detail.json()
     assert body["status"] == "draft"
     assert body["current_version_number"] == 1

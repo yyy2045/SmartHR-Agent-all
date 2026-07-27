@@ -47,6 +47,7 @@ const job: JobDetail = {
 
 const candidate: CandidateProcessCardRecord = {
   process_id: 'process-1',
+  application_id: 'application-1',
   screening_result_id: 'result-1',
   batch_id: 'batch-1',
   batch_name: '社招批次',

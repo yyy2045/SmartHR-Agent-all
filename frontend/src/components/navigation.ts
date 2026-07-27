@@ -25,6 +25,8 @@ export function businessModuleForPath(pathname: string): BusinessModule {
   }
   if (
     pathname.endsWith('/interview-plan') ||
+    pathname.endsWith('/interview-reports') ||
+    pathname.endsWith('/interview-report') ||
     pathname.endsWith('/interview-schedule') ||
     pathname.includes('/interview-evaluations/')
   ) {

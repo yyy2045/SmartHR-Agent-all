@@ -54,6 +54,7 @@ describe('candidate process board', () => {
   it('用人经理看不到电话和阶段调整命令', async () => {
     const candidate: CandidateProcessCardRecord = {
       process_id: 'process-1',
+      application_id: 'application-1',
       screening_result_id: 'result-1',
       batch_id: 'batch-1',
       batch_name: '社招批次',
@@ -111,6 +112,7 @@ describe('candidate process board', () => {
   it('按阶段展示候选人并保存人工流程变化与时间线', async () => {
     let candidate: CandidateProcessCardRecord = {
       process_id: null,
+      application_id: 'application-1',
       screening_result_id: 'result-1',
       batch_id: 'batch-1',
       batch_name: '校招第一批',
@@ -241,6 +243,7 @@ describe('candidate process board', () => {
   it('从候选人卡片进入对应档案页面', async () => {
     const candidate: CandidateProcessCardRecord = {
       process_id: null,
+      application_id: 'application-1',
       screening_result_id: 'result-1',
       batch_id: 'batch-1',
       batch_name: '社招批次',

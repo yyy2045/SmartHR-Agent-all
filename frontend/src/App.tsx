@@ -56,6 +56,16 @@ const InterviewEvaluationPage = lazy(() =>
     default: module.InterviewEvaluationPage,
   })),
 )
+const InterviewReportListPage = lazy(() =>
+  import('./pages/InterviewReportListPage').then((module) => ({
+    default: module.InterviewReportListPage,
+  })),
+)
+const InterviewReportPage = lazy(() =>
+  import('./pages/InterviewReportPage').then((module) => ({
+    default: module.InterviewReportPage,
+  })),
+)
 const UserManagementPage = lazy(() =>
   import('./pages/UserManagementPage').then((module) => ({
     default: module.UserManagementPage,
@@ -117,6 +127,14 @@ function App() {
                   <Route path="/jobs/:jobId/compare" element={<CandidateComparisonPage />} />
                   <Route path="/jobs/:jobId/pipeline" element={<CandidateProcessPage />} />
                   <Route path="/jobs/:jobId/interview-plan" element={<InterviewPlanPage />} />
+                  <Route
+                    path="/jobs/:jobId/interview-reports"
+                    element={<InterviewReportListPage />}
+                  />
+                  <Route
+                    path="/jobs/:jobId/applications/:applicationId/interview-report"
+                    element={<InterviewReportPage />}
+                  />
                   <Route
                     path="/jobs/:jobId/candidates/:documentId/interview-schedule"
                     element={<InterviewSchedulePage />}
