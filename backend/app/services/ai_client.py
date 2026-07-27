@@ -10,17 +10,23 @@ import httpx
 from pydantic import ValidationError
 
 from app.config import settings
+from app.schemas.interview_report import InterviewReportAIDraft
 from app.schemas.job import JDAIDraft
 from app.schemas.screening import ResumeAnalysisDraft
 
 logger = logging.getLogger(__name__)
 MAX_MODEL_RETRIES = 2
 RESUME_MATCH_PROMPT_VERSION = "resume-match-v2"
-StructuredResponse = TypeVar("StructuredResponse", JDAIDraft, ResumeAnalysisDraft)
+INTERVIEW_REPORT_PROMPT_VERSION = "interview-report-v1"
+StructuredResponse = TypeVar(
+    "StructuredResponse", JDAIDraft, ResumeAnalysisDraft, InterviewReportAIDraft
+)
 
 
 def _schema_instruction(
-    response_type: type[JDAIDraft] | type[ResumeAnalysisDraft],
+    response_type: type[JDAIDraft]
+    | type[ResumeAnalysisDraft]
+    | type[InterviewReportAIDraft],
 ) -> str:
     schema = json.dumps(
         response_type.model_json_schema(),
@@ -165,6 +171,31 @@ class OpenAICompatibleClient:
             "response_format": {"type": "json_object"},
         }
 
+    @staticmethod
+    def _interview_report_request_payload(
+        *, payload: dict[str, Any], model: str
+    ) -> dict[str, Any]:
+        system_prompt = (
+            "你是企业招聘面试报告助手。只能依据输入中的最新筛选结果、证据引用和已提交"
+            "面试评价生成可编辑草稿，不得补全或猜测缺失信息。必须明确区分‘未提供信息’"
+            "与‘不符合要求’，缺失面试轮次只能作为风险提示，不能假定面试未通过。"
+            "结论只允许 hire、next_round、reserve、reject。AI 不拥有最终录用权，输出只是"
+            "招聘专员确认前的草稿，也不得建议系统自动改变候选人阶段。"
+            f"{_schema_instruction(InterviewReportAIDraft)}"
+        )
+        return {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(payload, ensure_ascii=False),
+                },
+            ],
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"},
+        }
+
     async def _request_structured(
         self,
         *,
@@ -248,6 +279,19 @@ class OpenAICompatibleClient:
             ),
             response_type=ResumeAnalysisDraft,
             operation_name="AI 简历匹配",
+        )
+
+    async def generate_interview_report(
+        self, payload: dict[str, Any]
+    ) -> InterviewReportAIDraft:
+        self._validate_configuration()
+        return await self._request_structured(
+            payload=self._interview_report_request_payload(
+                payload=payload,
+                model=self.model,
+            ),
+            response_type=InterviewReportAIDraft,
+            operation_name="AI 面试报告",
         )
 
 

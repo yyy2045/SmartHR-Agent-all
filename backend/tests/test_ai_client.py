@@ -112,6 +112,37 @@ def valid_resume_analysis() -> dict[str, object]:
     }
 
 
+def interview_report_payload() -> dict[str, object]:
+    return {
+        "job": {"title": "高级后端工程师"},
+        "latest_screening": {
+            "total_score": 86,
+            "strengths": ["系统设计证据充分"],
+            "citations": [{"quote": "负责核心交易系统重构"}],
+        },
+        "submitted_evaluations": [
+            {
+                "round_name": "技术一面",
+                "overall_recommendation": "recommend",
+                "overall_comment": "系统设计能力达到岗位要求。",
+            }
+        ],
+        "missing_rounds": [
+            {"round_name": "业务二面", "reason": "not_submitted"}
+        ],
+    }
+
+
+def valid_interview_report() -> dict[str, object]:
+    return {
+        "conclusion": "next_round",
+        "executive_summary": "技术能力达到要求，建议完成业务面后再决策。",
+        "strengths": ["系统设计证据充分"],
+        "concerns": ["业务面评价尚未提交"],
+        "follow_up_actions": ["完成业务面"],
+    }
+
+
 @pytest.mark.asyncio
 async def test_openai_client_sends_json_object_with_schema_and_validates_draft() -> None:
     requests: list[httpx.Request] = []
@@ -183,6 +214,65 @@ async def test_openai_client_requests_resume_scores_without_model_total() -> Non
     user_payload = json.loads(request_body["messages"][1]["content"])
     assert user_payload == resume_payload()
     assert "private.pdf" not in request_body["messages"][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_openai_client_generates_strict_interview_report_from_supplied_evidence() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                valid_interview_report(), ensure_ascii=False
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    result = await make_client(
+        httpx.MockTransport(handler)
+    ).generate_interview_report(interview_report_payload())
+
+    assert result.conclusion == "next_round"
+    assert len(requests) == 1
+    request_body = json.loads(requests[0].content)
+    assert request_body["model"] == "test-model"
+    assert request_body["response_format"] == {"type": "json_object"}
+    system_prompt = request_body["messages"][0]["content"]
+    assert '"conclusion"' in system_prompt
+    assert '"executive_summary"' in system_prompt
+    assert "缺失面试轮次只能作为风险提示" in system_prompt
+    assert json.loads(request_body["messages"][1]["content"]) == (
+        interview_report_payload()
+    )
+
+
+@pytest.mark.asyncio
+async def test_invalid_interview_report_retries_twice() -> None:
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "{}"}}]},
+        )
+
+    with pytest.raises(AIResponseValidationError):
+        await make_client(
+            httpx.MockTransport(handler)
+        ).generate_interview_report(interview_report_payload())
+
+    assert attempts == 3
 
 
 @pytest.mark.asyncio

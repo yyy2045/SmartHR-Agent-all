@@ -14,9 +14,11 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    AuditLog,
     Candidate,
     CandidateInterviewRound,
     CandidateInterviewSchedule,
+    CandidateProcess,
     EvidenceCitation,
     InterviewDimensionRating,
     InterviewEvaluation,
@@ -39,6 +41,14 @@ from app.models import (
     UserRole,
 )
 from app.redis_client import get_session_store
+from app.schemas.interview_report import InterviewReportAIDraft
+from app.services.ai_client import (
+    AIConfigurationError,
+    AIRequestTimeout,
+    AIResponseValidationError,
+    AIUpstreamError,
+    get_ai_client,
+)
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
 
@@ -50,6 +60,27 @@ class InterviewReportDependencies:
     application_id: uuid.UUID
     latest_screening_id: uuid.UUID
     submitted_evaluation_id: uuid.UUID
+
+
+class StubInterviewReportAIClient:
+    def __init__(self, *, failure: Exception | None = None) -> None:
+        self.model = "report-test-model"
+        self.failure = failure
+        self.calls: list[dict[str, object]] = []
+
+    async def generate_interview_report(
+        self, payload: dict[str, object]
+    ) -> InterviewReportAIDraft:
+        self.calls.append(payload)
+        if self.failure is not None:
+            raise self.failure
+        return InterviewReportAIDraft(
+            conclusion="next_round",
+            executive_summary="技术能力达到要求，建议补充业务面评价后再决策。",
+            strengths=["系统设计证据完整"],
+            concerns=["业务轮次尚未提交评价"],
+            follow_up_actions=["完成业务面"],
+        )
 
 
 @pytest.fixture
@@ -338,6 +369,13 @@ def interview_report_dependencies() -> Generator[InterviewReportDependencies, No
             overall_comment="尚未完成",
         )
         db.add_all([submitted_evaluation, draft_evaluation])
+        db.add(
+            CandidateProcess(
+                application=application,
+                current_stage="to_interview",
+                updated_by_id=recruiter.id,
+            )
+        )
         db.commit()
         dependency = InterviewReportDependencies(
             session_factory=testing_session,
@@ -380,6 +418,24 @@ def context_path(dependency: InterviewReportDependencies) -> str:
         f"/jobs/{dependency.job_id}/applications/{dependency.application_id}/"
         "interview-report/context"
     )
+
+
+def report_path(dependency: InterviewReportDependencies) -> str:
+    return (
+        f"/jobs/{dependency.job_id}/applications/{dependency.application_id}/"
+        "interview-report"
+    )
+
+
+def complete_manual_payload(idempotency_key: uuid.UUID) -> dict[str, object]:
+    return {
+        "idempotency_key": str(idempotency_key),
+        "conclusion": "hire",
+        "executive_summary": "筛选和技术面证据支持录用。",
+        "strengths": ["系统设计能力突出"],
+        "concerns": ["业务轮次评价待补充"],
+        "follow_up_actions": ["确认到岗时间"],
+    }
 
 
 @pytest.mark.asyncio
@@ -538,3 +594,329 @@ def test_report_model_enforces_application_and_version_idempotency(
         db.add(duplicate_report)
         with pytest.raises(IntegrityError):
             db.commit()
+
+
+@pytest.mark.asyncio
+async def test_manual_report_creation_is_idempotent_and_keeps_evidence_snapshot(
+    interview_report_dependencies: InterviewReportDependencies,
+) -> None:
+    dependency = interview_report_dependencies
+    key = uuid.uuid4()
+    payload = complete_manual_payload(key)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        created = await client.post(
+            f"{report_path(dependency)}/manual-draft",
+            json=payload,
+        )
+        replayed = await client.post(
+            f"{report_path(dependency)}/manual-draft",
+            json=payload,
+        )
+        conflict = await client.post(
+            f"{report_path(dependency)}/manual-draft",
+            json={**payload, "executive_summary": "相同幂等键的不同内容"},
+        )
+        detail = await client.get(report_path(dependency))
+
+    assert created.status_code == 201, created.text
+    assert replayed.status_code == 201, replayed.text
+    assert replayed.json()["id"] == created.json()["id"]
+    assert conflict.status_code == 409
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["status"] == "draft"
+    assert body["current_version_number"] == 1
+    assert len(body["versions"]) == 1
+    version = body["versions"][0]
+    assert version["generation_mode"] == "manual"
+    assert version["screening_result_id"] == str(dependency.latest_screening_id)
+    assert version["evaluation_ids"] == [str(dependency.submitted_evaluation_id)]
+    assert version["evidence_snapshot"]["latest_screening"]["analysis_version"] == 2
+    assert [item["reason"] for item in version["missing_rounds"]] == [
+        "not_submitted",
+        "cancelled",
+    ]
+
+    with dependency.session_factory() as db:
+        assert len(list(db.scalars(select(InterviewReport)))) == 1
+        assert len(list(db.scalars(select(InterviewReportVersion)))) == 1
+        audits = list(
+            db.scalars(
+                select(AuditLog).where(
+                    AuditLog.action == "interview_report.manual_draft_created"
+                )
+            )
+        )
+        assert len(audits) == 1
+
+
+@pytest.mark.asyncio
+async def test_ai_report_uses_only_allowed_context_and_replay_does_not_call_ai_twice(
+    interview_report_dependencies: InterviewReportDependencies,
+) -> None:
+    dependency = interview_report_dependencies
+    key = uuid.uuid4()
+    stub = StubInterviewReportAIClient()
+    app.dependency_overrides[get_ai_client] = lambda: stub
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        created = await client.post(
+            f"{report_path(dependency)}/ai-draft",
+            json={"idempotency_key": str(key)},
+        )
+        replayed = await client.post(
+            f"{report_path(dependency)}/ai-draft",
+            json={"idempotency_key": str(key)},
+        )
+
+    assert created.status_code == 201, created.text
+    assert replayed.status_code == 201
+    assert len(stub.calls) == 1
+    assert set(stub.calls[0]) == {
+        "job",
+        "latest_screening",
+        "submitted_evaluations",
+        "missing_rounds",
+    }
+    serialized_payload = str(stub.calls[0])
+    assert "候选人A" not in serialized_payload
+    assert "candidate_name" not in serialized_payload
+    assert "candidate_code" not in serialized_payload
+    version = created.json()["versions"][0]
+    assert version["generation_mode"] == "ai"
+    assert version["model_name"] == "report-test-model"
+    assert version["prompt_version"] == "interview-report-v1"
+    assert version["conclusion"] == "next_round"
+    assert len(version["missing_rounds"]) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        (AIConfigurationError("未配置模型"), "configuration_error"),
+        (AIRequestTimeout("模型超时"), "timeout"),
+        (AIUpstreamError("上游不可用"), "upstream_error"),
+        (AIResponseValidationError("格式错误"), "invalid_response"),
+    ],
+)
+async def test_ai_failure_creates_editable_manual_fallback(
+    interview_report_dependencies: InterviewReportDependencies,
+    failure: Exception,
+    expected_code: str,
+) -> None:
+    dependency = interview_report_dependencies
+    stub = StubInterviewReportAIClient(failure=failure)
+    app.dependency_overrides[get_ai_client] = lambda: stub
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.post(
+            f"{report_path(dependency)}/ai-draft",
+            json={"idempotency_key": str(uuid.uuid4())},
+        )
+
+    assert response.status_code == 201, response.text
+    version = response.json()["versions"][0]
+    assert version["generation_mode"] == "manual"
+    assert version["conclusion"] is None
+    assert version["executive_summary"] == ""
+    assert version["ai_failure_code"] == expected_code
+    assert version["ai_failure_message"] == str(failure)
+    with dependency.session_factory() as db:
+        audit = db.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "interview_report.ai_fallback_created"
+            )
+        )
+        assert audit is not None
+        assert audit.details["ai_failure_code"] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_report_revision_confirmation_and_lock_preserve_history_and_stage(
+    interview_report_dependencies: InterviewReportDependencies,
+) -> None:
+    dependency = interview_report_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        created = await client.post(
+            f"{report_path(dependency)}/manual-draft",
+            json=complete_manual_payload(uuid.uuid4()),
+        )
+        assert created.status_code == 201, created.text
+        source = created.json()["versions"][0]
+        update_key = uuid.uuid4()
+        update_payload = {
+            "idempotency_key": str(update_key),
+            "source_version_id": source["id"],
+            "conclusion": "reserve",
+            "executive_summary": "证据完整，但当前岗位优先保留。",
+            "strengths": ["系统设计能力突出"],
+            "concerns": ["业务面评价缺失"],
+            "follow_up_actions": ["进入人才保留名单"],
+        }
+        revised = await client.post(
+            f"{report_path(dependency)}/versions",
+            json=update_payload,
+        )
+        replayed = await client.post(
+            f"{report_path(dependency)}/versions",
+            json=update_payload,
+        )
+        stale = await client.post(
+            f"{report_path(dependency)}/versions",
+            json={
+                **update_payload,
+                "idempotency_key": str(uuid.uuid4()),
+                "executive_summary": "基于过期版本修改",
+            },
+        )
+        current = revised.json()["versions"][-1]
+        confirmed = await client.post(
+            f"{report_path(dependency)}/confirm",
+            json={"version_id": current["id"]},
+        )
+        confirm_replay = await client.post(
+            f"{report_path(dependency)}/confirm",
+            json={"version_id": current["id"]},
+        )
+        wrong_confirm = await client.post(
+            f"{report_path(dependency)}/confirm",
+            json={"version_id": source["id"]},
+        )
+        locked = await client.post(
+            f"{report_path(dependency)}/versions",
+            json={
+                **update_payload,
+                "idempotency_key": str(uuid.uuid4()),
+                "source_version_id": current["id"],
+                "executive_summary": "确认后继续修改",
+            },
+        )
+
+    assert revised.status_code == 201, revised.text
+    assert replayed.status_code == 201
+    assert replayed.json()["current_version_number"] == 2
+    assert stale.status_code == 409
+    versions = revised.json()["versions"]
+    assert [item["version_number"] for item in versions] == [1, 2]
+    assert versions[0]["executive_summary"] == "筛选和技术面证据支持录用。"
+    assert versions[1]["source_version_id"] == versions[0]["id"]
+    assert versions[1]["evidence_snapshot"] == versions[0]["evidence_snapshot"]
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "confirmed"
+    assert confirmed.json()["current_version_number"] == 2
+    assert confirm_replay.status_code == 200
+    assert wrong_confirm.status_code == 409
+    assert locked.status_code == 409
+
+    with dependency.session_factory() as db:
+        process = db.scalar(
+            select(CandidateProcess).where(
+                CandidateProcess.application_id == dependency.application_id
+            )
+        )
+        assert process is not None
+        assert process.current_stage == "to_interview"
+        actions = set(
+            db.scalars(
+                select(AuditLog.action).where(
+                    AuditLog.target_type == "interview_report"
+                )
+            )
+        )
+        assert {
+            "interview_report.manual_draft_created",
+            "interview_report.version_created",
+            "interview_report.confirmed",
+        } <= actions
+
+
+@pytest.mark.asyncio
+async def test_report_confirmation_requires_conclusion_and_summary(
+    interview_report_dependencies: InterviewReportDependencies,
+) -> None:
+    dependency = interview_report_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        created = await client.post(
+            f"{report_path(dependency)}/manual-draft",
+            json={"idempotency_key": str(uuid.uuid4())},
+        )
+        version_id = created.json()["versions"][0]["id"]
+        response = await client.post(
+            f"{report_path(dependency)}/confirm",
+            json={"version_id": version_id},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "确认前必须填写报告结论和摘要"
+
+
+@pytest.mark.asyncio
+async def test_hiring_manager_is_read_only_and_unrelated_recruiter_cannot_see_report(
+    interview_report_dependencies: InterviewReportDependencies,
+) -> None:
+    dependency = interview_report_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        created = await client.post(
+            f"{report_path(dependency)}/manual-draft",
+            json=complete_manual_payload(uuid.uuid4()),
+        )
+        assert created.status_code == 201
+        await client.post("/auth/logout")
+        await login(client, "manager")
+        readable = await client.get(report_path(dependency))
+        forbidden = await client.post(
+            f"{report_path(dependency)}/versions",
+            json={
+                "idempotency_key": str(uuid.uuid4()),
+                "source_version_id": created.json()["versions"][0]["id"],
+                "conclusion": "hire",
+                "executive_summary": "用人经理尝试修改",
+            },
+        )
+        await client.post("/auth/logout")
+        await login(client, "other-recruiter")
+        hidden = await client.get(report_path(dependency))
+
+    assert readable.status_code == 200
+    assert forbidden.status_code == 403
+    assert hidden.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_state", ["archived_job", "merged_application"])
+async def test_archived_job_and_merged_application_block_report_writes(
+    interview_report_dependencies: InterviewReportDependencies,
+    blocked_state: str,
+) -> None:
+    dependency = interview_report_dependencies
+    with dependency.session_factory() as db:
+        if blocked_state == "archived_job":
+            job = db.get(Job, dependency.job_id)
+            assert job is not None
+            job.status = "archived"
+        else:
+            application = db.get(JobApplication, dependency.application_id)
+            assert application is not None
+            application.status = "merged"
+        db.commit()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.post(
+            f"{report_path(dependency)}/manual-draft",
+            json=complete_manual_payload(uuid.uuid4()),
+        )
+
+    assert response.status_code == 409
