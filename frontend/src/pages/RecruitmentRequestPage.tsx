@@ -681,6 +681,7 @@ export function RecruitmentRequestPage() {
 
       <Modal
         width={760}
+        zIndex={1100}
         open={formOpen}
         title={editingRequest ? '创建招聘需求新版本' : '新建招聘需求'}
         okText={editingRequest ? '保存新版本' : '创建草稿'}
@@ -802,6 +803,7 @@ export function RecruitmentRequestPage() {
       </Modal>
 
       <Modal
+        zIndex={1100}
         open={Boolean(decisionTarget)}
         title={decisionTarget?.decision === 'approved' ? '批准招聘需求' : '驳回招聘需求'}
         okText={decisionTarget?.decision === 'approved' ? '确认批准' : '确认驳回'}
@@ -847,6 +849,7 @@ export function RecruitmentRequestPage() {
 
       <Modal
         width={680}
+        zIndex={1100}
         open={Boolean(jobTarget)}
         title="创建关联职位"
         okText="确认创建"
