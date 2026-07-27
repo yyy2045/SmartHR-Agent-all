@@ -2351,3 +2351,115 @@ input {
     gap: 0;
   }
 }
+
+/* 招聘需求 */
+.request-workspace {
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  box-shadow: 0 3px 14px rgb(26 45 72 / 3%);
+}
+
+.request-filter-bar {
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: #f8fafc;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.request-filter-bar .ant-segmented {
+  min-width: 690px;
+}
+
+.request-workspace .ant-table-wrapper {
+  padding: 0 16px 16px;
+}
+
+.request-workspace .ant-table-thead > tr > th {
+  color: #526174;
+  font-size: 12px;
+  font-weight: 700;
+  background: #ffffff;
+}
+
+.request-row-selected > td {
+  background: #f0f7ff !important;
+}
+
+.request-title-cell,
+.request-owner-cell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.request-title-cell .ant-typography:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-empty {
+  min-height: 360px;
+  padding: 64px 20px;
+}
+
+.request-detail {
+  display: grid;
+  gap: 18px;
+}
+
+.request-detail-actions {
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.request-detail .ant-descriptions-title,
+.request-detail h4.ant-typography {
+  color: #18263a;
+  font-size: 16px;
+}
+
+.request-detail .ant-divider {
+  margin: 4px 0;
+}
+
+.request-timeline-item {
+  min-width: 0;
+}
+
+.request-timeline-item .ant-typography {
+  margin-bottom: 0;
+}
+
+.request-timeline-item > .ant-typography {
+  margin-top: 6px;
+  line-height: 1.65;
+}
+
+.request-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+
+.request-form-grid .ant-input-number {
+  width: 100%;
+}
+
+@media (max-width: 680px) {
+  .request-workspace .ant-table-wrapper {
+    padding-inline: 8px;
+  }
+
+  .request-form-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .request-detail-actions .ant-space,
+  .request-detail-actions .ant-btn {
+    width: 100%;
+  }
+}

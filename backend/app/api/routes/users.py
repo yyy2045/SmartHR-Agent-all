@@ -91,10 +91,14 @@ def list_user_options(
     db: DbSession,
     role: Annotated[RoleKey, Query()],
 ) -> list[User]:
-    if not current_user.has_role("administrator", "recruiter"):
+    can_view_job_options = current_user.has_role("administrator", "recruiter")
+    can_view_request_recruiters = (
+        role == "recruiter" and current_user.has_role("hiring_manager")
+    )
+    if not can_view_job_options and not can_view_request_recruiters:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="当前角色不能查看职位负责人选项",
+            detail="当前角色不能查看负责人选项",
         )
     return list(
         db.scalars(
