@@ -25,6 +25,8 @@ class JobCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     department: str = Field(default="", max_length=100)
     original_jd: str = Field(min_length=1, max_length=50_000)
+    recruiter_id: uuid.UUID | None = None
+    hiring_manager_id: uuid.UUID | None = None
 
     @field_validator("title", "original_jd")
     @classmethod
@@ -46,6 +48,8 @@ class JobUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     department: str | None = Field(default=None, max_length=100)
     original_jd: str | None = Field(default=None, min_length=1, max_length=50_000)
+    recruiter_id: uuid.UUID | None = None
+    hiring_manager_id: uuid.UUID | None = None
 
     @field_validator("title", "original_jd")
     @classmethod
@@ -67,6 +71,8 @@ class JobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    recruiter_id: uuid.UUID = Field(validation_alias="owner_id")
+    hiring_manager_id: uuid.UUID | None
     title: str
     department: str
     original_jd: str

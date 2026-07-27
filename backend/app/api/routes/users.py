@@ -1,17 +1,19 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.dependencies.auth import AdministratorUser
+from app.api.dependencies.auth import AdministratorUser, CurrentUser
 from app.database import get_db
 from app.models import Role, User, UserRole
+from app.schemas.auth import RoleKey
 from app.schemas.user import (
     ManagedUserResponse,
     PasswordResetRequest,
     UserCreate,
+    UserOptionResponse,
     UserUpdate,
 )
 from app.services.audit import record_audit
@@ -79,6 +81,29 @@ def list_users(_: AdministratorUser, db: DbSession) -> list[User]:
             select(User)
             .options(_with_roles())
             .order_by(User.is_active.desc(), User.created_at.asc())
+        )
+    )
+
+
+@router.get("/options", response_model=list[UserOptionResponse])
+def list_user_options(
+    current_user: CurrentUser,
+    db: DbSession,
+    role: Annotated[RoleKey, Query()],
+) -> list[User]:
+    if not current_user.has_role("administrator", "recruiter"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="当前角色不能查看职位负责人选项",
+        )
+    return list(
+        db.scalars(
+            select(User)
+            .join(UserRole, UserRole.user_id == User.id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(User.is_active.is_(True), Role.key == role)
+            .options(_with_roles())
+            .order_by(User.display_name, User.username)
         )
     )
 

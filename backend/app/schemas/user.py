@@ -76,3 +76,12 @@ class ManagedUserResponse(BaseModel):
     roles: list[RoleKey] = Field(validation_alias="role_keys")
     created_at: datetime
     updated_at: datetime
+
+
+class UserOptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    username: str
+    display_name: str
+    roles: list[RoleKey] = Field(validation_alias="role_keys")

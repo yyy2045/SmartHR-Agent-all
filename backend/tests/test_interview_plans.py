@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import AuditLog, User
+from app.models import AuditLog, Role, User, UserRole
 from app.redis_client import get_session_store
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
@@ -26,17 +26,21 @@ def interview_dependencies() -> Generator[sessionmaker[Session], None, None]:
     Base.metadata.create_all(engine)
 
     with testing_session() as db:
+        recruiter_role = Role(key="recruiter", display_name="招聘专员")
         db.add_all(
             [
+                recruiter_role,
                 User(
                     username="recruiter",
                     password_hash=hash_password("correct-password"),
                     display_name="测试招聘专员",
+                    role_assignments=[UserRole(role=recruiter_role)],
                 ),
                 User(
                     username="other-recruiter",
                     password_hash=hash_password("correct-password"),
                     display_name="其他招聘专员",
+                    role_assignments=[UserRole(role=recruiter_role)],
                 ),
             ]
         )
