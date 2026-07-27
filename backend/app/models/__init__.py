@@ -14,6 +14,11 @@ from app.models.interview import (
 )
 from app.models.job import HardRequirement, Job, JobCriteriaVersion, ScoringDimension
 from app.models.knowledge import ResumeEmbeddingChunk
+from app.models.recruitment_request import (
+    RecruitmentRequest,
+    RecruitmentRequestApproval,
+    RecruitmentRequestVersion,
+)
 from app.models.resume import (
     CandidateProfile,
     DimensionScore,
@@ -48,6 +53,9 @@ __all__ = [
     "Job",
     "JobCriteriaVersion",
     "RecruiterDecision",
+    "RecruitmentRequest",
+    "RecruitmentRequestApproval",
+    "RecruitmentRequestVersion",
     "ResumeDocument",
     "ResumeEmbeddingChunk",
     "ResumeRedaction",
