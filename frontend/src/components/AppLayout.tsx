@@ -1,5 +1,6 @@
 import {
   AppstoreOutlined,
+  AuditOutlined,
   BarChartOutlined,
   BellOutlined,
   CalendarOutlined,
@@ -41,6 +42,9 @@ interface NavigationItem {
 }
 
 function pageMeta(pathname: string) {
+  if (pathname.startsWith('/recruitment-requests')) {
+    return { title: '招聘需求', subtitle: '发起、审批并追踪招聘任务来源' }
+  }
   if (pathname === '/jobs/new') {
     return { title: '新建职位', subtitle: '录入职位信息并建立筛选标准' }
   }
@@ -86,10 +90,16 @@ export function AppLayout() {
   const canAccessJobs = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
   )
+  const canAccessRequests = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager', 'approver'].includes(role),
+  )
   const canCreateJobs = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
   )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
+  const showJobContext = ['jobs', 'screening', 'candidate-process', 'interviews'].includes(
+    activeModule,
+  )
   const navigationItems: NavigationItem[] = [
     {
       key: 'workbench',
@@ -97,6 +107,16 @@ export function AppLayout() {
       icon: <AppstoreOutlined />,
       badge: '待开发',
     },
+    ...(canAccessRequests
+      ? [
+          {
+            key: 'requests' as const,
+            label: '招聘需求',
+            icon: <AuditOutlined />,
+            path: '/recruitment-requests',
+          },
+        ]
+      : []),
     ...(canAccessJobs
       ? [
           { key: 'jobs' as const, label: '岗位管理', icon: <ProfileOutlined />, path: '/' },
@@ -139,6 +159,7 @@ export function AppLayout() {
   const jobs = useQuery({
     queryKey: ['jobs', { includeArchived: true }],
     queryFn: () => fetchJobs(true),
+    enabled: Boolean(canAccessJobs),
     staleTime: 30_000,
   })
   const currentJob = useQuery({
@@ -249,41 +270,43 @@ export function AppLayout() {
             </div>
           </div>
 
-          <div className="current-job-context" aria-label="当前岗位上下文">
-            <Text className="current-job-label">当前岗位</Text>
-            <Select
-              className="current-job-select"
-              aria-label="切换当前岗位"
-              showSearch
-              value={jobId ?? undefined}
-              placeholder={jobs.isPending ? '正在读取岗位…' : '选择一个岗位'}
-              loading={jobs.isPending}
-              status={jobs.isError ? 'error' : undefined}
-              optionFilterProp="label"
-              options={(jobs.data ?? []).map((job) => ({
-                value: job.id,
-                label: `${job.title}${job.status === 'archived' ? '（已归档）' : ''}`,
-              }))}
-              onChange={handleJobChange}
-            />
-            <div className="current-job-meta" aria-live="polite">
-              {selectedJob ? (
-                <>
-                  <Text ellipsis>{selectedJob.department || '未填写部门'}</Text>
-                  <Tag color={selectedJob.status === 'active' ? 'success' : 'default'}>
-                    {selectedJob.status === 'active' ? '招聘中' : '已归档'}
-                  </Tag>
-                </>
-              ) : (
-                <Text type={jobs.isError ? 'danger' : 'secondary'}>
-                  {jobs.isError ? '岗位列表读取失败' : '选择后进入岗位业务'}
-                </Text>
-              )}
+          {showJobContext && (
+            <div className="current-job-context" aria-label="当前岗位上下文">
+              <Text className="current-job-label">当前岗位</Text>
+              <Select
+                className="current-job-select"
+                aria-label="切换当前岗位"
+                showSearch
+                value={jobId ?? undefined}
+                placeholder={jobs.isPending ? '正在读取岗位…' : '选择一个岗位'}
+                loading={jobs.isPending}
+                status={jobs.isError ? 'error' : undefined}
+                optionFilterProp="label"
+                options={(jobs.data ?? []).map((job) => ({
+                  value: job.id,
+                  label: `${job.title}${job.status === 'archived' ? '（已归档）' : ''}`,
+                }))}
+                onChange={handleJobChange}
+              />
+              <div className="current-job-meta" aria-live="polite">
+                {selectedJob ? (
+                  <>
+                    <Text ellipsis>{selectedJob.department || '未填写部门'}</Text>
+                    <Tag color={selectedJob.status === 'active' ? 'success' : 'default'}>
+                      {selectedJob.status === 'active' ? '招聘中' : '已归档'}
+                    </Tag>
+                  </>
+                ) : (
+                  <Text type={jobs.isError ? 'danger' : 'secondary'}>
+                    {jobs.isError ? '岗位列表读取失败' : '选择后进入岗位业务'}
+                  </Text>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <Space size="middle" className="header-actions">
-            {canCreateJobs && (
+            {canCreateJobs && activeModule === 'jobs' && (
               <Button
                 type="primary"
                 icon={<PlusOutlined />}

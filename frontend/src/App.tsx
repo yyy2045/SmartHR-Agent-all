@@ -7,6 +7,7 @@ import { RoleRoute } from './auth/RoleRoute'
 import { AppLayout } from './components/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
+import { useAuth } from './auth/context'
 
 const CriteriaPage = lazy(() =>
   import('./pages/CriteriaPage').then((module) => ({ default: module.CriteriaPage })),
@@ -60,9 +61,22 @@ const UserManagementPage = lazy(() =>
     default: module.UserManagementPage,
   })),
 )
+const RecruitmentRequestPage = lazy(() =>
+  import('./pages/RecruitmentRequestPage').then((module) => ({
+    default: module.RecruitmentRequestPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
+}
+
+function HomeRoute() {
+  const auth = useAuth()
+  const canAccessJobs = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
+  )
+  return canAccessJobs ? <JobListPage /> : <Navigate to="/recruitment-requests" replace />
 }
 
 function App() {
@@ -75,12 +89,21 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="/change-password" element={<ChangePasswordPage />} />
               <Route element={<AppLayout />}>
+                <Route path="/" element={<HomeRoute />} />
+                <Route
+                  element={
+                    <RoleRoute
+                      roles={['administrator', 'recruiter', 'hiring_manager', 'approver']}
+                    />
+                  }
+                >
+                  <Route path="/recruitment-requests" element={<RecruitmentRequestPage />} />
+                </Route>
                 <Route
                   element={
                     <RoleRoute roles={['administrator', 'recruiter', 'hiring_manager']} />
                   }
                 >
-                  <Route path="/" element={<JobListPage />} />
                   <Route path="/jobs/:jobId" element={<JobListPage />} />
                   <Route path="/jobs/:jobId/edit" element={<JobFormPage />} />
                   <Route path="/jobs/:jobId/criteria" element={<CriteriaPage />} />

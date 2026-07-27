@@ -46,10 +46,85 @@ export interface JobRecord extends JobInput {
   id: string
   recruiter_id: string
   hiring_manager_id: string | null
+  recruitment_request_id: string | null
   status: JobStatus
   archived_at: string | null
   created_at: string
   updated_at: string
+}
+
+export type RecruitmentRequestStatus =
+  | 'draft'
+  | 'pending_approval'
+  | 'approved'
+  | 'rejected'
+  | 'converted'
+export type RecruitmentRequestPriority = 'urgent' | 'high' | 'normal' | 'low'
+export type RecruitmentRequestDecision = 'approved' | 'rejected'
+
+export interface UserReference {
+  id: string
+  username: string
+  display_name: string
+}
+
+export interface RecruitmentRequestContentInput {
+  job_title: string
+  headcount: number
+  reason: string
+  priority: RecruitmentRequestPriority
+  target_start_date: string
+  salary_min: number
+  salary_max: number
+  notes: string
+}
+
+export interface RecruitmentRequestVersion extends RecruitmentRequestContentInput {
+  id: string
+  version_number: number
+  source_version_id: string | null
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+}
+
+export interface RecruitmentRequestApproval {
+  id: string
+  version_id: string
+  approver_id: string | null
+  approver_username: string
+  approver_display_name: string
+  decision: RecruitmentRequestDecision
+  comment: string
+  decided_at: string
+}
+
+export interface RecruitmentRequestRecord {
+  id: string
+  idempotency_key: string
+  requester: UserReference
+  recruiter: UserReference
+  created_by: UserReference
+  status: RecruitmentRequestStatus
+  current_version_number: number
+  current_version: RecruitmentRequestVersion
+  linked_job_id: string | null
+  versions: RecruitmentRequestVersion[]
+  approvals: RecruitmentRequestApproval[]
+  created_at: string
+  updated_at: string
+}
+
+export interface RecruitmentRequestCreateInput extends RecruitmentRequestContentInput {
+  idempotency_key: string
+  requester_id?: string
+  recruiter_id: string
+}
+
+export interface RecruitmentRequestVersionCreateInput
+  extends RecruitmentRequestContentInput {
+  source_version_id: string
 }
 
 export interface HardRequirementInput {
@@ -846,6 +921,65 @@ export function updateJob(jobId: string, payload: Partial<JobInput>): Promise<Jo
 
 export function archiveJob(jobId: string): Promise<JobRecord> {
   return apiRequest(`/api/jobs/${jobId}/archive`, { method: 'POST' }, '归档职位失败')
+}
+
+export function fetchRecruitmentRequests(
+  status?: RecruitmentRequestStatus,
+): Promise<RecruitmentRequestRecord[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+  return apiRequest(
+    `/api/recruitment-requests${query}`,
+    {},
+    '无法读取招聘需求列表',
+  )
+}
+
+export function createRecruitmentRequest(
+  payload: RecruitmentRequestCreateInput,
+): Promise<RecruitmentRequestRecord> {
+  return apiRequest(
+    '/api/recruitment-requests',
+    { method: 'POST', body: JSON.stringify(payload) },
+    '创建招聘需求失败',
+  )
+}
+
+export function createRecruitmentRequestVersion(
+  requestId: string,
+  payload: RecruitmentRequestVersionCreateInput,
+): Promise<RecruitmentRequestRecord> {
+  return apiRequest(
+    `/api/recruitment-requests/${requestId}/versions`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    '保存招聘需求新版本失败',
+  )
+}
+
+export function submitRecruitmentRequest(
+  requestId: string,
+  versionId: string,
+): Promise<RecruitmentRequestRecord> {
+  return apiRequest(
+    `/api/recruitment-requests/${requestId}/submit`,
+    { method: 'POST', body: JSON.stringify({ version_id: versionId }) },
+    '提交招聘需求失败',
+  )
+}
+
+export function decideRecruitmentRequest(
+  requestId: string,
+  versionId: string,
+  decision: RecruitmentRequestDecision,
+  comment: string,
+): Promise<RecruitmentRequestRecord> {
+  return apiRequest(
+    `/api/recruitment-requests/${requestId}/decision`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ version_id: versionId, decision, comment }),
+    },
+    decision === 'approved' ? '批准招聘需求失败' : '驳回招聘需求失败',
+  )
 }
 
 export function createCriteriaVersion(

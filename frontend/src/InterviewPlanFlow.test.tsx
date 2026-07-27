@@ -38,6 +38,7 @@ function job(status: 'active' | 'archived' = 'active'): JobDetail {
     id: 'job-interview',
     recruiter_id: user.id,
     hiring_manager_id: null,
+    recruitment_request_id: null,
     title: '高级后端工程师',
     department: '研发中心',
     original_jd: '负责核心服务设计与开发。',
