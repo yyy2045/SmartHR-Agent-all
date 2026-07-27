@@ -20,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
-    from app.models.resume import ResumeDocument
+    from app.models.candidate import JobApplication
     from app.models.user import User
 
 
@@ -44,12 +44,12 @@ class CandidateProcess(Base):
             f"current_stage IN ({PROCESS_STAGE_SQL})",
             name="ck_candidate_processes_stage",
         ),
-        UniqueConstraint("document_id", name="uq_candidate_process_document"),
+        UniqueConstraint("application_id", name="uq_candidate_process_application"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("resume_documents.id", ondelete="CASCADE"),
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_applications.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -75,7 +75,7 @@ class CandidateProcess(Base):
         onupdate=func.now(),
     )
 
-    document: Mapped[ResumeDocument] = relationship(back_populates="candidate_process")
+    application: Mapped[JobApplication] = relationship(back_populates="process")
     updated_by: Mapped[User | None] = relationship(foreign_keys=[updated_by_id])
     events: Mapped[list[CandidateProcessEvent]] = relationship(
         back_populates="process",

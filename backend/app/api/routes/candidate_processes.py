@@ -14,6 +14,7 @@ from app.models import (
     CandidateInterviewSchedule,
     CandidateProcess,
     CandidateProcessEvent,
+    JobApplication,
     RecruiterDecision,
     ResumeDocument,
     ResumeRedaction,
@@ -64,14 +65,17 @@ def _result_options() -> tuple[object, ...]:
     return (
         selectinload(ScreeningResult.document).selectinload(ResumeDocument.batch),
         selectinload(ScreeningResult.document)
-        .selectinload(ResumeDocument.candidate_process)
+        .selectinload(ResumeDocument.application)
+        .selectinload(JobApplication.process)
         .selectinload(CandidateProcess.events),
         selectinload(ScreeningResult.document)
-        .selectinload(ResumeDocument.interview_schedule)
+        .selectinload(ResumeDocument.application)
+        .selectinload(JobApplication.interview_schedule)
         .selectinload(CandidateInterviewSchedule.rounds)
         .selectinload(CandidateInterviewRound.plan_round),
         selectinload(ScreeningResult.document)
-        .selectinload(ResumeDocument.interview_schedule)
+        .selectinload(ResumeDocument.application)
+        .selectinload(JobApplication.interview_schedule)
         .selectinload(CandidateInterviewSchedule.rounds)
         .selectinload(CandidateInterviewRound.evaluation),
         selectinload(ScreeningResult.candidate_profile),
@@ -271,7 +275,8 @@ def _get_owned_document(
         )
         .options(
             selectinload(ResumeDocument.batch),
-            selectinload(ResumeDocument.candidate_process)
+            selectinload(ResumeDocument.application)
+            .selectinload(JobApplication.process)
             .selectinload(CandidateProcess.events)
             .selectinload(CandidateProcessEvent.operator),
         )
@@ -349,7 +354,10 @@ def list_candidate_processes(
     for result, document_results in latest_results:
         if result.ai_group is None or result.total_score is None:
             continue
-        process = result.document.candidate_process
+        application = result.document.application
+        if application is None:
+            continue
+        process = application.process
         current_stage = _current_stage(document_results, process)
         score = float(result.total_score)
         skills = _profile_skills(result)
@@ -377,6 +385,7 @@ def list_candidate_processes(
         cards.append(
             CandidateProcessCardResponse(
                 process_id=process.id if process is not None else None,
+                application_id=application.id,
                 screening_result_id=result.id,
                 batch_id=result.document.batch_id,
                 batch_name=result.document.batch.name,
@@ -392,7 +401,7 @@ def list_candidate_processes(
                 skills=skills,
                 analysis_created_at=result.created_at,
                 interview_evaluation=_interview_evaluation_progress(
-                    result.document.interview_schedule
+                    application.interview_schedule
                 ),
             )
         )
@@ -438,7 +447,13 @@ def update_candidate_stage(
             item.analysis_version,
         ),
     )
-    process = document.candidate_process
+    application = document.application
+    if application is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="候选人简历尚未建立职位应聘记录",
+        )
+    process = application.process
     previous_stage = _current_stage(document_results, process)
     if previous_stage != payload.expected_stage:
         raise HTTPException(
@@ -485,7 +500,7 @@ def update_candidate_stage(
     now = datetime.now(UTC)
     if process is None:
         process = CandidateProcess(
-            document_id=document.id,
+            application_id=application.id,
             current_stage=payload.target_stage,
             stage_entered_at=now,
             updated_by_id=current_user.id,
@@ -519,6 +534,7 @@ def update_candidate_stage(
         actor=current_user,
         details={
             "document_id": str(document.id),
+            "application_id": str(application.id),
             "screening_result_id": str(latest_result.id),
             "from_stage": previous_stage,
             "to_stage": payload.target_stage,
@@ -529,6 +545,7 @@ def update_candidate_stage(
     db.refresh(process)
     return CandidateStageUpdateResponse(
         process_id=process.id,
+        application_id=application.id,
         document_id=document.id,
         previous_stage=previous_stage,
         current_stage=payload.target_stage,
@@ -561,11 +578,13 @@ def get_candidate_process_timeline(
             .order_by(RecruiterDecision.created_at, RecruiterDecision.sequence_number)
         ).all()
     )
-    if document.candidate_process is not None:
+    application = document.application
+    process = application.process if application is not None else None
+    if process is not None:
         decisions = [
             decision
             for decision in decisions
-            if decision.created_at < document.candidate_process.created_at
+            if decision.created_at < process.created_at
         ]
     timeline = [
         CandidateProcessTimelineEventResponse(
@@ -581,7 +600,7 @@ def get_candidate_process_timeline(
         )
         for decision in decisions
     ]
-    if document.candidate_process is not None:
+    if process is not None:
         timeline.extend(
             CandidateProcessTimelineEventResponse(
                 event_type="stage",
@@ -594,7 +613,7 @@ def get_candidate_process_timeline(
                 ),
                 created_at=event.created_at,
             )
-            for event in document.candidate_process.events
+            for event in process.events
         )
     timeline.sort(key=lambda item: item.created_at)
     return timeline

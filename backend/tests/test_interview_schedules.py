@@ -14,11 +14,13 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     AuditLog,
+    Candidate,
     CandidateInterviewRound,
     CandidateInterviewSchedule,
     InterviewPlanVersion,
     InterviewRound,
     Job,
+    JobApplication,
     JobCriteriaVersion,
     ResumeDocument,
     ScreeningBatch,
@@ -85,8 +87,12 @@ def interview_schedule_dependencies() -> Generator[InterviewScheduleDependencies
         )
         db.add(batch)
         db.flush()
+        candidate = Candidate(full_name="候选人A")
+        application = JobApplication(candidate=candidate, job_id=job.id)
         document = ResumeDocument(
             batch_id=batch.id,
+            candidate=candidate,
+            application=application,
             original_filename="候选人A.pdf",
             file_extension=".pdf",
             content_type="application/pdf",

@@ -26,8 +26,6 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.candidate import Candidate, JobApplication
-    from app.models.candidate_process import CandidateProcess
-    from app.models.interview import CandidateInterviewSchedule
     from app.models.job import Job, JobCriteriaVersion
     from app.models.knowledge import ResumeEmbeddingChunk
     from app.models.user import User
@@ -168,16 +166,6 @@ class ResumeDocument(Base):
     embedding_chunks: Mapped[list[ResumeEmbeddingChunk]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
-    )
-    candidate_process: Mapped[CandidateProcess | None] = relationship(
-        back_populates="document",
-        cascade="all, delete-orphan",
-        uselist=False,
-    )
-    interview_schedule: Mapped[CandidateInterviewSchedule | None] = relationship(
-        back_populates="document",
-        cascade="all, delete-orphan",
-        uselist=False,
     )
 
     @property

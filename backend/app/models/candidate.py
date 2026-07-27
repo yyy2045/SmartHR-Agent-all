@@ -19,6 +19,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.candidate_process import CandidateProcess
+    from app.models.interview import CandidateInterviewSchedule
     from app.models.job import Job
     from app.models.resume import ResumeDocument
 
@@ -124,5 +126,17 @@ class JobApplication(Base):
         remote_side=[id],
         foreign_keys=[merged_into_application_id],
     )
-    documents: Mapped[list[ResumeDocument]] = relationship(back_populates="application")
-
+    documents: Mapped[list[ResumeDocument]] = relationship(
+        back_populates="application",
+        order_by="ResumeDocument.created_at",
+    )
+    process: Mapped[CandidateProcess | None] = relationship(
+        back_populates="application",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    interview_schedule: Mapped[CandidateInterviewSchedule | None] = relationship(
+        back_populates="application",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )

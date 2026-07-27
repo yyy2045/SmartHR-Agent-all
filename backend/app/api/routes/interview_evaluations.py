@@ -18,6 +18,7 @@ from app.models import (
     InterviewQuestionResponse,
     InterviewRound,
     InterviewScoreDimension,
+    JobApplication,
     ResumeDocument,
     ScreeningBatch,
     User,
@@ -36,8 +37,8 @@ DbSession = Annotated[Session, Depends(get_db)]
 def evaluation_load_options() -> tuple[object, ...]:
     return (
         selectinload(CandidateInterviewRound.schedule).selectinload(
-            CandidateInterviewSchedule.document
-        ),
+            CandidateInterviewSchedule.application
+        ).selectinload(JobApplication.documents),
         selectinload(CandidateInterviewRound.plan_round).selectinload(
             InterviewRound.questions
         ),
@@ -71,11 +72,15 @@ def get_owned_candidate_round(
             CandidateInterviewSchedule,
             CandidateInterviewRound.schedule_id == CandidateInterviewSchedule.id,
         )
-        .join(ResumeDocument, CandidateInterviewSchedule.document_id == ResumeDocument.id)
+        .join(
+            JobApplication,
+            CandidateInterviewSchedule.application_id == JobApplication.id,
+        )
+        .join(ResumeDocument, ResumeDocument.application_id == JobApplication.id)
         .join(ScreeningBatch, ResumeDocument.batch_id == ScreeningBatch.id)
         .where(
             CandidateInterviewRound.id == round_id,
-            CandidateInterviewSchedule.document_id == document_id,
+            ResumeDocument.id == document_id,
             ScreeningBatch.job_id == job_id,
         )
         .options(*evaluation_load_options())

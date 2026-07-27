@@ -38,6 +38,7 @@ class InterviewEvaluationProgressResponse(BaseModel):
 
 class CandidateProcessCardResponse(BaseModel):
     process_id: uuid.UUID | None
+    application_id: uuid.UUID
     screening_result_id: uuid.UUID
     batch_id: uuid.UUID
     batch_name: str
@@ -73,6 +74,7 @@ class CandidateStageUpdate(BaseModel):
 
 class CandidateStageUpdateResponse(BaseModel):
     process_id: uuid.UUID
+    application_id: uuid.UUID
     document_id: uuid.UUID
     previous_stage: CandidateStage
     current_stage: CandidateStage

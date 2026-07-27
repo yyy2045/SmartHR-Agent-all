@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models import (
     CandidateInterviewRound,
     CandidateInterviewSchedule,
+    JobApplication,
     ResumeDocument,
     ScreeningBatch,
     User,
@@ -32,7 +33,12 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 def schedule_load_options() -> tuple[object, ...]:
     return (
-        selectinload(CandidateInterviewSchedule.document),
+        selectinload(CandidateInterviewSchedule.application).selectinload(
+            JobApplication.candidate
+        ),
+        selectinload(CandidateInterviewSchedule.application).selectinload(
+            JobApplication.documents
+        ),
         selectinload(CandidateInterviewSchedule.plan_version),
         selectinload(CandidateInterviewSchedule.rounds).selectinload(
             CandidateInterviewRound.plan_round
@@ -55,6 +61,7 @@ def get_owned_document(
             ResumeDocument.id == document_id,
             ScreeningBatch.job_id == job_id,
         )
+        .options(selectinload(ResumeDocument.application))
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="候选人简历不存在")
@@ -74,10 +81,14 @@ def get_owned_schedule(
         ensure_job_writable(job, user)
     statement = (
         select(CandidateInterviewSchedule)
-        .join(ResumeDocument)
+        .join(
+            JobApplication,
+            CandidateInterviewSchedule.application_id == JobApplication.id,
+        )
+        .join(ResumeDocument, ResumeDocument.application_id == JobApplication.id)
         .join(ScreeningBatch)
         .where(
-            CandidateInterviewSchedule.document_id == document_id,
+            ResumeDocument.id == document_id,
             ScreeningBatch.job_id == job_id,
         )
         .options(*schedule_load_options())
@@ -135,15 +146,17 @@ def get_candidate_interview_schedule(
     db: DbSession,
 ) -> CandidateInterviewSchedule | None:
     get_visible_job(db, job_id, current_user)
-    get_owned_document(
+    document = get_owned_document(
         db,
         job_id=job_id,
         document_id=document_id,
         user=current_user,
     )
+    if document.application_id is None:
+        return None
     return db.scalar(
         select(CandidateInterviewSchedule)
-        .where(CandidateInterviewSchedule.document_id == document_id)
+        .where(CandidateInterviewSchedule.application_id == document.application_id)
         .options(*schedule_load_options())
     )
 
@@ -169,9 +182,14 @@ def create_candidate_interview_schedule(
         document_id=document_id,
         user=current_user,
     )
+    if document.application_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="候选人简历尚未建立职位应聘记录",
+        )
     existing = db.scalar(
         select(CandidateInterviewSchedule.id).where(
-            CandidateInterviewSchedule.document_id == document_id
+            CandidateInterviewSchedule.application_id == document.application_id
         )
     )
     if existing is not None:
@@ -197,7 +215,7 @@ def create_candidate_interview_schedule(
         )
     arrangement_by_round = {item.plan_round_id: item for item in payload.rounds}
     schedule = CandidateInterviewSchedule(
-        document_id=document.id,
+        application_id=document.application_id,
         plan_version_id=plan_version.id,
         status="scheduled",
         created_by_id=current_user.id,
@@ -228,6 +246,7 @@ def create_candidate_interview_schedule(
         result="success",
         details={
             "document_id": str(document_id),
+            "application_id": str(document.application_id),
             "plan_version_id": str(plan_version.id),
             "plan_version_number": plan_version.version_number,
             "round_count": len(schedule.rounds),

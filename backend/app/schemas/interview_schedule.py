@@ -134,6 +134,7 @@ class InterviewScheduleResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    application_id: uuid.UUID
     document_id: uuid.UUID
     candidate_code: str
     plan_version_id: uuid.UUID
