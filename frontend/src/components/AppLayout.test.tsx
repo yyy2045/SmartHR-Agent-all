@@ -8,13 +8,22 @@ import { AppLayout } from './AppLayout'
 import { businessModuleForPath, defaultPathForModule, jobIdFromPath } from './navigation'
 
 const auth: AuthContextValue = {
-  user: { id: 'user-1', username: 'recruiter', display_name: '招聘专员' },
+  user: {
+    id: 'user-1',
+    username: 'recruiter',
+    display_name: '招聘专员',
+    is_active: true,
+    must_change_password: false,
+    roles: ['recruiter'],
+  },
   isLoading: false,
   isLoggingIn: false,
   isLoggingOut: false,
+  isChangingPassword: false,
   error: null,
   login: vi.fn(),
   logout: vi.fn(),
+  changePassword: vi.fn(),
   retry: vi.fn(),
 }
 

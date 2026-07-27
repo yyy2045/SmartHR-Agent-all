@@ -6,11 +6,21 @@ export interface AuthUser {
   id: string
   username: string
   display_name: string
+  is_active: boolean
+  must_change_password: boolean
+  roles: RoleKey[]
 }
+
+export type RoleKey = 'administrator' | 'recruiter' | 'hiring_manager' | 'approver'
 
 export interface LoginCredentials {
   username: string
   password: string
+}
+
+export interface ChangePasswordInput {
+  current_password: string
+  new_password: string
 }
 
 export type JobStatus = 'active' | 'archived'
@@ -721,6 +731,17 @@ export function logout(): Promise<void> {
       method: 'POST',
     },
     '退出失败，请稍后重试',
+  )
+}
+
+export function changePassword(payload: ChangePasswordInput): Promise<AuthUser> {
+  return apiRequest<AuthUser>(
+    '/api/auth/password',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    '修改密码失败',
   )
 }
 

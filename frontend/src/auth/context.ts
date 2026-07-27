@@ -1,15 +1,17 @@
 import { createContext, useContext } from 'react'
 
-import type { AuthUser, LoginCredentials } from '../api/client'
+import type { AuthUser, ChangePasswordInput, LoginCredentials } from '../api/client'
 
 export interface AuthContextValue {
   user: AuthUser | null
   isLoading: boolean
   isLoggingIn: boolean
   isLoggingOut: boolean
+  isChangingPassword: boolean
   error: Error | null
   login: (credentials: LoginCredentials) => Promise<AuthUser>
   logout: () => Promise<void>
+  changePassword: (payload: ChangePasswordInput) => Promise<AuthUser>
   retry: () => Promise<void>
 }
 

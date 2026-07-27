@@ -5,6 +5,7 @@ import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppLayout } from './components/AppLayout'
 import { LoginPage } from './pages/LoginPage'
+import { ChangePasswordPage } from './pages/ChangePasswordPage'
 
 const CriteriaPage = lazy(() =>
   import('./pages/CriteriaPage').then((module) => ({ default: module.CriteriaPage })),
@@ -66,6 +67,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
+              <Route path="/change-password" element={<ChangePasswordPage />} />
               <Route element={<AppLayout />}>
                 <Route path="/" element={<JobListPage />} />
                 <Route path="/jobs/:jobId" element={<JobListPage />} />
