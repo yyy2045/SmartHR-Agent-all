@@ -673,6 +673,96 @@ export interface CandidateProcessFilters {
   query?: string
 }
 
+export type CandidateRecordStatus = 'active' | 'merged'
+export type CandidateListStatus = CandidateRecordStatus | 'all'
+export type CandidateDuplicateConfidence = 'strong' | 'weak'
+export type CandidateDuplicateReviewStatus = 'pending' | 'not_duplicate' | 'merged'
+
+export interface CandidateSummaryRecord {
+  id: string
+  candidate_code: string
+  full_name: string | null
+  phone: string | null
+  email: string | null
+  status: CandidateRecordStatus
+  merged_into_candidate_id: string | null
+  application_count: number
+  resume_count: number
+}
+
+export interface CandidateListItemRecord extends CandidateSummaryRecord {
+  pending_duplicate_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CandidateListRecord {
+  items: CandidateListItemRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface CandidateApplicationSummaryRecord {
+  id: string
+  job_id: string
+  job_title: string
+  job_status: JobStatus
+  status: CandidateRecordStatus
+  merged_into_application_id: string | null
+  current_stage: CandidateStage | null
+  document_count: number
+  created_at: string
+}
+
+export interface CandidateResumeSummaryRecord {
+  id: string
+  application_id: string | null
+  job_id: string
+  job_title: string
+  batch_id: string
+  batch_name: string
+  original_filename: string
+  status: ResumeDocumentStatus
+  created_at: string
+}
+
+export interface CandidateDetailRecord extends CandidateListItemRecord {
+  applications: CandidateApplicationSummaryRecord[]
+  resumes: CandidateResumeSummaryRecord[]
+}
+
+export interface CandidateDuplicateReviewRecord {
+  id: string
+  candidate_a: CandidateSummaryRecord
+  candidate_b: CandidateSummaryRecord
+  source_document_id: string | null
+  confidence: CandidateDuplicateConfidence
+  signals: string[]
+  status: CandidateDuplicateReviewStatus
+  resolved_by_id: string | null
+  resolution_note: string | null
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CandidateMergeRecord {
+  review: CandidateDuplicateReviewRecord
+  target_candidate: CandidateSummaryRecord
+  merged_candidate: CandidateSummaryRecord
+  moved_application_ids: string[]
+  merged_application_ids: string[]
+  moved_document_count: number
+}
+
+export interface CandidateListFilters {
+  status?: CandidateListStatus
+  query?: string
+  limit?: number
+  offset?: number
+}
+
 export interface ScreeningResultDetail {
   id: string
   document_id: string
@@ -1386,6 +1476,60 @@ export function fetchCandidateProcesses(
     `/api/jobs/${jobId}/candidate-processes${suffix}`,
     {},
     '无法读取候选人流程看板',
+  )
+}
+
+export function fetchCandidates(filters: CandidateListFilters = {}): Promise<CandidateListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.query?.trim()) query.set('query', filters.query.trim())
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/candidates${suffix}`, {}, '无法读取候选人档案')
+}
+
+export function fetchCandidate(candidateId: string): Promise<CandidateDetailRecord> {
+  return apiRequest(
+    `/api/candidates/${encodeURIComponent(candidateId)}`,
+    {},
+    '无法读取候选人详情',
+  )
+}
+
+export function fetchCandidateDuplicateReviews(
+  status: CandidateDuplicateReviewStatus | 'all' = 'pending',
+): Promise<CandidateDuplicateReviewRecord[]> {
+  return apiRequest(
+    `/api/candidates/duplicate-reviews?status=${encodeURIComponent(status)}`,
+    {},
+    '无法读取重复候选人提示',
+  )
+}
+
+export function dismissCandidateDuplicateReview(
+  reviewId: string,
+  reason: string,
+): Promise<CandidateDuplicateReviewRecord> {
+  return apiRequest(
+    `/api/candidates/duplicate-reviews/${encodeURIComponent(reviewId)}/dismiss`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
+    '无法保存非重复判定',
+  )
+}
+
+export function mergeCandidateDuplicateReview(
+  reviewId: string,
+  targetCandidateId: string,
+  reason: string,
+): Promise<CandidateMergeRecord> {
+  return apiRequest(
+    `/api/candidates/duplicate-reviews/${encodeURIComponent(reviewId)}/merge`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ target_candidate_id: targetCandidateId, reason }),
+    },
+    '无法合并候选人档案',
   )
 }
 

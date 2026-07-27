@@ -66,6 +66,11 @@ const RecruitmentRequestPage = lazy(() =>
     default: module.RecruitmentRequestPage,
   })),
 )
+const CandidateCenterPage = lazy(() =>
+  import('./pages/CandidateCenterPage').then((module) => ({
+    default: module.CandidateCenterPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -127,6 +132,7 @@ function App() {
                 </Route>
                 <Route element={<RoleRoute roles={['administrator', 'recruiter']} />}>
                   <Route path="/jobs/new" element={<JobFormPage />} />
+                  <Route path="/candidates" element={<CandidateCenterPage />} />
                 </Route>
                 <Route element={<RoleRoute roles={['administrator']} />}>
                   <Route path="/settings/users" element={<UserManagementPage />} />

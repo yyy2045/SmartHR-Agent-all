@@ -127,6 +127,18 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-current', 'page')
   })
 
+  it('将全局候选人中心归入独立模块且不显示岗位上下文', () => {
+    expect(businessModuleForPath('/candidates')).toBe('candidates')
+    expect(jobIdFromPath('/candidates')).toBeNull()
+    mockApi()
+    renderLayout('/candidates')
+    expect(screen.getByRole('button', { name: '候选人中心' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
+  })
+
   it('无岗位上下文时展示完整导航，并禁用岗位级模块', () => {
     mockApi()
     renderLayout('/')
@@ -137,6 +149,7 @@ describe('招聘业务导航', () => {
     )
     expect(screen.getByRole('button', { name: /智能筛选/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /候选人流程/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /候选人中心/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /面试管理/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /人才库/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /数据分析/ })).toBeDisabled()

@@ -262,6 +262,45 @@ async def login(client: httpx.AsyncClient, username: str, password: str) -> None
 
 
 @pytest.mark.asyncio
+async def test_recruiter_can_search_candidates_and_read_application_history(
+    candidate_merge_dependencies: CandidateMergeDependencies,
+) -> None:
+    dependency = candidate_merge_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recruiter", "correct-password")
+        listed = await client.get("/candidates")
+        searched = await client.get(
+            "/candidates",
+            params={"status": "all", "query": "13800138000", "limit": 1},
+        )
+        detail = await client.get(f"/candidates/{dependency.source_candidate_id}")
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 2
+    assert {item["pending_duplicate_count"] for item in listed.json()["items"]} == {1}
+    assert searched.status_code == 200
+    assert searched.json()["total"] == 1
+    assert searched.json()["items"][0]["id"] == str(dependency.source_candidate_id)
+    assert detail.status_code == 200
+    assert detail.json()["candidate_code"].startswith("CAND-")
+    assert detail.json()["phone"] == "13800138000"
+    assert detail.json()["application_count"] == 2
+    assert detail.json()["resume_count"] == 2
+    assert {item["job_title"] for item in detail.json()["applications"]} == {
+        "后端工程师",
+        "平台工程师",
+    }
+    assert any(
+        item["current_stage"] == "contacted" for item in detail.json()["applications"]
+    )
+    assert {item["original_filename"] for item in detail.json()["resumes"]} == {
+        "source.pdf",
+        "source-second.pdf",
+    }
+
+
+@pytest.mark.asyncio
 async def test_recruiter_can_list_and_dismiss_duplicate_review_idempotently(
     candidate_merge_dependencies: CandidateMergeDependencies,
 ) -> None:
@@ -278,6 +317,9 @@ async def test_recruiter_can_list_and_dismiss_duplicate_review_idempotently(
             f"/candidates/duplicate-reviews/{dependency.review_id}/dismiss",
             json={"reason": "重复提交不应新增记录"},
         )
+        all_reviews = await client.get(
+            "/candidates/duplicate-reviews", params={"status": "all"}
+        )
 
     assert listed.status_code == 200
     assert len(listed.json()) == 1
@@ -286,6 +328,9 @@ async def test_recruiter_can_list_and_dismiss_duplicate_review_idempotently(
     assert dismissed.status_code == 200
     assert dismissed.json()["status"] == "not_duplicate"
     assert repeated.status_code == 200
+    assert all_reviews.status_code == 200
+    assert len(all_reviews.json()) == 1
+    assert all_reviews.json()[0]["status"] == "not_duplicate"
     with dependency.session_factory() as db:
         assert (
             db.scalar(
@@ -301,12 +346,17 @@ async def test_recruiter_can_list_and_dismiss_duplicate_review_idempotently(
 async def test_hiring_manager_cannot_manage_duplicate_reviews(
     candidate_merge_dependencies: CandidateMergeDependencies,
 ) -> None:
+    dependency = candidate_merge_dependencies
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         await login(client, "manager", "manager-password")
-        response = await client.get("/candidates/duplicate-reviews")
+        listed = await client.get("/candidates")
+        detail = await client.get(f"/candidates/{dependency.source_candidate_id}")
+        reviews = await client.get("/candidates/duplicate-reviews")
 
-    assert response.status_code == 403
+    assert listed.status_code == 403
+    assert detail.status_code == 403
+    assert reviews.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -365,6 +415,10 @@ async def test_merge_preserves_documents_applications_processes_and_interviews(
                 "reason": "幂等重试",
             },
         )
+        active_candidates = await client.get("/candidates")
+        all_candidates = await client.get("/candidates", params={"status": "all"})
+        target_detail = await client.get(f"/candidates/{dependency.target_candidate_id}")
+        source_detail = await client.get(f"/candidates/{dependency.source_candidate_id}")
 
     assert merged.status_code == 200, merged.text
     body = merged.json()
@@ -383,6 +437,17 @@ async def test_merge_preserves_documents_applications_processes_and_interviews(
     ]
     assert repeated.status_code == 200
     assert repeated.json()["moved_application_ids"] == []
+    assert active_candidates.status_code == 200
+    assert active_candidates.json()["total"] == 1
+    assert all_candidates.status_code == 200
+    assert all_candidates.json()["total"] == 2
+    assert target_detail.status_code == 200
+    assert target_detail.json()["application_count"] == 3
+    assert target_detail.json()["resume_count"] == 3
+    assert source_detail.status_code == 200
+    assert source_detail.json()["status"] == "merged"
+    assert source_detail.json()["application_count"] == 0
+    assert source_detail.json()["resume_count"] == 0
 
     with dependency.session_factory() as db:
         source = db.get(Candidate, dependency.source_candidate_id)

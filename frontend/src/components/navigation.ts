@@ -3,6 +3,7 @@ export type BusinessModule =
   | 'requests'
   | 'jobs'
   | 'screening'
+  | 'candidates'
   | 'candidate-process'
   | 'interviews'
   | 'talent'
@@ -11,6 +12,7 @@ export type BusinessModule =
 
 export function businessModuleForPath(pathname: string): BusinessModule {
   if (pathname.startsWith('/recruitment-requests')) return 'requests'
+  if (pathname.startsWith('/candidates')) return 'candidates'
   if (pathname.startsWith('/settings/')) return 'settings'
   if (pathname.endsWith('/batches') || pathname.endsWith('/results') || pathname.endsWith('/compare')) {
     return 'screening'
