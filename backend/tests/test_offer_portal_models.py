@@ -21,6 +21,7 @@ from app.models import (
     OfferVersion,
     User,
 )
+from app.services.offer_portal import phone_verification_digest
 from app.services.security import hash_password
 
 
@@ -99,11 +100,18 @@ def _portal_link(
     token_hash: str | None = None,
     idempotency_key: uuid.UUID | None = None,
 ) -> OfferPortalLink:
+    link_id = uuid.uuid4()
     return OfferPortalLink(
+        id=link_id,
         offer=offer,
         version=offer.current_version,
         idempotency_key=idempotency_key or uuid.uuid4(),
         token_hash=token_hash or uuid.uuid4().hex + uuid.uuid4().hex,
+        verification_phone_digest=phone_verification_digest(
+            "0001",
+            link_id=link_id,
+            secret_key="test-secret-key",
+        ),
         expires_at=datetime.now(UTC) + timedelta(days=7),
         created_by_id=user.id,
         created_by_username=user.username,

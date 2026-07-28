@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.config import settings
 from app.database import get_db
 from app.models import CandidateProcess, JobApplication, Offer, OfferPortalLink, OfferResponse
 from app.redis_client import get_offer_portal_store
@@ -25,7 +26,7 @@ from app.services.candidate_process import change_candidate_process_stage
 from app.services.offer_portal import (
     OfferPortalVerificationStore,
     hash_portal_token,
-    phone_last_four,
+    phone_verification_digest,
     portal_link_is_expired,
 )
 
@@ -181,9 +182,14 @@ def verify_offer_portal(
             headers={"Retry-After": str(retry_after)},
         )
 
-    expected = phone_last_four(link.offer.application.candidate.phone)
-    verified = expected is not None and hmac.compare_digest(
-        expected, payload.phone_last_four
+    submitted_digest = phone_verification_digest(
+        payload.phone_last_four,
+        link_id=link.id,
+        secret_key=settings.app_secret_key,
+    )
+    verified = hmac.compare_digest(
+        link.verification_phone_digest,
+        submitted_digest,
     )
     if not verified:
         try:

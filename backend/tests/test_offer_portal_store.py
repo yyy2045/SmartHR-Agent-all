@@ -7,6 +7,7 @@ from app.services.offer_portal import (
     create_portal_token,
     hash_portal_token,
     phone_last_four,
+    phone_verification_digest,
 )
 
 
@@ -56,3 +57,30 @@ def test_phone_last_four_uses_normalized_digits() -> None:
     assert phone_last_four("+86 138-0000-1234") == "1234"
     assert phone_last_four("123") is None
     assert phone_last_four(None) is None
+
+
+def test_phone_verification_digest_is_bound_to_link_and_secret() -> None:
+    link_id = uuid.uuid4()
+    digest = phone_verification_digest(
+        "1234",
+        link_id=link_id,
+        secret_key="first-test-secret",
+    )
+
+    assert len(digest) == 64
+    assert "1234" not in digest
+    assert digest == phone_verification_digest(
+        "1234",
+        link_id=link_id,
+        secret_key="first-test-secret",
+    )
+    assert digest != phone_verification_digest(
+        "1234",
+        link_id=uuid.uuid4(),
+        secret_key="first-test-secret",
+    )
+    assert digest != phone_verification_digest(
+        "1234",
+        link_id=link_id,
+        secret_key="second-test-secret",
+    )

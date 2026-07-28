@@ -311,6 +311,7 @@ class OfferPortalLink(Base):
     version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    verification_phone_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )

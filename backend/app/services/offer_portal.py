@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import re
 import secrets
@@ -15,6 +16,20 @@ def create_portal_token() -> str:
 
 def hash_portal_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def phone_verification_digest(
+    phone_last_four_value: str,
+    *,
+    link_id: uuid.UUID,
+    secret_key: str,
+) -> str:
+    message = f"offer-portal-phone:{link_id}:{phone_last_four_value}"
+    return hmac.new(
+        secret_key.encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def phone_last_four(phone: str | None) -> str | None:

@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
+from app.config import settings
 from app.database import get_db
 from app.models import (
     CandidateProcess,
@@ -47,6 +48,7 @@ from app.services.offer_portal import (
     create_portal_token,
     hash_portal_token,
     phone_last_four,
+    phone_verification_digest,
     portal_link_is_expired,
 )
 
@@ -346,6 +348,20 @@ def _portal_expiry(version: OfferVersion) -> datetime:
     return local_expiry.astimezone(UTC)
 
 
+def _verification_phone_digest(offer: Offer, link_id: uuid.UUID) -> str:
+    last_four = phone_last_four(offer.application.candidate.phone)
+    if last_four is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="候选人缺少可用于验证的手机号",
+        )
+    return phone_verification_digest(
+        last_four,
+        link_id=link_id,
+        secret_key=settings.app_secret_key,
+    )
+
+
 def _find_portal_link_by_creation_key(
     offer: Offer,
     key: uuid.UUID,
@@ -470,11 +486,14 @@ def create_offer_portal_link(
         )
 
     token = create_portal_token()
+    link_id = uuid.uuid4()
     link = OfferPortalLink(
+        id=link_id,
         offer_id=offer.id,
         version_id=offer.current_version.id,
         idempotency_key=payload.idempotency_key,
         token_hash=hash_portal_token(token),
+        verification_phone_digest=_verification_phone_digest(offer, link_id),
         expires_at=_portal_expiry(offer.current_version),
         created_by_id=current_user.id,
         created_by_username=current_user.username,
@@ -581,11 +600,17 @@ def regenerate_offer_portal_link(
         user=current_user,
     )
     token = create_portal_token()
+    replacement_id = uuid.uuid4()
     replacement = OfferPortalLink(
+        id=replacement_id,
         offer_id=offer.id,
         version_id=offer.current_version.id,
         idempotency_key=payload.idempotency_key,
         token_hash=hash_portal_token(token),
+        verification_phone_digest=_verification_phone_digest(
+            offer,
+            replacement_id,
+        ),
         expires_at=_portal_expiry(offer.current_version),
         created_by_id=current_user.id,
         created_by_username=current_user.username,

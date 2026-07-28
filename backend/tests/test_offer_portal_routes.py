@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.api.routes.offer_portal as offer_portal_routes
+from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
@@ -31,7 +32,11 @@ from app.models import (
     UserRole,
 )
 from app.redis_client import get_offer_portal_store, get_session_store
-from app.services.offer_portal import OfferPortalVerificationStore, hash_portal_token
+from app.services.offer_portal import (
+    OfferPortalVerificationStore,
+    hash_portal_token,
+    phone_verification_digest,
+)
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
 
@@ -209,6 +214,8 @@ async def test_recruiter_creates_hashed_link_and_replay_hides_raw_token(
         assert offer.application.process.current_stage == "offer_pending_response"
         assert link.token_hash == hash_portal_token(token)
         assert token != link.token_hash
+        assert len(link.verification_phone_digest) == 64
+        assert "1234" not in link.verification_phone_digest
         audit = db.scalar(
             select(AuditLog).where(AuditLog.action == "offer.portal_link_created")
         )
@@ -291,6 +298,36 @@ async def test_wrong_phone_locks_link_after_five_attempts(
 
     assert locked.status_code == correct_during_lock.status_code == 429
     assert int(locked.headers["Retry-After"]) > 0
+
+
+@pytest.mark.anyio
+async def test_phone_verification_uses_link_creation_snapshot(
+    portal_dependencies: PortalDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as internal:
+        await _login(internal, "portal-recruiter")
+        created = await _create_link(internal, portal_dependencies)
+        token = created.json()["portal_token"]
+
+    with portal_dependencies.session_factory() as db:
+        offer = db.get(Offer, portal_dependencies.offer_id)
+        assert offer is not None
+        offer.application.candidate.phone = "13999995678"
+        db.commit()
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as portal:
+        current_phone = await portal.post(
+            "/portal/offers/verify",
+            json={"token": token, "phone_last_four": "5678"},
+        )
+        original_phone = await portal.post(
+            "/portal/offers/verify",
+            json={"token": token, "phone_last_four": "1234"},
+        )
+
+    assert current_phone.status_code == 401
+    assert original_phone.status_code == 200
 
 
 @pytest.mark.anyio
@@ -387,10 +424,16 @@ async def test_internal_permissions_missing_phone_and_expired_link(
         offer = db.get(Offer, portal_dependencies.offer_id)
         offer.application.candidate.phone = "13800001234"
         link = OfferPortalLink(
+            id=(link_id := uuid.uuid4()),
             offer_id=offer.id,
             version_id=offer.current_version.id,
             idempotency_key=uuid.uuid4(),
             token_hash=hash_portal_token("expired-token" * 4),
+            verification_phone_digest=phone_verification_digest(
+                "1234",
+                link_id=link_id,
+                secret_key=settings.app_secret_key,
+            ),
             expires_at=datetime.now(UTC) - timedelta(days=1),
             created_at=datetime.now(UTC) - timedelta(days=2),
             created_by_id=offer.created_by_id,
