@@ -2,6 +2,7 @@ import {
   ArrowLeftOutlined,
   CheckOutlined,
   DeleteOutlined,
+  DollarOutlined,
   FileTextOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -529,6 +530,23 @@ export function InterviewReportPage() {
           >
             刷新
           </Button>
+          {canManageRecruitment(auth.user) &&
+            !archived &&
+            !merged &&
+            report.data?.status === 'confirmed' &&
+            currentVersion?.conclusion === 'hire' && (
+              <Button
+                type="primary"
+                icon={<DollarOutlined />}
+                onClick={() =>
+                  navigate(
+                    `/offers?create=1&jobId=${encodeURIComponent(jobId!)}&applicationId=${encodeURIComponent(applicationId!)}`,
+                  )
+                }
+              >
+                创建 Offer
+              </Button>
+            )}
         </Space>
       </div>
 

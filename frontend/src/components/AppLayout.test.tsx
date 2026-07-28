@@ -133,6 +133,18 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-current', 'page')
   })
 
+  it('将录用管理归入全局模块且不显示岗位上下文', () => {
+    expect(businessModuleForPath('/offers')).toBe('hiring')
+    expect(jobIdFromPath('/offers')).toBeNull()
+    mockApi()
+    renderLayout('/offers')
+    expect(screen.getByRole('button', { name: '录用管理' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
+  })
+
   it('将全局候选人中心归入独立模块且不显示岗位上下文', () => {
     expect(businessModuleForPath('/candidates')).toBe('candidates')
     expect(jobIdFromPath('/candidates')).toBeNull()
@@ -157,6 +169,7 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: /候选人流程/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /候选人中心/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /面试管理/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /录用管理/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /人才库/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /数据分析/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /系统设置/ })).toBeDisabled()

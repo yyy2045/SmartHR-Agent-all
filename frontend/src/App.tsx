@@ -81,6 +81,11 @@ const CandidateCenterPage = lazy(() =>
     default: module.CandidateCenterPage,
   })),
 )
+const OfferManagementPage = lazy(() =>
+  import('./pages/OfferManagementPage').then((module) => ({
+    default: module.OfferManagementPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -113,6 +118,7 @@ function App() {
                   }
                 >
                   <Route path="/recruitment-requests" element={<RecruitmentRequestPage />} />
+                  <Route path="/offers" element={<OfferManagementPage />} />
                 </Route>
                 <Route
                   element={
