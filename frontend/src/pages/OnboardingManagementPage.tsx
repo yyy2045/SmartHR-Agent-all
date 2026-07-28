@@ -503,6 +503,7 @@ export function OnboardingManagementPage() {
                   loading={acceptDate.isPending}
                   onClick={() => {
                     modal.confirm({
+                      zIndex: 1100,
                       title: '确认候选人提出的入职日期？',
                       content: formatDate(current.candidate_proposed_date),
                       okText: '确认日期',
@@ -648,6 +649,7 @@ export function OnboardingManagementPage() {
       </Drawer>
 
       <Modal
+        zIndex={1100}
         title={{
           propose: '提出新的入职日期',
           onboard: '标记候选人已入职',
