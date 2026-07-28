@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 
 from redis import Redis
 
+from app.models import OfferPortalLink, User
+
 
 def create_portal_token() -> str:
     return secrets.token_urlsafe(32)
@@ -46,6 +48,21 @@ def portal_link_is_expired(expires_at: datetime) -> bool:
         else expires_at.astimezone(UTC)
     )
     return normalized <= datetime.now(UTC)
+
+
+def revoke_portal_link(
+    link: OfferPortalLink,
+    *,
+    idempotency_key: uuid.UUID,
+    reason: str,
+    user: User,
+) -> None:
+    link.revoked_at = datetime.now(UTC)
+    link.revoked_by_id = user.id
+    link.revoked_by_username = user.username
+    link.revoked_by_display_name = user.display_name
+    link.revocation_idempotency_key = idempotency_key
+    link.revocation_reason = reason
 
 
 @dataclass(frozen=True)

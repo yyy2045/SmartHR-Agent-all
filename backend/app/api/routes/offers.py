@@ -50,6 +50,7 @@ from app.services.offer_portal import (
     phone_last_four,
     phone_verification_digest,
     portal_link_is_expired,
+    revoke_portal_link,
 )
 
 router = APIRouter()
@@ -402,21 +403,6 @@ def _ensure_portal_link_can_be_created(offer: Offer) -> None:
         )
 
 
-def _revoke_portal_link(
-    link: OfferPortalLink,
-    *,
-    idempotency_key: uuid.UUID,
-    reason: str,
-    user: User,
-) -> None:
-    link.revoked_at = datetime.now(UTC)
-    link.revoked_by_id = user.id
-    link.revoked_by_username = user.username
-    link.revoked_by_display_name = user.display_name
-    link.revocation_idempotency_key = idempotency_key
-    link.revocation_reason = reason
-
-
 @router.get("/offers", response_model=list[OfferSummaryResponse])
 def list_offers(
     current_user: CurrentUser,
@@ -593,7 +579,7 @@ def regenerate_offer_portal_link(
             detail="撤回幂等键已用于其他链接",
         )
 
-    _revoke_portal_link(
+    revoke_portal_link(
         active_link,
         idempotency_key=payload.revocation_idempotency_key,
         reason=payload.reason,
@@ -680,7 +666,7 @@ def revoke_offer_portal_link(
             detail="只能撤回当前候选人链接",
         )
 
-    _revoke_portal_link(
+    revoke_portal_link(
         link,
         idempotency_key=payload.idempotency_key,
         reason=payload.reason,

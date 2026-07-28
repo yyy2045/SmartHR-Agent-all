@@ -18,6 +18,7 @@ from app.main import app
 from app.models import (
     AuditLog,
     Candidate,
+    CandidateDuplicateReview,
     CandidateProcess,
     Job,
     JobApplication,
@@ -45,6 +46,7 @@ from app.services.session_store import SessionStore
 class PortalDependencies:
     session_factory: sessionmaker[Session]
     offer_id: uuid.UUID
+    candidate_id: uuid.UUID
     store: OfferPortalVerificationStore
 
 
@@ -152,7 +154,7 @@ def portal_dependencies() -> Generator[PortalDependencies, None, None]:
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_session_store] = lambda: session_store
     app.dependency_overrides[get_offer_portal_store] = lambda: portal_store
-    yield PortalDependencies(testing_session, offer_id, portal_store)
+    yield PortalDependencies(testing_session, offer_id, candidate.id, portal_store)
     app.dependency_overrides.clear()
     Base.metadata.drop_all(engine)
     engine.dispose()
@@ -657,3 +659,172 @@ async def test_candidate_response_rolls_back_when_audit_write_fails(
             "offer_pending_response"
         ]
         assert db.scalar(select(OfferResponse)) is None
+
+
+@pytest.mark.anyio
+async def test_recruiter_updates_phone_and_revokes_existing_portal_link(
+    portal_dependencies: PortalDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "portal-recruiter")
+        created = await _create_link(client, portal_dependencies)
+        old_token = created.json()["portal_token"]
+        updated = await client.patch(
+            f"/candidates/{portal_dependencies.candidate_id}/phone",
+            json={
+                "phone": "+86 139-9999-5678",
+                "reason": "候选人确认原号码已经停用",
+            },
+        )
+        replay = await client.patch(
+            f"/candidates/{portal_dependencies.candidate_id}/phone",
+            json={
+                "phone": "+86 139-9999-5678",
+                "reason": "候选人确认原号码已经停用",
+            },
+        )
+        replacement = await _create_link(client, portal_dependencies)
+        new_token = replacement.json()["portal_token"]
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as portal:
+        old_status = await portal.post(
+            "/portal/offers/status",
+            json={"token": old_token},
+        )
+        new_verification = await portal.post(
+            "/portal/offers/verify",
+            json={"token": new_token, "phone_last_four": "5678"},
+        )
+
+    assert updated.status_code == replay.status_code == 200
+    assert updated.json()["phone"] == "+86 139-9999-5678"
+    assert updated.json()["revoked_portal_link_count"] == 1
+    assert replay.json()["revoked_portal_link_count"] == 0
+    assert replacement.status_code == 201
+    assert old_status.status_code == 410
+    assert new_verification.status_code == 200
+    with portal_dependencies.session_factory() as db:
+        candidate = db.get(Candidate, portal_dependencies.candidate_id)
+        offer = db.get(Offer, portal_dependencies.offer_id)
+        phone_audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "candidate.phone_updated")
+        )
+        assert candidate is not None
+        assert candidate.phone_normalized == "8613999995678"
+        assert offer is not None
+        assert offer.status == "pending_response"
+        assert offer.application.process.current_stage == "offer_pending_response"
+        assert phone_audit is not None
+        assert "13800001234" not in str(phone_audit.details)
+        assert "+86 139-9999-5678" not in str(phone_audit.details)
+
+
+@pytest.mark.anyio
+async def test_phone_update_rejects_invalid_value_and_unauthorized_role(
+    portal_dependencies: PortalDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "portal-manager")
+        forbidden = await client.patch(
+            f"/candidates/{portal_dependencies.candidate_id}/phone",
+            json={"phone": "13999995678", "reason": "候选人要求修正"},
+        )
+        await _login(client, "portal-recruiter")
+        invalid = await client.patch(
+            f"/candidates/{portal_dependencies.candidate_id}/phone",
+            json={"phone": "2026-07-29", "reason": "错误格式"},
+        )
+
+    assert forbidden.status_code == 403
+    assert invalid.status_code == 422
+    with portal_dependencies.session_factory() as db:
+        candidate = db.get(Candidate, portal_dependencies.candidate_id)
+        assert candidate is not None
+        assert candidate.phone == "13800001234"
+
+
+@pytest.mark.anyio
+async def test_phone_update_revokes_responded_link_without_changing_acceptance(
+    portal_dependencies: PortalDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "portal-recruiter")
+        created = await _create_link(client, portal_dependencies)
+        token = created.json()["portal_token"]
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as portal:
+        verification_token = await _verify_link(portal, token)
+        accepted = await portal.post(
+            "/portal/offers/respond",
+            json={
+                "token": token,
+                "verification_token": verification_token,
+                "idempotency_key": str(uuid.uuid4()),
+                "decision": "accepted",
+            },
+        )
+    assert accepted.status_code == 200
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "portal-recruiter")
+        updated = await client.patch(
+            f"/candidates/{portal_dependencies.candidate_id}/phone",
+            json={"phone": "13999995678", "reason": "候选人确认换号"},
+        )
+        regenerate = await _create_link(client, portal_dependencies)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as portal:
+        revoked = await portal.post("/portal/offers/status", json={"token": token})
+
+    assert updated.status_code == 200
+    assert updated.json()["revoked_portal_link_count"] == 1
+    assert revoked.status_code == 410
+    assert regenerate.status_code == 409
+    with portal_dependencies.session_factory() as db:
+        offer = db.get(Offer, portal_dependencies.offer_id)
+        assert offer is not None
+        assert offer.status == "accepted"
+        assert offer.candidate_response is not None
+        assert offer.candidate_response.decision == "accepted"
+        assert offer.application.process.current_stage == "onboarding_pending_confirmation"
+
+
+@pytest.mark.anyio
+async def test_phone_update_creates_pending_duplicate_review(
+    portal_dependencies: PortalDependencies,
+) -> None:
+    with portal_dependencies.session_factory() as db:
+        db.add(
+            Candidate(
+                full_name="另一候选人",
+                phone="13999995678",
+                phone_normalized="13999995678",
+            )
+        )
+        db.commit()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "portal-recruiter")
+        updated = await client.patch(
+            f"/candidates/{portal_dependencies.candidate_id}/phone",
+            json={"phone": "13999995678", "reason": "候选人确认换号"},
+        )
+
+    assert updated.status_code == 200
+    with portal_dependencies.session_factory() as db:
+        reviews = list(db.scalars(select(CandidateDuplicateReview)).all())
+        duplicate_audits = list(
+            db.scalars(
+                select(AuditLog).where(AuditLog.action == "candidate.duplicate_detected")
+            ).all()
+        )
+        assert len(reviews) == len(duplicate_audits) == 1
+        assert reviews[0].status == "pending"
+        assert reviews[0].confidence == "strong"
+        assert reviews[0].signals == ["phone_exact"]
+        assert reviews[0].source_document_id is None
+        assert duplicate_audits[0].details["source"] == "manual_phone_update"

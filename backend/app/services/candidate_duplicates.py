@@ -14,6 +14,7 @@ from app.models import (
     CandidateDuplicateReview,
     CandidateProfile,
     ResumeDocument,
+    User,
 )
 from app.services.audit import record_audit
 from app.services.candidate_identity import normalize_candidate_name
@@ -51,6 +52,52 @@ def build_experience_fingerprint(
 
 def _candidate_pair(first: uuid.UUID, second: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
     return (first, second) if first.bytes < second.bytes else (second, first)
+
+
+def _upsert_duplicate_review(
+    db: Session,
+    *,
+    candidate_id: uuid.UUID,
+    other_id: uuid.UUID,
+    signals: set[str],
+    source_document_id: uuid.UUID | None,
+) -> tuple[CandidateDuplicateReview | None, bool]:
+    candidate_a_id, candidate_b_id = _candidate_pair(candidate_id, other_id)
+    ordered_signals = sorted(signals)
+    confidence = "strong" if signals & STRONG_SIGNALS else "weak"
+    review = db.scalar(
+        select(CandidateDuplicateReview).where(
+            CandidateDuplicateReview.candidate_a_id == candidate_a_id,
+            CandidateDuplicateReview.candidate_b_id == candidate_b_id,
+        )
+    )
+    created = False
+    if review is None:
+        try:
+            with db.begin_nested():
+                review = CandidateDuplicateReview(
+                    candidate_a_id=candidate_a_id,
+                    candidate_b_id=candidate_b_id,
+                    source_document_id=source_document_id,
+                    confidence=confidence,
+                    signals=ordered_signals,
+                )
+                db.add(review)
+                db.flush()
+                created = True
+        except IntegrityError:
+            review = db.scalar(
+                select(CandidateDuplicateReview).where(
+                    CandidateDuplicateReview.candidate_a_id == candidate_a_id,
+                    CandidateDuplicateReview.candidate_b_id == candidate_b_id,
+                )
+            )
+    if review is not None and review.status == "pending":
+        review.signals = sorted(set(review.signals) | signals)
+        review.confidence = "strong" if set(review.signals) & STRONG_SIGNALS else "weak"
+        if source_document_id is not None:
+            review.source_document_id = source_document_id
+    return review, created
 
 
 def _matching_candidates(
@@ -137,45 +184,17 @@ def detect_candidate_duplicates(
         candidate=candidate,
         document=document,
     ).items():
-        candidate_a_id, candidate_b_id = _candidate_pair(candidate.id, other_id)
-        ordered_signals = sorted(signals)
-        confidence = "strong" if signals & STRONG_SIGNALS else "weak"
-        review = db.scalar(
-            select(CandidateDuplicateReview).where(
-                CandidateDuplicateReview.candidate_a_id == candidate_a_id,
-                CandidateDuplicateReview.candidate_b_id == candidate_b_id,
-            )
+        review, created = _upsert_duplicate_review(
+            db,
+            candidate_id=candidate.id,
+            other_id=other_id,
+            signals=signals,
+            source_document_id=document.id,
         )
-        created = False
-        if review is None:
-            try:
-                with db.begin_nested():
-                    review = CandidateDuplicateReview(
-                        candidate_a_id=candidate_a_id,
-                        candidate_b_id=candidate_b_id,
-                        source_document_id=document.id,
-                        confidence=confidence,
-                        signals=ordered_signals,
-                    )
-                    db.add(review)
-                    db.flush()
-                    created = True
-            except IntegrityError:
-                review = db.scalar(
-                    select(CandidateDuplicateReview).where(
-                        CandidateDuplicateReview.candidate_a_id == candidate_a_id,
-                        CandidateDuplicateReview.candidate_b_id == candidate_b_id,
-                    )
-                )
         if review is None:
             continue
-        if review.status == "pending":
-            review.signals = sorted(set(review.signals) | signals)
-            review.confidence = (
-                "strong" if set(review.signals) & STRONG_SIGNALS else "weak"
-            )
-            review.source_document_id = document.id
         if created:
+            candidate_a_id, candidate_b_id = _candidate_pair(candidate.id, other_id)
             record_audit(
                 db,
                 action="candidate.duplicate_detected",
@@ -188,8 +207,54 @@ def detect_candidate_duplicates(
                 details={
                     "candidate_a_id": str(candidate_a_id),
                     "candidate_b_id": str(candidate_b_id),
-                    "confidence": confidence,
-                    "signals": ordered_signals,
+                    "confidence": review.confidence,
+                    "signals": review.signals,
+                },
+            )
+        reviews.append(review)
+    return reviews
+
+
+def detect_candidate_phone_duplicates(
+    db: Session,
+    *,
+    candidate: Candidate,
+    actor: User,
+) -> list[CandidateDuplicateReview]:
+    if candidate.phone_normalized is None:
+        return []
+    matches = db.scalars(
+        select(Candidate).where(
+            Candidate.id != candidate.id,
+            Candidate.status == "active",
+            Candidate.phone_normalized == candidate.phone_normalized,
+        )
+    ).all()
+    reviews: list[CandidateDuplicateReview] = []
+    for other in matches:
+        review, created = _upsert_duplicate_review(
+            db,
+            candidate_id=candidate.id,
+            other_id=other.id,
+            signals={"phone_exact"},
+            source_document_id=None,
+        )
+        if review is None:
+            continue
+        if created:
+            record_audit(
+                db,
+                action="candidate.duplicate_detected",
+                target_type="candidate_duplicate_review",
+                target_id=review.id,
+                result="success",
+                actor=actor,
+                details={
+                    "candidate_a_id": str(review.candidate_a_id),
+                    "candidate_b_id": str(review.candidate_b_id),
+                    "confidence": review.confidence,
+                    "signals": review.signals,
+                    "source": "manual_phone_update",
                 },
             )
         reviews.append(review)
