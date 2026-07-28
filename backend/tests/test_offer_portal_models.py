@@ -190,6 +190,7 @@ def test_only_one_unrevoked_portal_link_exists_per_offer(
     first.revoked_by_id = revoker_id
     first.revoked_by_username = revoker_username
     first.revoked_by_display_name = revoker_display_name
+    first.revocation_idempotency_key = uuid.uuid4()
     first.revocation_reason = "重新生成候选人链接"
     first.revoked_at = datetime.now(UTC)
     portal_session.commit()
@@ -282,6 +283,7 @@ def test_offer_allows_only_one_final_candidate_response(
         )
     )
     first_link.revoked_at = datetime.now(UTC)
+    first_link.revocation_idempotency_key = uuid.uuid4()
     first_link.revocation_reason = "测试第二条链接唯一性"
     portal_session.commit()
 

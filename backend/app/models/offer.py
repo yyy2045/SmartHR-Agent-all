@@ -273,6 +273,11 @@ class OfferPortalLink(Base):
             "idempotency_key",
             name="uq_offer_portal_links_idempotency",
         ),
+        UniqueConstraint(
+            "offer_id",
+            "revocation_idempotency_key",
+            name="uq_offer_portal_links_revocation_idempotency",
+        ),
         Index(
             "uq_offer_portal_links_active_offer",
             "offer_id",
@@ -285,8 +290,10 @@ class OfferPortalLink(Base):
             name="ck_offer_portal_links_expiry",
         ),
         CheckConstraint(
-            "(revoked_at IS NULL AND revoked_by_id IS NULL AND revocation_reason IS NULL) OR "
-            "(revoked_at IS NOT NULL AND revocation_reason IS NOT NULL)",
+            "(revoked_at IS NULL AND revoked_by_id IS NULL "
+            "AND revocation_idempotency_key IS NULL AND revocation_reason IS NULL) OR "
+            "(revoked_at IS NOT NULL AND revocation_idempotency_key IS NOT NULL "
+            "AND revocation_reason IS NOT NULL)",
             name="ck_offer_portal_links_revocation",
         ),
         ForeignKeyConstraint(
@@ -318,6 +325,7 @@ class OfferPortalLink(Base):
     )
     revoked_by_username: Mapped[str | None] = mapped_column(String(64))
     revoked_by_display_name: Mapped[str | None] = mapped_column(String(100))
+    revocation_idempotency_key: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     revocation_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

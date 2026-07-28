@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     app_session_cookie: str = "smarthr_session"
     app_session_expire_minutes: int = 480
     app_session_secure: bool = False
+    offer_portal_verification_session_minutes: int = Field(default=15, ge=5, le=60)
+    offer_portal_max_attempts: int = Field(default=5, ge=3, le=10)
+    offer_portal_lock_minutes: int = Field(default=15, ge=5, le=60)
 
     initial_recruiter_username: str = "recruiter"
     initial_recruiter_password: str = "change-me-before-use"

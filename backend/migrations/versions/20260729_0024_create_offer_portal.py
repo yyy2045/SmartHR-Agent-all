@@ -91,6 +91,7 @@ def upgrade() -> None:
         sa.Column("revoked_by_id", sa.Uuid(), nullable=True),
         sa.Column("revoked_by_username", sa.String(length=64), nullable=True),
         sa.Column("revoked_by_display_name", sa.String(length=100), nullable=True),
+        sa.Column("revocation_idempotency_key", sa.Uuid(), nullable=True),
         sa.Column("revocation_reason", sa.Text(), nullable=True),
         sa.Column(
             "created_at",
@@ -103,8 +104,10 @@ def upgrade() -> None:
             name="ck_offer_portal_links_expiry",
         ),
         sa.CheckConstraint(
-            "(revoked_at IS NULL AND revoked_by_id IS NULL AND revocation_reason IS NULL) OR "
-            "(revoked_at IS NOT NULL AND revocation_reason IS NOT NULL)",
+            "(revoked_at IS NULL AND revoked_by_id IS NULL "
+            "AND revocation_idempotency_key IS NULL AND revocation_reason IS NULL) OR "
+            "(revoked_at IS NOT NULL AND revocation_idempotency_key IS NOT NULL "
+            "AND revocation_reason IS NOT NULL)",
             name="ck_offer_portal_links_revocation",
         ),
         sa.ForeignKeyConstraint(["offer_id"], ["offers.id"], ondelete="CASCADE"),
@@ -125,6 +128,11 @@ def upgrade() -> None:
             "offer_id",
             "idempotency_key",
             name="uq_offer_portal_links_idempotency",
+        ),
+        sa.UniqueConstraint(
+            "offer_id",
+            "revocation_idempotency_key",
+            name="uq_offer_portal_links_revocation_idempotency",
         ),
         sa.UniqueConstraint(
             "offer_id",
