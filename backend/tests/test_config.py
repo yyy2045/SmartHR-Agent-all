@@ -53,3 +53,18 @@ def test_embedding_defaults_are_disabled_and_configuration_is_bounded() -> None:
         Settings(_env_file=None, embedding_batch_size=101)
     with pytest.raises(ValidationError):
         Settings(_env_file=None, embedding_max_concurrency=11)
+
+
+def test_workbench_priority_thresholds_are_configurable_and_bounded() -> None:
+    default = Settings(_env_file=None)
+    assert default.workbench_offer_urgent_days == 2
+    assert default.workbench_onboarding_urgent_days == 3
+    assert Settings(
+        _env_file=None,
+        workbench_offer_urgent_days=0,
+        workbench_onboarding_urgent_days=30,
+    ).workbench_onboarding_urgent_days == 30
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, workbench_offer_urgent_days=-1)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, workbench_onboarding_urgent_days=31)

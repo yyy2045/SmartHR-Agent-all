@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     offer_portal_verification_session_minutes: int = Field(default=15, ge=5, le=60)
     offer_portal_max_attempts: int = Field(default=5, ge=3, le=10)
     offer_portal_lock_minutes: int = Field(default=15, ge=5, le=60)
+    workbench_offer_urgent_days: int = Field(default=2, ge=0, le=30)
+    workbench_onboarding_urgent_days: int = Field(default=3, ge=0, le=30)
 
     initial_recruiter_username: str = "recruiter"
     initial_recruiter_password: str = "change-me-before-use"
