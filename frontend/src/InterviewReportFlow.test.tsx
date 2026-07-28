@@ -62,6 +62,7 @@ const candidate: CandidateProcessCardRecord = {
   stage_entered_at: timestamp,
   skills: ['Python'],
   analysis_created_at: timestamp,
+  onboarding: null,
   interview_evaluation: {
     status: 'in_progress',
     total_rounds: 2,

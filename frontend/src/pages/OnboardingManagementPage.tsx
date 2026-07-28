@@ -1,4 +1,5 @@
 import {
+  ArrowLeftOutlined,
   CheckOutlined,
   CopyOutlined,
   EditOutlined,
@@ -29,6 +30,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useMemo, useState } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
   ApiError,
@@ -141,20 +143,54 @@ function currentDate(record: OnboardingSummaryRecord) {
   )
 }
 
+function safeInternalPath(value: string | null) {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return undefined
+  try {
+    const resolved = new URL(value, window.location.origin)
+    if (resolved.origin !== window.location.origin) return undefined
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`
+  } catch {
+    return undefined
+  }
+}
+
+function returnLabel(path: string) {
+  if (path.startsWith('/offers')) return '返回 Offer 详情'
+  if (path.includes('/pipeline')) return '返回候选人流程'
+  return '返回来源页面'
+}
+
 export function OnboardingManagementPage() {
   const auth = useAuth()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [messageApi, messageContext] = message.useMessage()
   const [modal, modalContext] = Modal.useModal()
   const [form] = Form.useForm<ActionValues>()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [selectedId, setSelectedId] = useState<string>()
+  const selectedId = searchParams.get('selected') ?? undefined
+  const sourcePath = safeInternalPath(searchParams.get('from'))
   const [dialog, setDialog] = useState<DialogKind>()
   const [issuedPortalUrl, setIssuedPortalUrl] = useState<string>()
   const canWrite = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
   ) ?? false
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
+
+  function selectOnboarding(onboardingId: string) {
+    const next = new URLSearchParams(searchParams)
+    next.set('selected', onboardingId)
+    setSearchParams(next, { replace: true })
+  }
+
+  function closeOnboarding() {
+    const next = new URLSearchParams(searchParams)
+    next.delete('selected')
+    setSearchParams(next, { replace: true })
+    setIssuedPortalUrl(undefined)
+  }
 
   const onboardings = useQuery({
     queryKey: ['onboardings'],
@@ -351,13 +387,20 @@ export function OnboardingManagementPage() {
           <Title level={2}>入职跟踪</Title>
           <Text type="secondary">协调候选人入职日期并记录最终入职结果</Text>
         </div>
-        <Button
-          icon={<ReloadOutlined />}
-          loading={onboardings.isFetching}
-          onClick={() => void onboardings.refetch()}
-        >
-          刷新
-        </Button>
+        <Space wrap>
+          {sourcePath && sourcePath !== `${location.pathname}${location.search}` && (
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(sourcePath)}>
+              {returnLabel(sourcePath)}
+            </Button>
+          )}
+          <Button
+            icon={<ReloadOutlined />}
+            loading={onboardings.isFetching}
+            onClick={() => void onboardings.refetch()}
+          >
+            刷新
+          </Button>
+        </Space>
       </div>
 
       <HiringModuleNav />
@@ -394,7 +437,7 @@ export function OnboardingManagementPage() {
           pagination={{ pageSize: 20, showSizeChanger: false }}
           locale={{ emptyText: <Empty description="暂无入职记录" /> }}
           rowClassName={(item) => item.id === selectedId ? 'onboarding-row-selected' : ''}
-          onRow={(item) => ({ onClick: () => setSelectedId(item.id) })}
+          onRow={(item) => ({ onClick: () => selectOnboarding(item.id) })}
           scroll={{ x: 1040 }}
         />
       </section>
@@ -403,10 +446,7 @@ export function OnboardingManagementPage() {
         width={720}
         title={current ? `${current.candidate_name || current.candidate_code} · 入职详情` : '入职详情'}
         open={Boolean(selectedId)}
-        onClose={() => {
-          setSelectedId(undefined)
-          setIssuedPortalUrl(undefined)
-        }}
+        onClose={closeOnboarding}
       >
         {detail.isPending && <Skeleton active paragraph={{ rows: 12 }} />}
         {detail.error && (

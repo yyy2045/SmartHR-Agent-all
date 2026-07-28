@@ -6,6 +6,7 @@ import {
   LinkOutlined,
   ReloadOutlined,
   SendOutlined,
+  SolutionOutlined,
   StopOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
@@ -32,7 +33,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
   ApiError,
@@ -52,6 +53,8 @@ import {
   type OfferPortalLinkRecord,
   type OfferPortalLinkState,
   type OfferRecord,
+  type OnboardingActionOwner,
+  type OnboardingStatus,
   type OfferStatus,
   type OfferSummary,
   type OfferVersion,
@@ -157,9 +160,28 @@ const portalLinkStateMeta: Record<OfferPortalLinkState, { label: string; color: 
   responded: { label: '已回应', color: 'success' },
 }
 
+const onboardingStatusMeta: Record<OnboardingStatus, { label: string; color: string }> = {
+  pending_confirmation: { label: '待候选人确认日期', color: 'processing' },
+  candidate_proposed_date: { label: '待招聘方确认日期', color: 'warning' },
+  pending_start: { label: '待入职', color: 'cyan' },
+  onboarded: { label: '已入职', color: 'success' },
+  abandoned: { label: '已放弃入职', color: 'default' },
+}
+
+function onboardingOwnerLabel(owner: OnboardingActionOwner) {
+  if (owner === 'candidate') return '候选人'
+  if (owner === 'recruiter') return '招聘专员'
+  return '无需操作'
+}
+
+function optionalDate(value: string | null) {
+  return value ? formatDate(value) : '未确定'
+}
+
 export function OfferManagementPage() {
   const auth = useAuth()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [messageApi, messageContext] = message.useMessage()
   const [modal, modalContext] = Modal.useModal()
@@ -240,6 +262,25 @@ export function OfferManagementPage() {
     setIssuedPortalUrl(undefined)
     setPortalLinkAction(undefined)
   }, [selectedId])
+
+  useEffect(() => {
+    const selected = searchParams.get('selected')
+    if (selected) setSelectedId(selected)
+  }, [searchParams])
+
+  function openOffer(offerId: string) {
+    const next = new URLSearchParams(searchParams)
+    next.set('selected', offerId)
+    setSearchParams(next, { replace: true })
+    setSelectedId(offerId)
+  }
+
+  function closeOffer() {
+    const next = new URLSearchParams(searchParams)
+    next.delete('selected')
+    setSearchParams(next, { replace: true })
+    setSelectedId(undefined)
+  }
 
   function updateOfferCache(saved: OfferRecord) {
     queryClient.setQueryData(['offer', saved.id], saved)
@@ -498,7 +539,7 @@ export function OfferManagementPage() {
           icon={<EyeOutlined />}
           onClick={(event) => {
             event.stopPropagation()
-            setSelectedId(offer.id)
+            openOffer(offer.id)
           }}
         />
       ),
@@ -542,7 +583,7 @@ export function OfferManagementPage() {
           rowClassName={(offer) =>
             offer.id === selectedId ? 'offer-row-selected' : ''
           }
-          onRow={(offer) => ({ onClick: () => setSelectedId(offer.id) })}
+          onRow={(offer) => ({ onClick: () => openOffer(offer.id) })}
           scroll={{ x: 920 }}
         />
       </section>
@@ -574,7 +615,7 @@ export function OfferManagementPage() {
         width={680}
         title={detail.data ? `${detail.data.candidate_name || detail.data.candidate_code} · Offer` : 'Offer 详情'}
         open={Boolean(selectedId)}
-        onClose={() => setSelectedId(undefined)}
+        onClose={closeOffer}
       >
         {detail.isPending && <Skeleton active paragraph={{ rows: 12 }} />}
         {detail.error && (
@@ -691,6 +732,61 @@ export function OfferManagementPage() {
                 {detail.data.current_version.notes || '未填写'}
               </Descriptions.Item>
             </Descriptions>
+
+            {detail.data.onboarding && (
+              <>
+                <Divider />
+                <section className="offer-onboarding-section">
+                  <div className="offer-section-heading">
+                    <div>
+                      <Title level={4}>入职跟踪</Title>
+                      <Text type="secondary">Offer 已接受，后续日期与到岗结果在入职模块统一维护。</Text>
+                    </div>
+                    <Button
+                      type="primary"
+                      icon={<SolutionOutlined />}
+                      onClick={() => {
+                        const sourceParams = new URLSearchParams(searchParams)
+                        sourceParams.set('selected', detail.data!.id)
+                        const from = `/offers?${sourceParams.toString()}`
+                        const targetParams = new URLSearchParams({
+                          selected: detail.data!.onboarding!.id,
+                          from,
+                        })
+                        navigate(`/onboardings?${targetParams.toString()}`)
+                      }}
+                    >
+                      查看入职跟踪
+                    </Button>
+                  </div>
+                  <Descriptions bordered column={2} size="small">
+                    <Descriptions.Item label="状态">
+                      <Tag color={onboardingStatusMeta[detail.data.onboarding.status].color}>
+                        {onboardingStatusMeta[detail.data.onboarding.status].label}
+                      </Tag>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="当前责任方">
+                      {onboardingOwnerLabel(detail.data.onboarding.action_owner)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Offer 预计日期">
+                      {formatDate(detail.data.onboarding.expected_start_date)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="候选人提议">
+                      {optionalDate(detail.data.onboarding.candidate_proposed_date)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="招聘方提议">
+                      {optionalDate(detail.data.onboarding.recruiter_proposed_date)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="双方确认日期">
+                      {optionalDate(detail.data.onboarding.confirmed_start_date)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="实际入职日期" span={2}>
+                      {optionalDate(detail.data.onboarding.actual_start_date)}
+                    </Descriptions.Item>
+                  </Descriptions>
+                </section>
+              </>
+            )}
 
             <Divider />
             <div className="offer-portal-section">

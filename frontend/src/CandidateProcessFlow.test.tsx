@@ -69,6 +69,7 @@ describe('candidate process board', () => {
       stage_entered_at: timestamp,
       skills: ['Python'],
       analysis_created_at: timestamp,
+      onboarding: null,
       interview_evaluation: {
         status: 'in_progress',
         total_rounds: 1,
@@ -127,6 +128,7 @@ describe('candidate process board', () => {
       stage_entered_at: timestamp,
       skills: ['Python', 'FastAPI', 'PostgreSQL', 'React', 'Docker'],
       analysis_created_at: timestamp,
+      onboarding: null,
       interview_evaluation: {
         status: 'in_progress',
         total_rounds: 2,
@@ -258,6 +260,7 @@ describe('candidate process board', () => {
       stage_entered_at: timestamp,
       skills: [],
       analysis_created_at: timestamp,
+      onboarding: null,
     }
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = input.toString()
@@ -297,6 +300,61 @@ describe('candidate process board', () => {
       expect(window.location.pathname).toBe(
         '/jobs/job-1/batches/batch-1/documents/document-1/history',
       )
+    })
+  })
+
+  it('展示自动入职阶段并携带来源进入入职跟踪', async () => {
+    const candidate: CandidateProcessCardRecord = {
+      process_id: 'process-1',
+      application_id: 'application-1',
+      screening_result_id: 'result-1',
+      batch_id: 'batch-1',
+      batch_name: '社招批次',
+      document_id: 'document-1',
+      candidate_code: 'CAND-0001',
+      original_filename: 'candidate.pdf',
+      phone: '13800138000',
+      ai_group: 'passed',
+      total_score: 88,
+      current_decision: 'shortlisted',
+      current_stage: 'onboarding_pending_start',
+      stage_entered_at: timestamp,
+      skills: ['Python'],
+      analysis_created_at: timestamp,
+      interview_evaluation: null,
+      onboarding: { id: 'onboarding-1', status: 'pending_start' },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      if (path === '/api/auth/me') return jsonResponse(user)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') return jsonResponse(job)
+      if (path === '/api/jobs/job-1/batches') return jsonResponse([])
+      if (path === '/api/jobs/job-1/candidate-processes') return jsonResponse([candidate])
+      if (path === '/api/jobs?include_archived=true') return jsonResponse([job])
+      if (path === '/api/onboardings?page=1&page_size=100') {
+        return jsonResponse({ items: [], total: 0, page: 1, page_size: 100 })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    window.history.replaceState({}, '', '/jobs/job-1/pipeline')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    )
+
+    expect((await screen.findAllByText('待入职')).length).toBeGreaterThan(0)
+    expect(screen.getByText('等待入职')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /入职跟踪/ }))
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/onboardings')
+      expect(new URLSearchParams(window.location.search).get('selected')).toBe('onboarding-1')
+      expect(new URLSearchParams(window.location.search).get('from')).toBe('/jobs/job-1/pipeline')
     })
   })
 })

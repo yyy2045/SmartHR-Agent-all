@@ -633,6 +633,18 @@ export interface CandidateOnboardingRecord {
   abandonment_reason_code: OnboardingAbandonmentReason | null
 }
 
+export interface OfferOnboardingSummaryRecord {
+  id: string
+  status: OnboardingStatus
+  version: number
+  action_owner: OnboardingActionOwner
+  expected_start_date: string
+  candidate_proposed_date: string | null
+  recruiter_proposed_date: string | null
+  confirmed_start_date: string | null
+  actual_start_date: string | null
+}
+
 export interface OnboardingEventRecord {
   id: string
   sequence_number: number
@@ -756,6 +768,7 @@ export interface OfferRecord {
   created_by_id: string | null
   created_at: string
   updated_at: string
+  onboarding: OfferOnboardingSummaryRecord | null
 }
 
 export interface OfferSummary {
@@ -872,6 +885,12 @@ export type CandidateStage =
   | 'to_interview'
   | 'completed'
   | 'rejected'
+  | 'offer_pending_response'
+  | 'offer_rejected'
+  | 'onboarding_pending_confirmation'
+  | 'onboarding_pending_start'
+  | 'onboarding_completed'
+  | 'onboarding_abandoned'
 
 export interface EvidenceCitationRecord {
   id: string
@@ -1010,6 +1029,12 @@ export interface CandidateProcessCardRecord {
   skills: string[]
   analysis_created_at: string
   interview_evaluation?: InterviewEvaluationProgressRecord | null
+  onboarding: CandidateProcessOnboardingRecord | null
+}
+
+export interface CandidateProcessOnboardingRecord {
+  id: string
+  status: OnboardingStatus
 }
 
 export type InterviewEvaluationProgressStatus =

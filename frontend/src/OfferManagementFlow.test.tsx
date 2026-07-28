@@ -78,6 +78,7 @@ function version(overrides: Partial<OfferVersion> = {}): OfferVersion {
 function offerRecord(
   status: OfferStatus,
   currentVersion: OfferVersion = version(),
+  onboarding: OfferRecord['onboarding'] = null,
 ): OfferRecord {
   return {
     id: 'offer-1',
@@ -95,6 +96,7 @@ function offerRecord(
     created_by_id: 'recruiter-1',
     created_at: timestamp,
     updated_at: timestamp,
+    onboarding,
   }
 }
 
@@ -476,6 +478,44 @@ describe('Offer management flow', () => {
     expect(operationPayloads[1]).toMatchObject({ reason: '候选人决定暂缓' })
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /撤回链接/ })).not.toBeInTheDocument()
+    })
+  })
+
+  it('从 Offer 详情查看入职摘要并打开对应入职记录', async () => {
+    const saved = offerRecord('accepted', version(), {
+      id: 'onboarding-1',
+      status: 'pending_start',
+      version: 3,
+      action_owner: 'none',
+      expected_start_date: '2026-09-01',
+      candidate_proposed_date: '2026-09-08',
+      recruiter_proposed_date: null,
+      confirmed_start_date: '2026-09-08',
+      actual_start_date: null,
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      const common = commonResponse(path, users.recruiter, [saved])
+      if (common) return common
+      if (path === '/api/offers/offer-1') return jsonResponse(saved)
+      if (path === '/api/offers/offer-1/portal-links') return jsonResponse([])
+      if (path === '/api/onboardings?page=1&page_size=100') {
+        return jsonResponse({ items: [], total: 0, page: 1, page_size: 100 })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    renderApp('/offers?selected=offer-1')
+
+    expect(await screen.findByRole('heading', { name: '入职跟踪' })).toBeInTheDocument()
+    expect(screen.getByText('双方确认日期')).toBeInTheDocument()
+    expect(screen.getByText('无需操作')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /查看入职跟踪/ }))
+
+    await waitFor(() => {
+      const query = new URLSearchParams(window.location.search)
+      expect(window.location.pathname).toBe('/onboardings')
+      expect(query.get('selected')).toBe('onboarding-1')
+      expect(query.get('from')).toBe('/offers?selected=offer-1')
     })
   })
 })

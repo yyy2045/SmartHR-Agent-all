@@ -122,8 +122,8 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-function renderApp() {
-  window.history.replaceState({}, '', '/onboardings')
+function renderApp(path = '/onboardings') {
+  window.history.replaceState({}, '', path)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -276,5 +276,54 @@ describe('onboarding management flow', () => {
       reason: '招聘专员误点已入职',
     }))
     expect(await screen.findByText('已追加状态更正')).toBeInTheDocument()
+  })
+
+  it('通过安全深链自动打开详情并返回原 Offer', async () => {
+    const currentSummary = summary({ status: 'pending_start', action_owner: 'none' })
+    const currentDetail = detail({ ...currentSummary })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      const common = commonResponse(path, users.recruiter, currentSummary)
+      if (common) return common
+      if (path === '/api/onboardings/onboarding-1') return jsonResponse(currentDetail)
+      if (path === '/api/offers/offer-1/portal-links') return jsonResponse([])
+      if (path === '/api/offers') return jsonResponse([])
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderApp('/onboardings?selected=onboarding-1&from=%2Foffers%3Fselected%3Doffer-1')
+
+    expect(await screen.findByText('状态记录')).toBeInTheDocument()
+    const backButton = screen.getByRole('button', { name: /返回 Offer 详情/ })
+    fireEvent.click(backButton)
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/offers')
+      expect(new URLSearchParams(window.location.search).get('selected')).toBe('offer-1')
+    })
+  })
+
+  it('拒绝外部来源地址且关闭详情时保留安全来源参数', async () => {
+    const currentSummary = summary()
+    const currentDetail = detail()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      const common = commonResponse(path, users.recruiter, currentSummary)
+      if (common) return common
+      if (path === '/api/onboardings/onboarding-1') return jsonResponse(currentDetail)
+      if (path === '/api/offers/offer-1/portal-links') return jsonResponse([])
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    renderApp('/onboardings?selected=onboarding-1&from=https%3A%2F%2Fevil.example%2Foffers')
+
+    expect(await screen.findByText('状态记录')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /返回来源页面/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    await waitFor(() => {
+      const query = new URLSearchParams(window.location.search)
+      expect(query.get('selected')).toBeNull()
+      expect(query.get('from')).toBe('https://evil.example/offers')
+    })
   })
 })

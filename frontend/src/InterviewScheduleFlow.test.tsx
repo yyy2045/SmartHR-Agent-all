@@ -70,6 +70,7 @@ const candidate: CandidateProcessCardRecord = {
   stage_entered_at: timestamp,
   skills: ['Python'],
   analysis_created_at: timestamp,
+  onboarding: null,
 }
 
 const plan: InterviewPlanVersion = {

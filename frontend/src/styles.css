@@ -2585,6 +2585,22 @@ input {
   box-shadow: 0 3px 14px rgb(26 45 72 / 3%);
 }
 
+.candidate-onboarding-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #f6f9fc;
+  border: 1px solid #e1e8f0;
+  border-radius: 6px;
+}
+
+.candidate-onboarding-summary .ant-tag {
+  margin: 0;
+}
+
 /* 入职跟踪 */
 .onboarding-workspace {
   overflow: hidden;
@@ -2724,6 +2740,11 @@ input {
 .offer-portal-section {
   display: grid;
   gap: 16px;
+}
+
+.offer-onboarding-section {
+  display: grid;
+  gap: 14px;
 }
 
 .offer-section-heading,
