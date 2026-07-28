@@ -238,4 +238,59 @@ describe('candidate center', () => {
     expect(await screen.findByText('已判定为不同候选人')).toBeInTheDocument()
     expect(dismissPayload).toEqual({ reason: '号码为家庭共用，履历核对后确认不同人' })
   })
+
+  it('修正候选人手机号并提示撤回的门户链接数量', async () => {
+    let currentDetail = candidateDetail
+    let updatePayload: Record<string, unknown> | undefined
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      if (path === '/api/auth/me') return jsonResponse(recruiter)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs?include_archived=true') return jsonResponse([])
+      if (path.startsWith('/api/candidates?')) {
+        return jsonResponse({
+          items: [currentDetail, sourceCandidate],
+          total: 2,
+          limit: 20,
+          offset: 0,
+        })
+      }
+      if (path === '/api/candidates/candidate-1' && method === 'GET') {
+        return jsonResponse(currentDetail)
+      }
+      if (path === '/api/candidates/candidate-1/phone' && method === 'PATCH') {
+        updatePayload = JSON.parse(init?.body as string) as Record<string, unknown>
+        currentDetail = { ...currentDetail, phone: '13999995678' }
+        return jsonResponse({
+          candidate_id: 'candidate-1',
+          phone: '13999995678',
+          revoked_portal_link_count: 2,
+        })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    renderCandidateCenter(fetchMock)
+
+    fireEvent.click((await screen.findAllByRole('button', { name: /查看/ }))[0])
+    fireEvent.click(await screen.findByRole('button', { name: /修正手机号/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: '手机号' }), {
+      target: { value: '13999995678' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '修改原因' }), {
+      target: { value: '候选人确认原号码录入错误' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认修改' }))
+
+    expect(
+      await screen.findByText('手机号已更新，已撤回 2 条旧门户链接'),
+    ).toBeInTheDocument()
+    expect(updatePayload).toEqual({
+      phone: '13999995678',
+      reason: '候选人确认原号码录入错误',
+    })
+    await waitFor(() => {
+      expect(screen.getAllByText('13999995678').length).toBeGreaterThan(0)
+    })
+  })
 })

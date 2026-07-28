@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -9,14 +9,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
+from app.config import settings
 from app.database import get_db
 from app.models import (
+    CandidateProcess,
     InterviewReport,
     Job,
     JobApplication,
     Offer,
     OfferApproval,
     OfferManagerConfirmation,
+    OfferPortalLink,
     OfferVersion,
     User,
 )
@@ -31,8 +34,24 @@ from app.schemas.offer import (
     OfferVersionCreateRequest,
     OfferVersionResponse,
 )
+from app.schemas.offer_portal import (
+    OfferPortalLinkCreateRequest,
+    OfferPortalLinkIssuedResponse,
+    OfferPortalLinkRegenerateRequest,
+    OfferPortalLinkResponse,
+    OfferPortalLinkRevokeRequest,
+)
 from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job
+from app.services.candidate_process import change_candidate_process_stage
+from app.services.offer_portal import (
+    create_portal_token,
+    hash_portal_token,
+    phone_last_four,
+    phone_verification_digest,
+    portal_link_is_expired,
+    revoke_portal_link,
+)
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -41,8 +60,13 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _OFFER_LOAD_OPTIONS = (
     selectinload(Offer.application).selectinload(JobApplication.candidate),
     selectinload(Offer.application).selectinload(JobApplication.job),
+    selectinload(Offer.application)
+    .selectinload(JobApplication.process)
+    .selectinload(CandidateProcess.events),
     selectinload(Offer.versions).selectinload(OfferVersion.manager_confirmation),
     selectinload(Offer.versions).selectinload(OfferVersion.approval),
+    selectinload(Offer.portal_links).selectinload(OfferPortalLink.response),
+    selectinload(Offer.candidate_response),
 )
 _CONTENT_FIELDS = (
     "monthly_salary",
@@ -289,6 +313,96 @@ def _record_sensitive_read(db: Session, user: User, offer: Offer) -> None:
     )
 
 
+def _portal_link_state(link: OfferPortalLink) -> str:
+    if link.response is not None:
+        return "responded"
+    if link.revoked_at is not None:
+        return "revoked"
+    if portal_link_is_expired(link.expires_at):
+        return "expired"
+    return "active"
+
+
+def _portal_link_response(
+    link: OfferPortalLink,
+    *,
+    portal_token: str | None = None,
+) -> OfferPortalLinkIssuedResponse:
+    return OfferPortalLinkIssuedResponse(
+        id=link.id,
+        version_id=link.version_id,
+        state=_portal_link_state(link),
+        expires_at=link.expires_at,
+        created_by_username=link.created_by_username,
+        created_by_display_name=link.created_by_display_name,
+        created_at=link.created_at,
+        revoked_at=link.revoked_at,
+        revoked_by_username=link.revoked_by_username,
+        revoked_by_display_name=link.revoked_by_display_name,
+        revocation_reason=link.revocation_reason,
+        portal_token=portal_token,
+    )
+
+
+def _portal_expiry(version: OfferVersion) -> datetime:
+    local_expiry = datetime.combine(version.valid_until, time(23, 59, 59), _SHANGHAI)
+    return local_expiry.astimezone(UTC)
+
+
+def _verification_phone_digest(offer: Offer, link_id: uuid.UUID) -> str:
+    last_four = phone_last_four(offer.application.candidate.phone)
+    if last_four is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="候选人缺少可用于验证的手机号",
+        )
+    return phone_verification_digest(
+        last_four,
+        link_id=link_id,
+        secret_key=settings.app_secret_key,
+    )
+
+
+def _find_portal_link_by_creation_key(
+    offer: Offer,
+    key: uuid.UUID,
+) -> OfferPortalLink | None:
+    return next((item for item in offer.portal_links if item.idempotency_key == key), None)
+
+
+def _unrevoked_portal_link(offer: Offer) -> OfferPortalLink | None:
+    return next((item for item in reversed(offer.portal_links) if item.revoked_at is None), None)
+
+
+def _ensure_portal_link_can_be_created(offer: Offer) -> None:
+    if offer.candidate_response is not None or offer.status in {"accepted", "declined"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="候选人已经回应 Offer，不能生成新链接",
+        )
+    if offer.status not in {"approved", "pending_response"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="只有已批准的 Offer 可以生成候选人链接",
+        )
+    version = offer.current_version
+    if version.approval is None or version.approval.decision != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Offer 当前版本尚未批准",
+        )
+    if phone_last_four(offer.application.candidate.phone) is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="候选人缺少可用于验证的手机号",
+        )
+    if _portal_expiry(version) <= datetime.now(UTC):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Offer 已过有效期，不能生成候选人链接",
+        )
+
+
 @router.get("/offers", response_model=list[OfferSummaryResponse])
 def list_offers(
     current_user: CurrentUser,
@@ -316,6 +430,268 @@ def get_offer(offer_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> 
     _record_sensitive_read(db, current_user, offer)
     db.commit()
     return response
+
+
+@router.get(
+    "/offers/{offer_id}/portal-links",
+    response_model=list[OfferPortalLinkResponse],
+)
+def list_offer_portal_links(
+    offer_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[OfferPortalLinkResponse]:
+    offer = _get_offer(db, offer_id, current_user)
+    return [
+        OfferPortalLinkResponse.model_validate(_portal_link_response(link))
+        for link in reversed(offer.portal_links)
+    ]
+
+
+@router.post(
+    "/offers/{offer_id}/portal-links",
+    response_model=OfferPortalLinkIssuedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_offer_portal_link(
+    offer_id: uuid.UUID,
+    payload: OfferPortalLinkCreateRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> OfferPortalLinkIssuedResponse:
+    offer = _get_offer(db, offer_id, current_user, for_update=True)
+    _ensure_offer_writable(offer, current_user)
+    replay = _find_portal_link_by_creation_key(offer, payload.idempotency_key)
+    if replay is not None:
+        return _portal_link_response(replay)
+    _ensure_portal_link_can_be_created(offer)
+    if _unrevoked_portal_link(offer) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该 Offer 已有候选人链接，请使用重新生成操作",
+        )
+
+    token = create_portal_token()
+    link_id = uuid.uuid4()
+    link = OfferPortalLink(
+        id=link_id,
+        offer_id=offer.id,
+        version_id=offer.current_version.id,
+        idempotency_key=payload.idempotency_key,
+        token_hash=hash_portal_token(token),
+        verification_phone_digest=_verification_phone_digest(offer, link_id),
+        expires_at=_portal_expiry(offer.current_version),
+        created_by_id=current_user.id,
+        created_by_username=current_user.username,
+        created_by_display_name=current_user.display_name,
+    )
+    db.add(link)
+    offer.status = "pending_response"
+    change_candidate_process_stage(
+        db,
+        offer.application,
+        target_stage="offer_pending_response",
+        reason="候选人 Offer 链接已生成",
+        operator=current_user,
+    )
+    try:
+        db.flush()
+        record_audit(
+            db,
+            action="offer.portal_link_created",
+            target_type="offer_portal_link",
+            target_id=link.id,
+            job_id=offer.application.job_id,
+            result="success",
+            actor=current_user,
+            details={
+                "offer_id": str(offer.id),
+                "version_id": str(link.version_id),
+                "expires_at": link.expires_at.isoformat(),
+            },
+        )
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        concurrent = _get_offer(db, offer_id, current_user)
+        replay = _find_portal_link_by_creation_key(
+            concurrent, payload.idempotency_key
+        )
+        if replay is not None:
+            return _portal_link_response(replay)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Offer 候选人链接已被其他操作更新",
+        ) from error
+    db.refresh(link)
+    return _portal_link_response(link, portal_token=token)
+
+
+@router.post(
+    "/offers/{offer_id}/portal-links/regenerate",
+    response_model=OfferPortalLinkIssuedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def regenerate_offer_portal_link(
+    offer_id: uuid.UUID,
+    payload: OfferPortalLinkRegenerateRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> OfferPortalLinkIssuedResponse:
+    offer = _get_offer(db, offer_id, current_user, for_update=True)
+    _ensure_offer_writable(offer, current_user)
+    replay = _find_portal_link_by_creation_key(offer, payload.idempotency_key)
+    if replay is not None:
+        revoked = next(
+            (
+                item
+                for item in offer.portal_links
+                if item.revocation_idempotency_key
+                == payload.revocation_idempotency_key
+            ),
+            None,
+        )
+        if revoked is None or revoked.revocation_reason != payload.reason:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="幂等键已用于不同的链接重新生成操作",
+            )
+        return _portal_link_response(replay)
+
+    _ensure_portal_link_can_be_created(offer)
+    active_link = _unrevoked_portal_link(offer)
+    if active_link is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="当前没有可重新生成的候选人链接",
+        )
+    if active_link.response is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="候选人已经回应，不能重新生成链接",
+        )
+    if any(
+        item.revocation_idempotency_key == payload.revocation_idempotency_key
+        for item in offer.portal_links
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="撤回幂等键已用于其他链接",
+        )
+
+    revoke_portal_link(
+        active_link,
+        idempotency_key=payload.revocation_idempotency_key,
+        reason=payload.reason,
+        user=current_user,
+    )
+    token = create_portal_token()
+    replacement_id = uuid.uuid4()
+    replacement = OfferPortalLink(
+        id=replacement_id,
+        offer_id=offer.id,
+        version_id=offer.current_version.id,
+        idempotency_key=payload.idempotency_key,
+        token_hash=hash_portal_token(token),
+        verification_phone_digest=_verification_phone_digest(
+            offer,
+            replacement_id,
+        ),
+        expires_at=_portal_expiry(offer.current_version),
+        created_by_id=current_user.id,
+        created_by_username=current_user.username,
+        created_by_display_name=current_user.display_name,
+    )
+    db.add(replacement)
+    db.flush()
+    record_audit(
+        db,
+        action="offer.portal_link_regenerated",
+        target_type="offer_portal_link",
+        target_id=replacement.id,
+        job_id=offer.application.job_id,
+        result="success",
+        actor=current_user,
+        details={
+            "offer_id": str(offer.id),
+            "replaced_link_id": str(active_link.id),
+            "version_id": str(replacement.version_id),
+            "reason": payload.reason,
+        },
+    )
+    db.commit()
+    db.refresh(replacement)
+    return _portal_link_response(replacement, portal_token=token)
+
+
+@router.post(
+    "/offers/{offer_id}/portal-links/{link_id}/revoke",
+    response_model=OfferPortalLinkResponse,
+)
+def revoke_offer_portal_link(
+    offer_id: uuid.UUID,
+    link_id: uuid.UUID,
+    payload: OfferPortalLinkRevokeRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> OfferPortalLinkResponse:
+    offer = _get_offer(db, offer_id, current_user, for_update=True)
+    _ensure_offer_writable(offer, current_user)
+    link = next((item for item in offer.portal_links if item.id == link_id), None)
+    if link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="候选人链接不存在",
+        )
+    if link.response is not None or offer.candidate_response is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="候选人已经回应，不能撤回链接",
+        )
+    if link.revoked_at is not None:
+        if (
+            link.revocation_idempotency_key == payload.idempotency_key
+            and link.revocation_reason == payload.reason
+        ):
+            return OfferPortalLinkResponse.model_validate(
+                _portal_link_response(link)
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="候选人链接已经撤回",
+        )
+    if _unrevoked_portal_link(offer) is not link:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="只能撤回当前候选人链接",
+        )
+
+    revoke_portal_link(
+        link,
+        idempotency_key=payload.idempotency_key,
+        reason=payload.reason,
+        user=current_user,
+    )
+    offer.status = "approved"
+    change_candidate_process_stage(
+        db,
+        offer.application,
+        target_stage="completed",
+        reason=f"候选人 Offer 链接已撤回：{payload.reason}",
+        operator=current_user,
+    )
+    record_audit(
+        db,
+        action="offer.portal_link_revoked",
+        target_type="offer_portal_link",
+        target_id=link.id,
+        job_id=offer.application.job_id,
+        result="success",
+        actor=current_user,
+        details={"offer_id": str(offer.id), "reason": payload.reason},
+    )
+    db.commit()
+    return OfferPortalLinkResponse.model_validate(_portal_link_response(link))
 
 
 @router.post(

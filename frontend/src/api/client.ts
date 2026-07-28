@@ -534,6 +534,69 @@ export type OfferStatus =
   | 'pending_approval'
   | 'approved'
   | 'rejected'
+  | 'pending_response'
+  | 'accepted'
+  | 'declined'
+
+export type OfferPortalLinkState = 'active' | 'expired' | 'revoked' | 'responded'
+export type CandidateOfferDecision = 'accepted' | 'rejected'
+export type CandidateOfferProgress = 'offer_pending_response' | 'accepted' | 'declined'
+export type CandidateOfferRejectionReason =
+  | 'compensation'
+  | 'career'
+  | 'location'
+  | 'timing'
+  | 'other'
+
+export interface OfferPortalLinkRecord {
+  id: string
+  version_id: string
+  state: OfferPortalLinkState
+  expires_at: string
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+  revoked_at: string | null
+  revoked_by_username: string | null
+  revoked_by_display_name: string | null
+  revocation_reason: string | null
+}
+
+export interface OfferPortalLinkIssuedRecord extends OfferPortalLinkRecord {
+  portal_token: string | null
+}
+
+export interface CandidateOfferResponseRecord {
+  decision: CandidateOfferDecision
+  rejection_reason_code: CandidateOfferRejectionReason | null
+  rejection_note: string | null
+  responded_at: string
+}
+
+export interface CandidateOfferViewRecord {
+  candidate_name: string | null
+  job_title: string
+  progress: CandidateOfferProgress
+  currency: 'CNY'
+  monthly_salary: string
+  annual_salary_months: string
+  probation_months: number
+  probation_monthly_salary: string | null
+  bonus_description: string
+  expected_start_date: string
+  valid_until: string
+  notes: string
+  response: CandidateOfferResponseRecord | null
+}
+
+export interface OfferPortalVerifiedRecord extends CandidateOfferViewRecord {
+  verification_token: string
+  verification_expires_at: string
+}
+
+export interface OfferPortalStatusRecord {
+  status: 'verification_required'
+}
 
 export interface OfferContentInput {
   monthly_salary: number
@@ -969,6 +1032,12 @@ export interface CandidateDetailRecord extends CandidateListItemRecord {
   resumes: CandidateResumeSummaryRecord[]
 }
 
+export interface CandidatePhoneUpdateRecord {
+  candidate_id: string
+  phone: string
+  revoked_portal_link_count: number
+}
+
 export interface CandidateDuplicateReviewRecord {
   id: string
   candidate_a: CandidateSummaryRecord
@@ -1072,6 +1141,7 @@ async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
   fallbackMessage = '请求失败',
+  notifyUnauthorized = true,
 ): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
@@ -1087,6 +1157,7 @@ async function apiRequest<T>(
   if (!response.ok) {
     if (
       response.status === 401 &&
+      notifyUnauthorized &&
       path !== '/api/auth/me' &&
       path !== '/api/auth/login'
     ) {
@@ -1620,6 +1691,129 @@ export function fetchOffer(offerId: string): Promise<OfferRecord> {
   return apiRequest(`/api/offers/${offerId}`, {}, '无法读取 Offer 详情')
 }
 
+export function fetchOfferPortalLinks(offerId: string): Promise<OfferPortalLinkRecord[]> {
+  return apiRequest(
+    `/api/offers/${offerId}/portal-links`,
+    {},
+    '无法读取候选人链接记录',
+  )
+}
+
+export function createOfferPortalLink(
+  offerId: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<OfferPortalLinkIssuedRecord> {
+  return apiRequest(
+    `/api/offers/${offerId}/portal-links`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: idempotencyKey }),
+    },
+    '生成候选人链接失败',
+  )
+}
+
+export function regenerateOfferPortalLink(
+  offerId: string,
+  reason: string,
+  idempotencyKey: string = crypto.randomUUID(),
+  revocationIdempotencyKey: string = crypto.randomUUID(),
+): Promise<OfferPortalLinkIssuedRecord> {
+  return apiRequest(
+    `/api/offers/${offerId}/portal-links/regenerate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        revocation_idempotency_key: revocationIdempotencyKey,
+        reason,
+      }),
+    },
+    '重新生成候选人链接失败',
+  )
+}
+
+export function revokeOfferPortalLink(
+  offerId: string,
+  linkId: string,
+  reason: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<OfferPortalLinkRecord> {
+  return apiRequest(
+    `/api/offers/${offerId}/portal-links/${linkId}/revoke`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: idempotencyKey, reason }),
+    },
+    '撤回候选人链接失败',
+  )
+}
+
+export function fetchOfferPortalStatus(token: string): Promise<OfferPortalStatusRecord> {
+  return apiRequest(
+    '/api/portal/offers/status',
+    { method: 'POST', body: JSON.stringify({ token }) },
+    '无法验证候选人链接',
+    false,
+  )
+}
+
+export function verifyOfferPortal(
+  token: string,
+  phoneLastFour: string,
+): Promise<OfferPortalVerifiedRecord> {
+  return apiRequest(
+    '/api/portal/offers/verify',
+    {
+      method: 'POST',
+      body: JSON.stringify({ token, phone_last_four: phoneLastFour }),
+    },
+    '验证候选人身份失败',
+    false,
+  )
+}
+
+export function fetchOfferPortalDetail(
+  token: string,
+  verificationToken: string,
+): Promise<CandidateOfferViewRecord> {
+  return apiRequest(
+    '/api/portal/offers/detail',
+    {
+      method: 'POST',
+      body: JSON.stringify({ token, verification_token: verificationToken }),
+    },
+    '无法读取 Offer',
+    false,
+  )
+}
+
+export function respondToOfferPortal(
+  token: string,
+  verificationToken: string,
+  decision: CandidateOfferDecision,
+  rejectionReasonCode: CandidateOfferRejectionReason | null = null,
+  rejectionNote: string | null = null,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<CandidateOfferViewRecord> {
+  return apiRequest(
+    '/api/portal/offers/respond',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        token,
+        verification_token: verificationToken,
+        idempotency_key: idempotencyKey,
+        decision,
+        rejection_reason_code: rejectionReasonCode,
+        rejection_note: rejectionNote,
+      }),
+    },
+    decision === 'accepted' ? '接受 Offer 失败' : '拒绝 Offer 失败',
+    false,
+  )
+}
+
 export function createOffer(
   jobId: string,
   applicationId: string,
@@ -1934,6 +2128,21 @@ export function fetchCandidate(candidateId: string): Promise<CandidateDetailReco
     `/api/candidates/${encodeURIComponent(candidateId)}`,
     {},
     '无法读取候选人详情',
+  )
+}
+
+export function updateCandidatePhone(
+  candidateId: string,
+  phone: string,
+  reason: string,
+): Promise<CandidatePhoneUpdateRecord> {
+  return apiRequest(
+    `/api/candidates/${encodeURIComponent(candidateId)}/phone`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ phone, reason }),
+    },
+    '修正候选人手机号失败',
   )
 }
 

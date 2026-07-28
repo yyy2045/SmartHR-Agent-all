@@ -33,6 +33,9 @@ PROCESS_STAGES = (
     "to_interview",
     "completed",
     "rejected",
+    "offer_pending_response",
+    "offer_rejected",
+    "onboarding_pending_confirmation",
 )
 PROCESS_STAGE_SQL = ", ".join(f"'{stage}'" for stage in PROCESS_STAGES)
 
@@ -53,7 +56,7 @@ class CandidateProcess(Base):
         nullable=False,
         index=True,
     )
-    current_stage: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    current_stage: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     stage_entered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -110,8 +113,8 @@ class CandidateProcessEvent(Base):
         index=True,
     )
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    from_stage: Mapped[str] = mapped_column(String(30), nullable=False)
-    to_stage: Mapped[str] = mapped_column(String(30), nullable=False)
+    from_stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    to_stage: Mapped[str] = mapped_column(String(40), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text)
     operator_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),

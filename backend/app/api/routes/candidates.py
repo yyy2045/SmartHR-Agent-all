@@ -7,7 +7,16 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
 from app.database import get_db
-from app.models import Candidate, CandidateDuplicateReview, JobApplication, ResumeDocument, User
+from app.models import (
+    Candidate,
+    CandidateDuplicateReview,
+    CandidateProcess,
+    JobApplication,
+    Offer,
+    OfferPortalLink,
+    ResumeDocument,
+    User,
+)
 from app.schemas.candidate import (
     CandidateApplicationSummaryResponse,
     CandidateDetailResponse,
@@ -17,13 +26,20 @@ from app.schemas.candidate import (
     CandidateListResponse,
     CandidateMergeRequest,
     CandidateMergeResponse,
+    CandidatePhoneUpdateRequest,
+    CandidatePhoneUpdateResponse,
     CandidateResumeSummaryResponse,
     CandidateSummaryResponse,
 )
+from app.services.audit import record_audit
+from app.services.candidate_duplicates import detect_candidate_phone_duplicates
+from app.services.candidate_identity import normalize_candidate_phone
 from app.services.candidate_merging import (
     dismiss_duplicate_review,
     merge_duplicate_candidates,
 )
+from app.services.candidate_process import change_candidate_process_stage
+from app.services.offer_portal import revoke_portal_link
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -256,6 +272,125 @@ def get_candidate(
         ).model_dump(),
         applications=application_items,
         resumes=resume_items,
+    )
+
+
+@router.patch(
+    "/{candidate_id:uuid}/phone",
+    response_model=CandidatePhoneUpdateResponse,
+)
+def update_candidate_phone(
+    candidate_id: uuid.UUID,
+    payload: CandidatePhoneUpdateRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> CandidatePhoneUpdateResponse:
+    _ensure_candidate_access(current_user)
+    normalized_phone = normalize_candidate_phone(payload.phone)
+    if normalized_phone is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="请输入有效的手机或联系电话",
+        )
+    candidate = db.scalar(
+        select(Candidate)
+        .where(Candidate.id == candidate_id)
+        .with_for_update()
+        .options(
+            selectinload(Candidate.applications)
+            .selectinload(JobApplication.process)
+            .selectinload(CandidateProcess.events),
+            selectinload(Candidate.applications)
+            .selectinload(JobApplication.offer)
+            .selectinload(Offer.portal_links)
+            .selectinload(OfferPortalLink.response),
+            selectinload(Candidate.applications)
+            .selectinload(JobApplication.offer)
+            .selectinload(Offer.candidate_response),
+        )
+    )
+    if candidate is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="候选人不存在")
+    if candidate.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="已合并候选人不能修改手机号",
+        )
+    if candidate.phone == payload.phone and candidate.phone_normalized == normalized_phone:
+        return CandidatePhoneUpdateResponse(
+            candidate_id=candidate.id,
+            phone=candidate.phone,
+            revoked_portal_link_count=0,
+        )
+
+    revoked_links: list[OfferPortalLink] = []
+    revocation_reason = f"候选人手机号已修正：{payload.reason}"
+    for application in candidate.applications:
+        offer = application.offer
+        if offer is None:
+            continue
+        for link in offer.portal_links:
+            if link.revoked_at is not None:
+                continue
+            revoke_portal_link(
+                link,
+                idempotency_key=uuid.uuid4(),
+                reason=revocation_reason,
+                user=current_user,
+            )
+            revoked_links.append(link)
+            record_audit(
+                db,
+                action="offer.portal_link_revoked_phone_change",
+                target_type="offer_portal_link",
+                target_id=link.id,
+                job_id=application.job_id,
+                result="success",
+                actor=current_user,
+                details={
+                    "offer_id": str(offer.id),
+                    "candidate_id": str(candidate.id),
+                    "reason": payload.reason,
+                },
+            )
+        if offer.status == "pending_response" and offer.candidate_response is None:
+            offer.status = "approved"
+            change_candidate_process_stage(
+                db,
+                application,
+                target_stage="completed",
+                reason=revocation_reason,
+                operator=current_user,
+            )
+
+    had_previous_phone = candidate.phone is not None
+    candidate.phone = payload.phone
+    candidate.phone_normalized = normalized_phone
+    db.flush()
+    duplicate_reviews = detect_candidate_phone_duplicates(
+        db,
+        candidate=candidate,
+        actor=current_user,
+    )
+    record_audit(
+        db,
+        action="candidate.phone_updated",
+        target_type="candidate",
+        target_id=candidate.id,
+        result="success",
+        actor=current_user,
+        details={
+            "had_previous_phone": had_previous_phone,
+            "revoked_portal_link_ids": [str(item.id) for item in revoked_links],
+            "duplicate_review_ids": [str(item.id) for item in duplicate_reviews],
+            "reason": payload.reason,
+        },
+    )
+    db.commit()
+    return CandidatePhoneUpdateResponse(
+        candidate_id=candidate.id,
+        phone=candidate.phone,
+        revoked_portal_link_count=len(revoked_links),
     )
 
 

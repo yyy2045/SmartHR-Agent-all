@@ -13,6 +13,9 @@ CandidateStage = Literal[
     "to_interview",
     "completed",
     "rejected",
+    "offer_pending_response",
+    "offer_rejected",
+    "onboarding_pending_confirmation",
 ]
 CandidateProcessEventType = Literal["decision", "stage"]
 InterviewEvaluationProgressStatus = Literal[

@@ -16,7 +16,14 @@ from app.models.interview import (
 from app.models.interview_report import InterviewReport, InterviewReportVersion
 from app.models.job import HardRequirement, Job, JobCriteriaVersion, ScoringDimension
 from app.models.knowledge import ResumeEmbeddingChunk
-from app.models.offer import Offer, OfferApproval, OfferManagerConfirmation, OfferVersion
+from app.models.offer import (
+    Offer,
+    OfferApproval,
+    OfferManagerConfirmation,
+    OfferPortalLink,
+    OfferResponse,
+    OfferVersion,
+)
 from app.models.recruitment_request import (
     RecruitmentRequest,
     RecruitmentRequestApproval,
@@ -63,6 +70,8 @@ __all__ = [
     "Offer",
     "OfferApproval",
     "OfferManagerConfirmation",
+    "OfferPortalLink",
+    "OfferResponse",
     "OfferVersion",
     "RecruiterDecision",
     "RecruitmentRequest",

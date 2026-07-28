@@ -64,6 +64,27 @@ class CandidateDetailResponse(CandidateListItemResponse):
     resumes: list[CandidateResumeSummaryResponse]
 
 
+class CandidatePhoneUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str = Field(min_length=1, max_length=50)
+    reason: str = Field(min_length=1, max_length=2_000)
+
+    @field_validator("phone", "reason")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("手机号和修改原因不能为空")
+        return normalized
+
+
+class CandidatePhoneUpdateResponse(BaseModel):
+    candidate_id: uuid.UUID
+    phone: str
+    revoked_portal_link_count: int
+
+
 class CandidateDuplicateReviewResponse(BaseModel):
     id: uuid.UUID
     candidate_a: CandidateSummaryResponse

@@ -211,6 +211,206 @@ input {
   margin-top: 22px;
 }
 
+/* 候选人 Offer 门户 */
+.candidate-offer-portal {
+  min-height: 100vh;
+  color: #172033;
+  background: #f4f6f8;
+}
+
+.candidate-offer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 68px;
+  padding: 12px max(24px, calc((100vw - 920px) / 2));
+  background: #ffffff;
+  border-bottom: 1px solid #e1e5ea;
+}
+
+.candidate-offer-brand,
+.candidate-offer-security {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.candidate-offer-brand > span:last-child {
+  display: grid;
+  gap: 1px;
+}
+
+.candidate-offer-brand-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  color: #ffffff;
+  font-size: 18px;
+  background: #2269c8;
+  border-radius: 6px;
+  place-items: center;
+}
+
+.candidate-offer-security {
+  color: #43705b;
+  font-size: 13px;
+}
+
+.candidate-offer-main {
+  display: grid;
+  min-height: calc(100vh - 116px);
+  padding: 40px 16px;
+  place-items: start center;
+}
+
+.candidate-offer-panel {
+  width: min(760px, 100%);
+  padding: 30px;
+  background: #ffffff;
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgb(26 42 66 / 7%);
+}
+
+.candidate-offer-verification {
+  width: min(440px, 100%);
+}
+
+.candidate-offer-verification > .ant-typography {
+  display: block;
+  margin: 0;
+  text-align: center;
+}
+
+.candidate-offer-verification .ant-alert,
+.candidate-offer-verification .ant-form {
+  margin-top: 24px;
+}
+
+.candidate-offer-lock {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 18px;
+  color: #2269c8;
+  font-size: 22px;
+  background: #edf5ff;
+  border-radius: 50%;
+  place-items: center;
+}
+
+.candidate-offer-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.candidate-offer-title-row h2 {
+  margin: 4px 0 0;
+}
+
+.candidate-offer-title-row .ant-tag {
+  margin: 4px 0 0;
+}
+
+.candidate-offer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.candidate-offer-response {
+  display: flex;
+  gap: 14px;
+  margin-top: 24px;
+  padding: 18px;
+  border: 1px solid;
+  border-radius: 6px;
+}
+
+.candidate-offer-response > .anticon {
+  margin-top: 2px;
+  font-size: 24px;
+}
+
+.candidate-offer-response h4,
+.candidate-offer-response p {
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.candidate-offer-response--accepted {
+  color: #276647;
+  background: #f1f8f4;
+  border-color: #bddfca;
+}
+
+.candidate-offer-response--rejected {
+  color: #8b3441;
+  background: #fff5f5;
+  border-color: #efc5ca;
+}
+
+.candidate-offer-verification-expiry {
+  display: block;
+  margin-top: 24px;
+  text-align: right;
+}
+
+.candidate-offer-footer {
+  min-height: 48px;
+  padding: 14px 20px;
+  color: #7a8493;
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .candidate-offer-header {
+    min-height: 60px;
+    padding: 10px 16px;
+  }
+
+  .candidate-offer-security {
+    font-size: 0;
+  }
+
+  .candidate-offer-security .anticon {
+    font-size: 18px;
+  }
+
+  .candidate-offer-main {
+    min-height: calc(100vh - 108px);
+    padding: 16px 10px;
+  }
+
+  .candidate-offer-panel {
+    padding: 20px 16px;
+  }
+
+  .candidate-offer-title-row {
+    align-items: flex-start;
+  }
+
+  .candidate-offer-title-row h2 {
+    font-size: 22px;
+  }
+
+  .candidate-offer-actions {
+    flex-direction: column-reverse;
+  }
+
+  .candidate-offer-actions .ant-btn {
+    width: 100%;
+  }
+
+  .candidate-offer-verification-expiry {
+    text-align: left;
+  }
+}
+
 /* 认证后框架 */
 .app-shell {
   min-height: 100vh;
@@ -2353,6 +2553,53 @@ input {
   border-bottom: 1px solid #e8edf3;
 }
 
+.offer-portal-section {
+  display: grid;
+  gap: 16px;
+}
+
+.offer-section-heading,
+.offer-portal-issued,
+.offer-portal-history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.offer-section-heading .ant-typography,
+.offer-portal-history-item .ant-typography {
+  margin: 0;
+}
+
+.offer-portal-issued .ant-input {
+  min-width: 0;
+}
+
+.offer-portal-issued .ant-btn {
+  flex: 0 0 auto;
+}
+
+.offer-portal-history {
+  border: 1px solid #e6e8eb;
+  border-radius: 6px;
+}
+
+.offer-portal-history-item {
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef0f2;
+}
+
+.offer-portal-history-item:last-child {
+  border-bottom: 0;
+}
+
+.offer-portal-history-meta {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+
 .offer-version-item {
   display: grid;
   gap: 6px;
@@ -2384,6 +2631,20 @@ input {
 
   .offer-detail-actions,
   .offer-detail-actions .ant-btn {
+    width: 100%;
+  }
+
+  .offer-section-heading,
+  .offer-portal-issued,
+  .offer-portal-history-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .offer-section-heading .ant-btn,
+  .offer-portal-issued .ant-btn,
+  .offer-portal-history-item > .ant-space,
+  .offer-portal-history-item > .ant-space .ant-btn {
     width: 100%;
   }
 }
@@ -2603,6 +2864,11 @@ input {
   gap: 24px;
 }
 
+.candidate-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .candidate-detail-content section {
   min-width: 0;
 }
@@ -2697,6 +2963,11 @@ input {
 
   .candidate-duplicate-review-footer .ant-btn {
     flex: 1;
+  }
+
+  .candidate-detail-actions,
+  .candidate-detail-actions .ant-btn {
+    width: 100%;
   }
 
   .candidate-merge-choices {
