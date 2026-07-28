@@ -7,6 +7,7 @@ import {
   ContactsOutlined,
   DatabaseOutlined,
   FileSearchOutlined,
+  FileDoneOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -48,6 +49,9 @@ function pageMeta(pathname: string) {
   }
   if (pathname.startsWith('/candidates')) {
     return { title: '候选人中心', subtitle: '统一查看主档案、应聘历史与重复确认' }
+  }
+  if (pathname.startsWith('/offers')) {
+    return { title: '录用管理', subtitle: '处理薪酬方案、Offer 审批与入职跟踪' }
   }
   if (pathname === '/jobs/new') {
     return { title: '新建职位', subtitle: '录入职位信息并建立筛选标准' }
@@ -127,6 +131,16 @@ export function AppLayout() {
             label: '招聘需求',
             icon: <AuditOutlined />,
             path: '/recruitment-requests',
+          },
+        ]
+      : []),
+    ...(canAccessRequests
+      ? [
+          {
+            key: 'hiring' as const,
+            label: '录用管理',
+            icon: <FileDoneOutlined />,
+            path: '/offers',
           },
         ]
       : []),

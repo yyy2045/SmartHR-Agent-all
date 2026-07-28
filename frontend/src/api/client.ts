@@ -528,6 +528,103 @@ export interface InterviewReportSummary {
   updated_at: string
 }
 
+export type OfferStatus =
+  | 'draft'
+  | 'pending_manager_confirmation'
+  | 'pending_approval'
+  | 'approved'
+  | 'rejected'
+
+export interface OfferContentInput {
+  monthly_salary: number
+  annual_salary_months: number
+  probation_months: number
+  probation_monthly_salary: number | null
+  bonus_description: string
+  expected_start_date: string
+  valid_until: string
+  notes: string
+}
+
+export interface OfferManagerConfirmation {
+  id: string
+  idempotency_key: string
+  confirmer_id: string | null
+  confirmer_username: string
+  confirmer_display_name: string
+  decision: 'confirmed' | 'rejected'
+  comment: string
+  decided_at: string
+}
+
+export interface OfferApproval {
+  id: string
+  idempotency_key: string
+  approver_id: string | null
+  approver_username: string
+  approver_display_name: string
+  decision: 'approved' | 'rejected'
+  comment: string
+  decided_at: string
+}
+
+export interface OfferVersion {
+  id: string
+  version_number: number
+  idempotency_key: string
+  submission_idempotency_key: string | null
+  submitted_at: string | null
+  source_version_id: string | null
+  source_interview_report_version_id: string | null
+  currency: 'CNY'
+  monthly_salary: string
+  annual_salary_months: string
+  probation_months: number
+  probation_monthly_salary: string | null
+  bonus_description: string
+  expected_start_date: string
+  valid_until: string
+  notes: string
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+  manager_confirmation: OfferManagerConfirmation | null
+  approval: OfferApproval | null
+}
+
+export interface OfferRecord {
+  id: string
+  application_id: string
+  application_status: 'active' | 'merged'
+  job_id: string
+  job_title: string
+  candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  status: OfferStatus
+  current_version_number: number
+  current_version: OfferVersion
+  versions: OfferVersion[]
+  created_by_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface OfferSummary {
+  id: string
+  application_id: string
+  job_id: string
+  job_title: string
+  candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  status: OfferStatus
+  current_version_number: number
+  current_version: OfferVersion
+  updated_at: string
+}
+
 export type BatchStatus =
   | 'uploading'
   | 'ready'
@@ -1508,6 +1605,107 @@ export function confirmInterviewReport(
       body: JSON.stringify({ version_id: versionId }),
     },
     '确认面试报告失败',
+  )
+}
+
+export function fetchOffers(status?: OfferStatus, jobId?: string): Promise<OfferSummary[]> {
+  const query = new URLSearchParams()
+  if (status) query.set('status', status)
+  if (jobId) query.set('job_id', jobId)
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/offers${suffix}`, {}, '无法读取 Offer 列表')
+}
+
+export function fetchOffer(offerId: string): Promise<OfferRecord> {
+  return apiRequest(`/api/offers/${offerId}`, {}, '无法读取 Offer 详情')
+}
+
+export function createOffer(
+  jobId: string,
+  applicationId: string,
+  idempotencyKey: string,
+  content: OfferContentInput,
+): Promise<OfferRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/offer`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: idempotencyKey, ...content }),
+    },
+    '创建 Offer 失败',
+  )
+}
+
+export function createOfferVersion(
+  offerId: string,
+  idempotencyKey: string,
+  sourceVersionId: string,
+  content: OfferContentInput,
+): Promise<OfferRecord> {
+  return apiRequest(
+    `/api/offers/${offerId}/versions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        source_version_id: sourceVersionId,
+        ...content,
+      }),
+    },
+    '保存 Offer 新版本失败',
+  )
+}
+
+export function submitOffer(offerId: string, versionId: string): Promise<OfferRecord> {
+  return apiRequest(
+    `/api/offers/${offerId}/submit`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: crypto.randomUUID(), version_id: versionId }),
+    },
+    '提交 Offer 失败',
+  )
+}
+
+export function decideOfferAsManager(
+  offerId: string,
+  versionId: string,
+  decision: 'confirmed' | 'rejected',
+  comment: string,
+): Promise<OfferRecord> {
+  return apiRequest(
+    `/api/offers/${offerId}/manager-decision`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: crypto.randomUUID(),
+        version_id: versionId,
+        decision,
+        comment,
+      }),
+    },
+    decision === 'confirmed' ? '确认录用失败' : '驳回 Offer 失败',
+  )
+}
+
+export function decideOfferAsApprover(
+  offerId: string,
+  versionId: string,
+  decision: 'approved' | 'rejected',
+  comment: string,
+): Promise<OfferRecord> {
+  return apiRequest(
+    `/api/offers/${offerId}/approval-decision`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: crypto.randomUUID(),
+        version_id: versionId,
+        decision,
+        comment,
+      }),
+    },
+    decision === 'approved' ? '批准 Offer 失败' : '驳回 Offer 失败',
   )
 }
 
