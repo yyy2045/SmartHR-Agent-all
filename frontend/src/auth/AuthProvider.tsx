@@ -15,11 +15,18 @@ import { AuthContext } from './context'
 
 const currentUserQueryKey = ['auth', 'current-user'] as const
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({
+  children,
+  loadCurrentUser = true,
+}: {
+  children: ReactNode
+  loadCurrentUser?: boolean
+}) {
   const queryClient = useQueryClient()
   const currentUser = useQuery({
     queryKey: currentUserQueryKey,
     queryFn: fetchCurrentUser,
+    enabled: loadCurrentUser,
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
   })
@@ -60,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         user: currentUser.data ?? null,
-        isLoading: currentUser.isPending,
+        isLoading: loadCurrentUser && currentUser.isPending,
         isLoggingIn: loginMutation.isPending,
         isLoggingOut: logoutMutation.isPending,
         isChangingPassword: changePasswordMutation.isPending,

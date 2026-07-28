@@ -102,6 +102,9 @@ describe('candidate Offer portal', () => {
 
     await verifyCandidate()
     expect(window.location.hash).toBe('')
+    expect(
+      fetchMock.mock.calls.some(([input]) => input.toString() === '/api/auth/me'),
+    ).toBe(false)
     expect(screen.queryByRole('navigation', { name: '主导航' })).not.toBeInTheDocument()
     expect(screen.getByText('420,000 元/年')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /接受 Offer/ }))

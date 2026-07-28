@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 
 import { AuthProvider } from './auth/AuthProvider'
@@ -104,12 +104,13 @@ function HomeRoute() {
   return canAccessJobs ? <JobListPage /> : <Navigate to="/recruitment-requests" replace />
 }
 
-function App() {
+function AppRoutes() {
+  const location = useLocation()
+
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Suspense fallback={<PageFallback />}>
-          <Routes>
+    <AuthProvider loadCurrentUser={location.pathname !== '/offer'}>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
             <Route path="/offer" element={<OfferPortalPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
@@ -170,9 +171,16 @@ function App() {
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
-      </AuthProvider>
+        </Routes>
+      </Suspense>
+    </AuthProvider>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppRoutes />
     </BrowserRouter>
   )
 }
