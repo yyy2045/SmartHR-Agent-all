@@ -95,6 +95,11 @@ class OfferVersion(Base):
             "idempotency_key",
             name="uq_offer_version_idempotency",
         ),
+        UniqueConstraint(
+            "offer_id",
+            "submission_idempotency_key",
+            name="uq_offer_submission_idempotency",
+        ),
         CheckConstraint("version_number >= 1", name="ck_offer_versions_number"),
         CheckConstraint("currency = 'CNY'", name="ck_offer_versions_currency"),
         CheckConstraint("monthly_salary > 0", name="ck_offer_versions_monthly_salary"),
@@ -119,6 +124,8 @@ class OfferVersion(Base):
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    submission_idempotency_key: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_version_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("offer_versions.id", ondelete="SET NULL"), index=True
     )
@@ -174,6 +181,7 @@ class OfferManagerConfirmation(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     version_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("offer_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -203,6 +211,7 @@ class OfferApproval(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     version_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("offer_versions.id", ondelete="CASCADE"), nullable=False, index=True
     )

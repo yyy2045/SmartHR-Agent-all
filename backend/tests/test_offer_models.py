@@ -97,6 +97,7 @@ def test_offer_keeps_immutable_versions_and_decision_history(
     offer_session.flush()
 
     first.manager_confirmation = OfferManagerConfirmation(
+        idempotency_key=uuid.uuid4(),
         confirmer_id=recruiter.id,
         confirmer_username="manager",
         confirmer_display_name="用人经理",
@@ -112,6 +113,7 @@ def test_offer_keeps_immutable_versions_and_decision_history(
     offer.current_version_number = 2
     offer.status = "pending_approval"
     second.manager_confirmation = OfferManagerConfirmation(
+        idempotency_key=uuid.uuid4(),
         confirmer_id=recruiter.id,
         confirmer_username="manager",
         confirmer_display_name="用人经理",
@@ -119,6 +121,7 @@ def test_offer_keeps_immutable_versions_and_decision_history(
         comment="确认录用",
     )
     second.approval = OfferApproval(
+        idempotency_key=uuid.uuid4(),
         approver_id=recruiter.id,
         approver_username="approver",
         approver_display_name="审批人",
