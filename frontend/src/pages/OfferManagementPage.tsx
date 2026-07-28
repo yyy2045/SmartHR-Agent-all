@@ -25,7 +25,6 @@ import {
   Skeleton,
   Space,
   Table,
-  Tabs,
   Tag,
   Timeline,
   Typography,
@@ -58,6 +57,7 @@ import {
   type OfferVersion,
 } from '../api/client'
 import { useAuth } from '../auth/context'
+import { HiringModuleNav } from '../components/HiringModuleNav'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -567,13 +567,8 @@ export function OfferManagementPage() {
         </Button>
       </div>
 
-      <Tabs
-        activeKey="offers"
-        items={[
-          { key: 'offers', label: 'Offer 审批', children: listContent },
-          { key: 'onboarding', label: '入职跟踪', disabled: true },
-        ]}
-      />
+      <HiringModuleNav />
+      {listContent}
 
       <Drawer
         width={680}

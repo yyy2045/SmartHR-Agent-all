@@ -53,6 +53,9 @@ function pageMeta(pathname: string) {
   if (pathname.startsWith('/offers')) {
     return { title: '录用管理', subtitle: '处理薪酬方案、Offer 审批与入职跟踪' }
   }
+  if (pathname.startsWith('/onboardings')) {
+    return { title: '入职跟踪', subtitle: '确认入职日期并跟进入职结果' }
+  }
   if (pathname === '/jobs/new') {
     return { title: '新建职位', subtitle: '录入职位信息并建立筛选标准' }
   }

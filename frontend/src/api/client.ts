@@ -587,6 +587,90 @@ export interface CandidateOfferViewRecord {
   valid_until: string
   notes: string
   response: CandidateOfferResponseRecord | null
+  onboarding: CandidateOnboardingRecord | null
+}
+
+export type OnboardingStatus =
+  | 'pending_confirmation'
+  | 'candidate_proposed_date'
+  | 'pending_start'
+  | 'onboarded'
+  | 'abandoned'
+export type OnboardingActionOwner = 'candidate' | 'recruiter' | 'none'
+export type OnboardingAbandonmentSource =
+  | 'candidate_withdrew'
+  | 'company_cancelled'
+  | 'other'
+export type OnboardingAbandonmentReason =
+  | 'compensation'
+  | 'career'
+  | 'location'
+  | 'start_date'
+  | 'personal'
+  | 'position_cancelled'
+  | 'business_change'
+  | 'other'
+export type OnboardingEventAction =
+  | 'created'
+  | 'candidate_confirmed_date'
+  | 'candidate_proposed_date'
+  | 'recruiter_accepted_date'
+  | 'recruiter_proposed_date'
+  | 'onboarded'
+  | 'abandoned'
+  | 'onboarded_corrected'
+
+export interface CandidateOnboardingRecord {
+  status: OnboardingStatus
+  version: number
+  action_owner: OnboardingActionOwner
+  expected_start_date: string
+  candidate_proposed_date: string | null
+  recruiter_proposed_date: string | null
+  confirmed_start_date: string | null
+  actual_start_date: string | null
+  abandonment_source: OnboardingAbandonmentSource | null
+  abandonment_reason_code: OnboardingAbandonmentReason | null
+}
+
+export interface OnboardingEventRecord {
+  id: string
+  sequence_number: number
+  action: OnboardingEventAction
+  from_status: OnboardingStatus | null
+  to_status: OnboardingStatus
+  date_before: string | null
+  date_after: string | null
+  reason: string | null
+  actor_type: 'system' | 'candidate' | 'recruiter' | 'admin'
+  actor_username: string | null
+  actor_display_name: string | null
+  created_at: string
+}
+
+export interface OnboardingSummaryRecord extends CandidateOnboardingRecord {
+  id: string
+  application_id: string
+  offer_id: string
+  job_id: string
+  job_title: string
+  candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  candidate_phone: string | null
+  updated_at: string
+}
+
+export interface OnboardingDetailRecord extends OnboardingSummaryRecord {
+  abandonment_note: string | null
+  events: OnboardingEventRecord[]
+}
+
+export interface OnboardingListRecord {
+  items: OnboardingSummaryRecord[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export interface OfferPortalVerifiedRecord extends CandidateOfferViewRecord {
@@ -1811,6 +1895,139 @@ export function respondToOfferPortal(
     },
     decision === 'accepted' ? '接受 Offer 失败' : '拒绝 Offer 失败',
     false,
+  )
+}
+
+export function fetchOnboardings(
+  status?: OnboardingStatus,
+  jobId?: string,
+  page = 1,
+  pageSize = 100,
+): Promise<OnboardingListRecord> {
+  const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (status) query.set('status', status)
+  if (jobId) query.set('job_id', jobId)
+  return apiRequest(`/api/onboardings?${query.toString()}`, {}, '无法读取入职记录')
+}
+
+export function fetchOnboarding(onboardingId: string): Promise<OnboardingDetailRecord> {
+  return apiRequest(`/api/onboardings/${onboardingId}`, {}, '无法读取入职详情')
+}
+
+export function decideOnboardingDate(
+  onboardingId: string,
+  version: number,
+  decision: 'accept' | 'propose',
+  proposedDate: string | null,
+  note: string | null,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<OnboardingDetailRecord> {
+  return apiRequest(
+    `/api/onboardings/${onboardingId}/date-decision`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        version,
+        decision,
+        proposed_date: proposedDate,
+        note,
+      }),
+    },
+    decision === 'accept' ? '确认候选人入职日期失败' : '提出入职日期失败',
+  )
+}
+
+export function markOnboardingCompleted(
+  onboardingId: string,
+  version: number,
+  actualStartDate: string,
+  note: string | null,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<OnboardingDetailRecord> {
+  return apiRequest(
+    `/api/onboardings/${onboardingId}/onboard`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        version,
+        actual_start_date: actualStartDate,
+        note,
+      }),
+    },
+    '标记已入职失败',
+  )
+}
+
+export function abandonOnboarding(
+  onboardingId: string,
+  version: number,
+  source: OnboardingAbandonmentSource,
+  reasonCode: OnboardingAbandonmentReason,
+  note: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<OnboardingDetailRecord> {
+  return apiRequest(
+    `/api/onboardings/${onboardingId}/abandon`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        version,
+        source,
+        reason_code: reasonCode,
+        note,
+      }),
+    },
+    '标记放弃入职失败',
+  )
+}
+
+export function correctOnboardingStatus(
+  onboardingId: string,
+  version: number,
+  reason: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<OnboardingDetailRecord> {
+  return apiRequest(
+    `/api/onboardings/${onboardingId}/corrections`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: idempotencyKey, version, reason }),
+    },
+    '更正入职状态失败',
+  )
+}
+
+export function createOnboardingPortalLink(
+  onboardingId: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<OfferPortalLinkIssuedRecord> {
+  return apiRequest(
+    `/api/onboardings/${onboardingId}/portal-links`,
+    { method: 'POST', body: JSON.stringify({ idempotency_key: idempotencyKey }) },
+    '生成入职访问链接失败',
+  )
+}
+
+export function regenerateOnboardingPortalLink(
+  onboardingId: string,
+  reason: string,
+  idempotencyKey: string = crypto.randomUUID(),
+  revocationIdempotencyKey: string = crypto.randomUUID(),
+): Promise<OfferPortalLinkIssuedRecord> {
+  return apiRequest(
+    `/api/onboardings/${onboardingId}/portal-links/regenerate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        revocation_idempotency_key: revocationIdempotencyKey,
+        reason,
+      }),
+    },
+    '重新生成入职访问链接失败',
   )
 }
 

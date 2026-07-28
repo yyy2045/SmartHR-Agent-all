@@ -23,6 +23,7 @@ const pendingOffer: CandidateOfferViewRecord = {
   valid_until: '2026-08-15',
   notes: '请在有效期内确认',
   response: null,
+  onboarding: null,
 }
 
 const verifiedOffer: OfferPortalVerifiedRecord = {
