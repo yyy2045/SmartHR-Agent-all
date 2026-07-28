@@ -77,7 +77,13 @@ const stageLabels: Record<CandidateStage, string> = {
   to_contact: '待联系',
   contacted: '已联系',
   to_interview: '待面试',
-  completed: '已结束',
+  completed: '面试完成',
+  offer_pending_response: 'Offer 待回应',
+  offer_rejected: 'Offer 已拒绝',
+  onboarding_pending_confirmation: '待确认入职',
+  onboarding_pending_start: '待入职',
+  onboarding_completed: '已入职',
+  onboarding_abandoned: '已放弃入职',
   rejected: '已淘汰',
 }
 

@@ -135,6 +135,7 @@ describe('招聘业务导航', () => {
 
   it('将录用管理归入全局模块且不显示岗位上下文', () => {
     expect(businessModuleForPath('/offers')).toBe('hiring')
+    expect(businessModuleForPath('/onboardings')).toBe('hiring')
     expect(jobIdFromPath('/offers')).toBeNull()
     mockApi()
     renderLayout('/offers')

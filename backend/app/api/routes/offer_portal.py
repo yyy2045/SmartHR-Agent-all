@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.database import get_db
-from app.models import CandidateProcess, JobApplication, Offer, OfferPortalLink, OfferResponse
+from app.models import (
+    CandidateProcess,
+    JobApplication,
+    Offer,
+    OfferPortalLink,
+    OfferResponse,
+    Onboarding,
+)
 from app.redis_client import get_offer_portal_store
 from app.schemas.offer_portal import (
     CandidateOfferResponse,
@@ -21,6 +28,12 @@ from app.schemas.offer_portal import (
     OfferPortalVerifiedResponse,
     OfferPortalVerifyRequest,
 )
+from app.schemas.onboarding import (
+    CandidateOnboardingView,
+    PortalOnboardingAbandonRequest,
+    PortalOnboardingConfirmDateRequest,
+    PortalOnboardingProposeDateRequest,
+)
 from app.services.audit import record_audit
 from app.services.candidate_process import change_candidate_process_stage
 from app.services.offer_portal import (
@@ -28,6 +41,16 @@ from app.services.offer_portal import (
     hash_portal_token,
     phone_verification_digest,
     portal_link_is_expired,
+)
+from app.services.onboarding import (
+    OnboardingConflictError,
+    OnboardingValidationError,
+    abandon_onboarding,
+    candidate_confirm_date,
+    candidate_propose_date,
+    create_onboarding_for_acceptance,
+    find_event_by_key,
+    onboarding_action_owner,
 )
 
 router = APIRouter()
@@ -46,6 +69,11 @@ def _get_portal_link(db: Session, token: str) -> OfferPortalLink:
             selectinload(OfferPortalLink.offer)
             .selectinload(Offer.application)
             .selectinload(JobApplication.job),
+            selectinload(OfferPortalLink.offer).selectinload(Offer.versions),
+            selectinload(OfferPortalLink.offer).selectinload(Offer.candidate_response),
+            selectinload(OfferPortalLink.offer)
+            .selectinload(Offer.onboarding)
+            .selectinload(Onboarding.events),
             selectinload(OfferPortalLink.version),
             selectinload(OfferPortalLink.response),
         )
@@ -85,6 +113,7 @@ def _get_locked_offer(db: Session, offer_id: uuid.UUID) -> Offer:
             selectinload(Offer.versions),
             selectinload(Offer.portal_links).selectinload(OfferPortalLink.response),
             selectinload(Offer.candidate_response),
+            selectinload(Offer.onboarding).selectinload(Onboarding.events),
         )
         .execution_options(populate_existing=True)
     )
@@ -112,10 +141,25 @@ def _response_conflict() -> HTTPException:
     )
 
 
+def _candidate_onboarding_view(onboarding: Onboarding) -> CandidateOnboardingView:
+    return CandidateOnboardingView(
+        status=onboarding.status,
+        version=onboarding.version,
+        action_owner=onboarding_action_owner(onboarding),
+        expected_start_date=onboarding.offer.current_version.expected_start_date,
+        candidate_proposed_date=onboarding.candidate_proposed_date,
+        recruiter_proposed_date=onboarding.recruiter_proposed_date,
+        confirmed_start_date=onboarding.confirmed_start_date,
+        actual_start_date=onboarding.actual_start_date,
+        abandonment_source=onboarding.abandonment_source,
+        abandonment_reason_code=onboarding.abandonment_reason_code,
+    )
+
+
 def _candidate_offer_view(link: OfferPortalLink) -> CandidateOfferView:
     offer = link.offer
     version = link.version
-    response = link.response
+    response = offer.candidate_response
     progress = {
         "accepted": "accepted",
         "declined": "declined",
@@ -141,6 +185,11 @@ def _candidate_offer_view(link: OfferPortalLink) -> CandidateOfferView:
                 responded_at=response.responded_at,
             )
             if response is not None
+            else None
+        ),
+        onboarding=(
+            _candidate_onboarding_view(offer.onboarding)
+            if offer.onboarding is not None
             else None
         ),
     )
@@ -320,6 +369,13 @@ def respond_to_offer(
         offer.status = "accepted"
         target_stage = "onboarding_pending_confirmation"
         process_reason = "候选人已接受 Offer"
+        db.flush()
+        create_onboarding_for_acceptance(
+            db,
+            offer=offer,
+            response=response,
+            portal_link=link,
+        )
     else:
         offer.status = "declined"
         target_stage = "offer_rejected"
@@ -361,5 +417,193 @@ def respond_to_offer(
             return _candidate_offer_view(concurrent_link)
         raise _response_conflict() from error
 
+    db.expire_all()
+    return _candidate_offer_view(_get_portal_link(db, payload.token))
+
+
+def _get_verified_onboarding(
+    db: Session,
+    portal_store: OfferPortalVerificationStore,
+    *,
+    token: str,
+    verification_token: str,
+) -> tuple[OfferPortalLink, Onboarding]:
+    initial_link = _get_portal_link(db, token)
+    _ensure_link_usable(initial_link)
+    try:
+        identity = portal_store.get_verification(verification_token)
+    except Exception as error:
+        raise _verification_unavailable() from error
+    if identity is None or identity.link_id != initial_link.id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="候选人验证已失效，请重新验证",
+        )
+
+    link = db.scalar(
+        select(OfferPortalLink)
+        .where(OfferPortalLink.id == initial_link.id)
+        .with_for_update()
+    )
+    if link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="候选人链接不存在或已失效",
+        )
+    _ensure_link_usable(link)
+    onboarding = db.scalar(
+        select(Onboarding)
+        .where(Onboarding.offer_id == initial_link.offer_id)
+        .with_for_update()
+        .options(
+            selectinload(Onboarding.application).selectinload(JobApplication.candidate),
+            selectinload(Onboarding.application).selectinload(JobApplication.job),
+            selectinload(Onboarding.offer).selectinload(Offer.versions),
+            selectinload(Onboarding.offer)
+            .selectinload(Offer.portal_links)
+            .selectinload(OfferPortalLink.response),
+            selectinload(Onboarding.offer).selectinload(Offer.candidate_response),
+            selectinload(Onboarding.events),
+        )
+        .execution_options(populate_existing=True)
+    )
+    if onboarding is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="入职记录尚未建立，请联系招聘专员",
+        )
+    return link, onboarding
+
+
+def _onboarding_service_error(error: Exception) -> HTTPException:
+    if isinstance(error, OnboardingValidationError):
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        )
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+
+
+@router.post("/onboarding/confirm-date", response_model=CandidateOfferView)
+def confirm_onboarding_date(
+    payload: PortalOnboardingConfirmDateRequest,
+    db: DbSession,
+    portal_store: PortalStore,
+) -> CandidateOfferView:
+    _link, onboarding = _get_verified_onboarding(
+        db,
+        portal_store,
+        token=payload.token,
+        verification_token=payload.verification_token,
+    )
+    replay = find_event_by_key(onboarding, payload.idempotency_key)
+    try:
+        candidate_confirm_date(
+            db,
+            onboarding,
+            idempotency_key=payload.idempotency_key,
+            version=payload.version,
+            start_date=payload.start_date,
+        )
+    except (OnboardingConflictError, OnboardingValidationError) as error:
+        raise _onboarding_service_error(error) from error
+    if replay is not None:
+        return _candidate_offer_view(_get_portal_link(db, payload.token))
+    record_audit(
+        db,
+        action="onboarding.candidate_confirmed_date",
+        target_type="onboarding",
+        target_id=onboarding.id,
+        job_id=onboarding.application.job_id,
+        result="success",
+        actor_username="candidate_portal",
+        details={"status": onboarding.status, "version": onboarding.version},
+    )
+    db.commit()
+    db.expire_all()
+    return _candidate_offer_view(_get_portal_link(db, payload.token))
+
+
+@router.post("/onboarding/propose-date", response_model=CandidateOfferView)
+def propose_onboarding_date(
+    payload: PortalOnboardingProposeDateRequest,
+    db: DbSession,
+    portal_store: PortalStore,
+) -> CandidateOfferView:
+    _link, onboarding = _get_verified_onboarding(
+        db,
+        portal_store,
+        token=payload.token,
+        verification_token=payload.verification_token,
+    )
+    replay = find_event_by_key(onboarding, payload.idempotency_key)
+    try:
+        candidate_propose_date(
+            db,
+            onboarding,
+            idempotency_key=payload.idempotency_key,
+            version=payload.version,
+            proposed_date=payload.start_date,
+            note=payload.note,
+        )
+    except (OnboardingConflictError, OnboardingValidationError) as error:
+        raise _onboarding_service_error(error) from error
+    if replay is not None:
+        return _candidate_offer_view(_get_portal_link(db, payload.token))
+    record_audit(
+        db,
+        action="onboarding.candidate_proposed_date",
+        target_type="onboarding",
+        target_id=onboarding.id,
+        job_id=onboarding.application.job_id,
+        result="success",
+        actor_username="candidate_portal",
+        details={"status": onboarding.status, "version": onboarding.version},
+    )
+    db.commit()
+    db.expire_all()
+    return _candidate_offer_view(_get_portal_link(db, payload.token))
+
+
+@router.post("/onboarding/abandon", response_model=CandidateOfferView)
+def abandon_portal_onboarding(
+    payload: PortalOnboardingAbandonRequest,
+    db: DbSession,
+    portal_store: PortalStore,
+) -> CandidateOfferView:
+    _link, onboarding = _get_verified_onboarding(
+        db,
+        portal_store,
+        token=payload.token,
+        verification_token=payload.verification_token,
+    )
+    replay = find_event_by_key(onboarding, payload.idempotency_key)
+    try:
+        abandon_onboarding(
+            db,
+            onboarding,
+            idempotency_key=payload.idempotency_key,
+            version=payload.version,
+            source="candidate_withdrew",
+            reason_code=payload.reason_code,
+            note=payload.note,
+            actor_type="candidate",
+            actor=None,
+        )
+    except (OnboardingConflictError, OnboardingValidationError) as error:
+        raise _onboarding_service_error(error) from error
+    if replay is not None:
+        return _candidate_offer_view(_get_portal_link(db, payload.token))
+    record_audit(
+        db,
+        action="onboarding.candidate_abandoned",
+        target_type="onboarding",
+        target_id=onboarding.id,
+        job_id=onboarding.application.job_id,
+        result="success",
+        actor_username="candidate_portal",
+        details={"status": onboarding.status, "version": onboarding.version},
+    )
+    db.commit()
     db.expire_all()
     return _candidate_offer_view(_get_portal_link(db, payload.token))

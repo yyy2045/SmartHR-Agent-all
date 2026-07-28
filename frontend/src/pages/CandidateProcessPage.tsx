@@ -7,6 +7,7 @@ import {
   MoreOutlined,
   PhoneOutlined,
   ReloadOutlined,
+  SolutionOutlined,
   SwapOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -42,6 +43,7 @@ import {
   type CandidateProcessCardRecord,
   type CandidateProcessFilters,
   type CandidateStage,
+  type OnboardingStatus,
 } from '../api/client'
 import { useAuth } from '../auth/context'
 import {
@@ -59,6 +61,12 @@ const stageOrder: CandidateStage[] = [
   'contacted',
   'to_interview',
   'completed',
+  'offer_pending_response',
+  'onboarding_pending_confirmation',
+  'onboarding_pending_start',
+  'onboarding_completed',
+  'offer_rejected',
+  'onboarding_abandoned',
   'rejected',
 ]
 
@@ -72,8 +80,22 @@ const stageMeta: Record<
   to_contact: { label: '待联系', color: 'blue', description: '等待联系候选人' },
   contacted: { label: '已联系', color: 'cyan', description: '已完成首次沟通' },
   to_interview: { label: '待面试', color: 'purple', description: '等待后续面试安排' },
-  completed: { label: '已结束', color: 'success', description: '该职位内人工流程已经完成' },
+  completed: { label: '面试完成', color: 'success', description: '面试流程已完成，等待录用决策' },
+  offer_pending_response: { label: 'Offer 待回应', color: 'processing', description: 'Offer 已送达候选人，等待回应' },
+  offer_rejected: { label: 'Offer 已拒绝', color: 'error', description: '候选人已拒绝本次 Offer' },
+  onboarding_pending_confirmation: { label: '待确认入职', color: 'warning', description: '双方正在确认入职日期' },
+  onboarding_pending_start: { label: '待入职', color: 'cyan', description: '入职日期已确认，等待到岗' },
+  onboarding_completed: { label: '已入职', color: 'success', description: '候选人已经正式入职' },
+  onboarding_abandoned: { label: '已放弃入职', color: 'default', description: '入职流程已终止并保留原因' },
   rejected: { label: '已淘汰', color: 'error', description: '人工确认不再继续推进' },
+}
+
+const onboardingStatusMeta: Record<OnboardingStatus, { label: string; color: string }> = {
+  pending_confirmation: { label: '待候选人确认日期', color: 'processing' },
+  candidate_proposed_date: { label: '待招聘方确认日期', color: 'warning' },
+  pending_start: { label: '等待入职', color: 'cyan' },
+  onboarded: { label: '已入职', color: 'success' },
+  abandoned: { label: '已放弃入职', color: 'default' },
 }
 
 const aiGroupMeta: Record<AIGroup, { label: string; color: string }> = {
@@ -97,6 +119,12 @@ const allowedTransitions: Record<CandidateStage, CandidateStage[]> = {
   contacted: ['to_contact', 'to_interview', 'rejected'],
   to_interview: ['contacted', 'completed', 'rejected'],
   completed: [],
+  offer_pending_response: [],
+  offer_rejected: [],
+  onboarding_pending_confirmation: [],
+  onboarding_pending_start: [],
+  onboarding_completed: [],
+  onboarding_abandoned: [],
   rejected: [],
 }
 
@@ -190,6 +218,12 @@ export function CandidateProcessPage() {
       contacted: [],
       to_interview: [],
       completed: [],
+      offer_pending_response: [],
+      offer_rejected: [],
+      onboarding_pending_confirmation: [],
+      onboarding_pending_start: [],
+      onboarding_completed: [],
+      onboarding_abandoned: [],
       rejected: [],
     }
     candidates.data?.forEach((candidate) => result[candidate.current_stage].push(candidate))
@@ -436,6 +470,14 @@ export function CandidateProcessPage() {
                         )}
                       </div>
                     )}
+                    {candidate.onboarding && (
+                      <div className="candidate-onboarding-summary">
+                        <Text strong>入职进展</Text>
+                        <Tag color={onboardingStatusMeta[candidate.onboarding.status].color}>
+                          {onboardingStatusMeta[candidate.onboarding.status].label}
+                        </Tag>
+                      </div>
+                    )}
                     <div className="candidate-flow-actions">
                       <Button
                         size="small"
@@ -459,6 +501,22 @@ export function CandidateProcessPage() {
                       >
                         面试安排
                       </Button>
+                      {candidate.onboarding && (
+                        <Button
+                          size="small"
+                          icon={<SolutionOutlined />}
+                          onClick={() => {
+                            const from = `${window.location.pathname}${window.location.search}`
+                            const query = new URLSearchParams({
+                              selected: candidate.onboarding!.id,
+                              from,
+                            })
+                            navigate(`/onboardings?${query.toString()}`)
+                          }}
+                        >
+                          入职跟踪
+                        </Button>
+                      )}
                       <div className="candidate-flow-actions-secondary">
                         {canWrite && allowedTransitions[candidate.current_stage].length > 0 && (
                           <Button

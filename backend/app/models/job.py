@@ -83,6 +83,7 @@ class Job(Base):
         order_by="InterviewPlanVersion.version_number",
     )
     applications: Mapped[list[JobApplication]] = relationship(back_populates="job")
+    owner: Mapped[User] = relationship(foreign_keys=[owner_id])
     hiring_manager: Mapped[User | None] = relationship(foreign_keys=[hiring_manager_id])
     recruitment_request: Mapped[RecruitmentRequest | None] = relationship(
         back_populates="job"

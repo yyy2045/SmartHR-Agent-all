@@ -91,6 +91,11 @@ const OfferPortalPage = lazy(() =>
     default: module.OfferPortalPage,
   })),
 )
+const OnboardingManagementPage = lazy(() =>
+  import('./pages/OnboardingManagementPage').then((module) => ({
+    default: module.OnboardingManagementPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -126,6 +131,13 @@ function AppRoutes() {
                 >
                   <Route path="/recruitment-requests" element={<RecruitmentRequestPage />} />
                   <Route path="/offers" element={<OfferManagementPage />} />
+                </Route>
+                <Route
+                  element={
+                    <RoleRoute roles={['administrator', 'recruiter', 'hiring_manager']} />
+                  }
+                >
+                  <Route path="/onboardings" element={<OnboardingManagementPage />} />
                 </Route>
                 <Route
                   element={

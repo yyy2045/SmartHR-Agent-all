@@ -28,6 +28,7 @@ from app.models import (
     OfferPortalLink,
     OfferResponse,
     OfferVersion,
+    Onboarding,
     Role,
     User,
     UserRole,
@@ -487,9 +488,12 @@ async def test_candidate_accepts_offer_idempotently_and_updates_process(
     assert accepted.json() == replay.json() == detail.json()
     assert accepted.json()["progress"] == "accepted"
     assert accepted.json()["response"]["decision"] == "accepted"
+    assert accepted.json()["onboarding"]["status"] == "pending_confirmation"
+    assert accepted.json()["onboarding"]["version"] == 1
     with portal_dependencies.session_factory() as db:
         offer = db.get(Offer, portal_dependencies.offer_id)
         responses = list(db.scalars(select(OfferResponse)).all())
+        onboardings = list(db.scalars(select(Onboarding)).all())
         audits = list(
             db.scalars(
                 select(AuditLog).where(AuditLog.action == "offer_portal.responded")
@@ -501,8 +505,14 @@ async def test_candidate_accepts_offer_idempotently_and_updates_process(
             "offer_pending_response",
             "onboarding_pending_confirmation",
         ]
-        assert len(responses) == len(audits) == 1
+        assert len(responses) == len(onboardings) == len(audits) == 1
         assert responses[0].idempotency_key == response_key
+        assert onboardings[0].offer_response_id == responses[0].id
+        assert [event.action for event in onboardings[0].events] == ["created"]
+        expires_at = offer.portal_links[0].expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        assert expires_at > datetime.now(UTC) + timedelta(days=29)
         assert audits[0].actor_username == "candidate_portal"
         assert audits[0].details["decision"] == "accepted"
 
@@ -659,6 +669,7 @@ async def test_candidate_response_rolls_back_when_audit_write_fails(
             "offer_pending_response"
         ]
         assert db.scalar(select(OfferResponse)) is None
+        assert db.scalar(select(Onboarding)) is None
 
 
 @pytest.mark.anyio
