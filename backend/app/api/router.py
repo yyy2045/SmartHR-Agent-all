@@ -14,6 +14,7 @@ from app.api.routes.jobs import router as jobs_router
 from app.api.routes.knowledge import router as knowledge_router
 from app.api.routes.offer_portal import router as offer_portal_router
 from app.api.routes.offers import router as offers_router
+from app.api.routes.onboardings import router as onboardings_router
 from app.api.routes.recruitment_requests import router as recruitment_requests_router
 from app.api.routes.screening_results import router as screening_results_router
 from app.api.routes.users import router as users_router
@@ -26,6 +27,7 @@ api_router.include_router(candidates_router, prefix="/candidates", tags=["candid
 api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
 api_router.include_router(offers_router, tags=["offers"])
+api_router.include_router(onboardings_router, tags=["onboardings"])
 api_router.include_router(
     offer_portal_router,
     prefix="/portal/offers",

@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.schemas.onboarding import CandidateOnboardingView
+
 PortalLinkState = Literal["active", "expired", "revoked", "responded"]
 CandidateOfferDecision = Literal["accepted", "rejected"]
 CandidateRejectionReason = Literal[
@@ -143,6 +145,7 @@ class CandidateOfferView(BaseModel):
     valid_until: date
     notes: str
     response: CandidateOfferResponse | None
+    onboarding: CandidateOnboardingView | None = None
 
 
 class OfferPortalVerifiedResponse(CandidateOfferView):

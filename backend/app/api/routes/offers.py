@@ -314,12 +314,12 @@ def _record_sensitive_read(db: Session, user: User, offer: Offer) -> None:
 
 
 def _portal_link_state(link: OfferPortalLink) -> str:
-    if link.response is not None:
-        return "responded"
     if link.revoked_at is not None:
         return "revoked"
     if portal_link_is_expired(link.expires_at):
         return "expired"
+    if link.response is not None or link.offer.candidate_response is not None:
+        return "responded"
     return "active"
 
 
