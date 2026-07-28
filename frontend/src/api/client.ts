@@ -1701,7 +1701,7 @@ export function fetchOfferPortalLinks(offerId: string): Promise<OfferPortalLinkR
 
 export function createOfferPortalLink(
   offerId: string,
-  idempotencyKey = crypto.randomUUID(),
+  idempotencyKey: string = crypto.randomUUID(),
 ): Promise<OfferPortalLinkIssuedRecord> {
   return apiRequest(
     `/api/offers/${offerId}/portal-links`,
@@ -1716,8 +1716,8 @@ export function createOfferPortalLink(
 export function regenerateOfferPortalLink(
   offerId: string,
   reason: string,
-  idempotencyKey = crypto.randomUUID(),
-  revocationIdempotencyKey = crypto.randomUUID(),
+  idempotencyKey: string = crypto.randomUUID(),
+  revocationIdempotencyKey: string = crypto.randomUUID(),
 ): Promise<OfferPortalLinkIssuedRecord> {
   return apiRequest(
     `/api/offers/${offerId}/portal-links/regenerate`,
@@ -1737,7 +1737,7 @@ export function revokeOfferPortalLink(
   offerId: string,
   linkId: string,
   reason: string,
-  idempotencyKey = crypto.randomUUID(),
+  idempotencyKey: string = crypto.randomUUID(),
 ): Promise<OfferPortalLinkRecord> {
   return apiRequest(
     `/api/offers/${offerId}/portal-links/${linkId}/revoke`,
@@ -1794,7 +1794,7 @@ export function respondToOfferPortal(
   decision: CandidateOfferDecision,
   rejectionReasonCode: CandidateOfferRejectionReason | null = null,
   rejectionNote: string | null = null,
-  idempotencyKey = crypto.randomUUID(),
+  idempotencyKey: string = crypto.randomUUID(),
 ): Promise<CandidateOfferViewRecord> {
   return apiRequest(
     '/api/portal/offers/respond',

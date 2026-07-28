@@ -86,6 +86,11 @@ const OfferManagementPage = lazy(() =>
     default: module.OfferManagementPage,
   })),
 )
+const OfferPortalPage = lazy(() =>
+  import('./pages/OfferPortalPage').then((module) => ({
+    default: module.OfferPortalPage,
+  })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -105,6 +110,7 @@ function App() {
       <AuthProvider>
         <Suspense fallback={<PageFallback />}>
           <Routes>
+            <Route path="/offer" element={<OfferPortalPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/change-password" element={<ChangePasswordPage />} />
