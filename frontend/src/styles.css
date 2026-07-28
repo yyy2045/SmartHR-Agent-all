@@ -353,6 +353,51 @@ input {
   border-color: #efc5ca;
 }
 
+.candidate-onboarding {
+  display: grid;
+  gap: 18px;
+}
+
+.candidate-onboarding > .ant-divider {
+  margin: 28px 0 4px;
+}
+
+.candidate-onboarding-heading,
+.candidate-onboarding-action-panel,
+.candidate-onboarding-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.candidate-onboarding-heading h3 {
+  margin: 3px 0 0;
+}
+
+.candidate-onboarding-heading .ant-tag {
+  margin: 4px 0 0;
+}
+
+.candidate-onboarding-action-panel {
+  align-items: center;
+  padding: 16px;
+  background: #f7f9fc;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+}
+
+.candidate-onboarding-action-panel > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.candidate-onboarding-abandon {
+  justify-self: start;
+  height: auto;
+  padding: 0;
+}
+
 .candidate-offer-verification-expiry {
   display: block;
   margin-top: 24px;
@@ -408,6 +453,17 @@ input {
 
   .candidate-offer-verification-expiry {
     text-align: left;
+  }
+
+  .candidate-onboarding-action-panel,
+  .candidate-onboarding-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .candidate-onboarding-actions,
+  .candidate-onboarding-actions .ant-btn {
+    width: 100%;
   }
 }
 

@@ -2031,6 +2031,82 @@ export function regenerateOnboardingPortalLink(
   )
 }
 
+export function confirmPortalOnboardingDate(
+  token: string,
+  verificationToken: string,
+  version: number,
+  startDate: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<CandidateOfferViewRecord> {
+  return apiRequest(
+    '/api/portal/offers/onboarding/confirm-date',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        token,
+        verification_token: verificationToken,
+        idempotency_key: idempotencyKey,
+        version,
+        start_date: startDate,
+      }),
+    },
+    '确认入职日期失败',
+    false,
+  )
+}
+
+export function proposePortalOnboardingDate(
+  token: string,
+  verificationToken: string,
+  version: number,
+  startDate: string,
+  note: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<CandidateOfferViewRecord> {
+  return apiRequest(
+    '/api/portal/offers/onboarding/propose-date',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        token,
+        verification_token: verificationToken,
+        idempotency_key: idempotencyKey,
+        version,
+        start_date: startDate,
+        note,
+      }),
+    },
+    '提出入职日期失败',
+    false,
+  )
+}
+
+export function abandonPortalOnboarding(
+  token: string,
+  verificationToken: string,
+  version: number,
+  reasonCode: OnboardingAbandonmentReason,
+  note: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<CandidateOfferViewRecord> {
+  return apiRequest(
+    '/api/portal/offers/onboarding/abandon',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        token,
+        verification_token: verificationToken,
+        idempotency_key: idempotencyKey,
+        version,
+        reason_code: reasonCode,
+        note,
+      }),
+    },
+    '提交放弃入职失败',
+    false,
+  )
+}
+
 export function createOffer(
   jobId: string,
   applicationId: string,
