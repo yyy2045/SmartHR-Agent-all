@@ -73,6 +73,8 @@ class OnboardingSummaryResponse(BaseModel):
     offer_id: uuid.UUID
     job_id: uuid.UUID
     job_title: str
+    job_status: Literal["active", "archived"]
+    recruiter_available: bool
     candidate_id: uuid.UUID
     candidate_code: str
     candidate_name: str | None
@@ -80,6 +82,7 @@ class OnboardingSummaryResponse(BaseModel):
     status: OnboardingStatus
     version: int
     action_owner: OnboardingActionOwner
+    start_date_overdue: bool
     expected_start_date: date
     candidate_proposed_date: date | None
     recruiter_proposed_date: date | None

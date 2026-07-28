@@ -666,10 +666,13 @@ export interface OnboardingSummaryRecord extends CandidateOnboardingRecord {
   offer_id: string
   job_id: string
   job_title: string
+  job_status: 'active' | 'archived'
+  recruiter_available: boolean
   candidate_id: string
   candidate_code: string
   candidate_name: string | null
   candidate_phone: string | null
+  start_date_overdue: boolean
   updated_at: string
 }
 

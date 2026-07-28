@@ -393,11 +393,17 @@ def mark_onboarded(
         )
         return replay
     ensure_version(onboarding, version)
-    if onboarding.status != "pending_start":
+    historical_record = (
+        onboarding.status in {"pending_confirmation", "candidate_proposed_date"}
+        and onboarding_reference_date(onboarding) < shanghai_today()
+    )
+    if onboarding.status != "pending_start" and not historical_record:
         raise OnboardingConflictError("只有待入职记录可以标记已入职")
     if actual_start_date > shanghai_today():
         raise OnboardingValidationError("实际入职日期不能晚于操作当天")
     previous_status = onboarding.status
+    if historical_record and onboarding.confirmed_start_date is None:
+        onboarding.confirmed_start_date = actual_start_date
     onboarding.actual_start_date = actual_start_date
     onboarding.status = "onboarded"
     onboarding.version += 1

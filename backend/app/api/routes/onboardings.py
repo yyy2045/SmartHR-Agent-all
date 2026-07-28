@@ -18,6 +18,7 @@ from app.models import (
     Onboarding,
     OnboardingEvent,
     User,
+    UserRole,
 )
 from app.schemas.offer_portal import (
     OfferPortalLinkCreateRequest,
@@ -55,6 +56,7 @@ from app.services.onboarding import (
     onboarding_portal_expiry,
     onboarding_reference_date,
     recruiter_date_decision,
+    shanghai_today,
 )
 
 router = APIRouter()
@@ -62,7 +64,11 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 _LOAD_OPTIONS = (
     selectinload(Onboarding.application).selectinload(JobApplication.candidate),
-    selectinload(Onboarding.application).selectinload(JobApplication.job),
+    selectinload(Onboarding.application)
+    .selectinload(JobApplication.job)
+    .selectinload(Job.owner)
+    .selectinload(User.role_assignments)
+    .selectinload(UserRole.role),
     selectinload(Onboarding.application)
     .selectinload(JobApplication.process)
     .selectinload(CandidateProcess.events),
@@ -130,15 +136,19 @@ def _event_response(event: OnboardingEvent) -> OnboardingEventResponse:
 
 def _summary_response(onboarding: Onboarding, user: User) -> OnboardingSummaryResponse:
     application = onboarding.application
+    job = application.job
     show_phone = user.has_role("administrator") or (
-        user.has_role("recruiter") and application.job.owner_id == user.id
+        user.has_role("recruiter") and job.owner_id == user.id
     )
+    recruiter_available = job.owner.is_active and job.owner.has_role("recruiter")
     return OnboardingSummaryResponse(
         id=onboarding.id,
         application_id=application.id,
         offer_id=onboarding.offer_id,
         job_id=application.job_id,
-        job_title=application.job.title,
+        job_title=job.title,
+        job_status=job.status,
+        recruiter_available=recruiter_available,
         candidate_id=application.candidate_id,
         candidate_code=application.candidate.candidate_code,
         candidate_name=application.candidate.full_name,
@@ -146,6 +156,11 @@ def _summary_response(onboarding: Onboarding, user: User) -> OnboardingSummaryRe
         status=onboarding.status,
         version=onboarding.version,
         action_owner=onboarding_action_owner(onboarding),
+        start_date_overdue=(
+            onboarding.status
+            in {"pending_confirmation", "candidate_proposed_date", "pending_start"}
+            and onboarding_reference_date(onboarding) < shanghai_today()
+        ),
         expected_start_date=onboarding.offer.current_version.expected_start_date,
         candidate_proposed_date=onboarding.candidate_proposed_date,
         recruiter_proposed_date=onboarding.recruiter_proposed_date,

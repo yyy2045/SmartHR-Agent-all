@@ -58,6 +58,8 @@ function summary(overrides: Partial<OnboardingSummaryRecord> = {}): OnboardingSu
     offer_id: 'offer-1',
     job_id: job.id,
     job_title: job.title,
+    job_status: 'active',
+    recruiter_available: true,
     candidate_id: 'candidate-1',
     candidate_code: 'CAND-0001',
     candidate_name: '候选人A',
@@ -65,6 +67,7 @@ function summary(overrides: Partial<OnboardingSummaryRecord> = {}): OnboardingSu
     status: 'candidate_proposed_date',
     version: 2,
     action_owner: 'recruiter',
+    start_date_overdue: false,
     expected_start_date: '2026-09-01',
     candidate_proposed_date: '2026-09-08',
     recruiter_proposed_date: null,
@@ -325,5 +328,33 @@ describe('onboarding management flow', () => {
       expect(query.get('selected')).toBeNull()
       expect(query.get('from')).toBe('https://evil.example/offers')
     })
+  })
+
+  it('提示归档职位、失效负责人和过期历史日期并允许补录入职', async () => {
+    const currentSummary = summary({
+      status: 'pending_confirmation',
+      action_owner: 'candidate',
+      expected_start_date: '2020-01-01',
+      job_status: 'archived',
+      recruiter_available: false,
+      start_date_overdue: true,
+    })
+    const currentDetail = detail({ ...currentSummary })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = input.toString()
+      const common = commonResponse(path, users.administrator, currentSummary)
+      if (common) return common
+      if (path === '/api/onboardings/onboarding-1') return jsonResponse(currentDetail)
+      if (path === '/api/offers/offer-1/portal-links') return jsonResponse([])
+      return jsonResponse({ detail: 'not found' }, 404)
+    }))
+    renderApp()
+    await openDetail()
+
+    expect(screen.getByText('职位当前没有可用招聘专员')).toBeInTheDocument()
+    expect(screen.getByText('职位已归档')).toBeInTheDocument()
+    expect(screen.getByText('计划入职日期已过')).toBeInTheDocument()
+    expect(screen.getByText(/只有管理员可以继续处理/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /标记已入职/ })).toBeInTheDocument()
   })
 })

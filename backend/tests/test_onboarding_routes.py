@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
@@ -152,7 +153,7 @@ def onboarding_dependencies() -> Generator[OnboardingDependencies, None, None]:
             verification_phone_digest=phone_verification_digest(
                 "1234",
                 link_id=link_id,
-                secret_key="development-only-change-me",
+                secret_key=settings.app_secret_key,
             ),
             expires_at=datetime.now(UTC) + timedelta(days=7),
             created_by_id=recruiter.id,
@@ -236,6 +237,9 @@ async def test_onboarding_list_and_detail_enforce_role_scope(
         assert recruiter_list.status_code == 200
         assert recruiter_list.json()["total"] == 1
         assert recruiter_list.json()["items"][0]["candidate_phone"] == "13800001234"
+        assert recruiter_list.json()["items"][0]["job_status"] == "active"
+        assert recruiter_list.json()["items"][0]["recruiter_available"] is True
+        assert recruiter_list.json()["items"][0]["start_date_overdue"] is False
 
         await _login(client, "onboarding-manager")
         manager_detail = await client.get(f"/onboardings/{onboarding_dependencies.onboarding_id}")
@@ -371,6 +375,20 @@ async def test_candidate_proposes_recruiter_accepts_and_admin_corrects_onboardin
             "confirmed_start_date": str(proposed_date),
             "actual_start_date": None,
         }
+        verification_token = await _verify(client, onboarding_dependencies.token)
+        portal_detail = await client.post(
+            "/portal/offers/detail",
+            json={
+                "token": onboarding_dependencies.token,
+                "verification_token": verification_token,
+            },
+        )
+        assert portal_detail.status_code == 200
+        candidate_onboarding = portal_detail.json()["onboarding"]
+        assert "events" not in candidate_onboarding
+        assert "abandonment_note" not in candidate_onboarding
+        assert "recruiter_available" not in candidate_onboarding
+        assert "start_date_overdue" not in candidate_onboarding
 
     with onboarding_dependencies.session_factory() as db:
         onboarding = db.get(Onboarding, onboarding_dependencies.onboarding_id)
@@ -503,6 +521,109 @@ async def test_onboarding_portal_rejects_invalid_session_and_past_date(
         )
     assert invalid_session.status_code == 401
     assert past_date.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_current_recruiter_owns_archived_onboarding_and_inactive_owner_needs_admin(
+    onboarding_dependencies: OnboardingDependencies,
+) -> None:
+    with onboarding_dependencies.session_factory() as db:
+        job = db.scalar(select(Job))
+        next_recruiter = db.scalar(
+            select(User).where(User.username == "other-onboarding-recruiter")
+        )
+        assert job is not None and next_recruiter is not None
+        job.owner_id = next_recruiter.id
+        job.status = "archived"
+        db.commit()
+
+    transport = httpx.ASGITransport(app=app)
+    continued_date = date.today() + timedelta(days=45)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "onboarding-recruiter")
+        old_owner_list = await client.get("/onboardings")
+        old_owner_detail = await client.get(f"/onboardings/{onboarding_dependencies.onboarding_id}")
+        assert old_owner_list.json()["total"] == 0
+        assert old_owner_detail.status_code == 404
+
+        await _login(client, "other-onboarding-recruiter")
+        new_owner_detail = await client.get(f"/onboardings/{onboarding_dependencies.onboarding_id}")
+        continued = await client.post(
+            f"/onboardings/{onboarding_dependencies.onboarding_id}/date-decision",
+            json={
+                "idempotency_key": str(uuid.uuid4()),
+                "version": 1,
+                "decision": "propose",
+                "proposed_date": str(continued_date),
+                "note": "归档职位继续完成已接受 Offer 的入职流程",
+            },
+        )
+        assert new_owner_detail.status_code == 200
+        assert new_owner_detail.json()["job_status"] == "archived"
+        assert new_owner_detail.json()["recruiter_available"] is True
+        assert continued.status_code == 200
+        verification_token = await _verify(client, onboarding_dependencies.token)
+        candidate_confirmed = await client.post(
+            "/portal/offers/onboarding/confirm-date",
+            json={
+                "token": onboarding_dependencies.token,
+                "verification_token": verification_token,
+                "idempotency_key": str(uuid.uuid4()),
+                "version": 2,
+                "start_date": str(continued_date),
+            },
+        )
+        assert candidate_confirmed.status_code == 200
+        assert candidate_confirmed.json()["onboarding"]["status"] == "pending_start"
+
+    with onboarding_dependencies.session_factory() as db:
+        next_recruiter = db.scalar(
+            select(User).where(User.username == "other-onboarding-recruiter")
+        )
+        assert next_recruiter is not None
+        next_recruiter.is_active = False
+        db.commit()
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as admin:
+        await _login(admin, "onboarding-administrator")
+        admin_detail = await admin.get(f"/onboardings/{onboarding_dependencies.onboarding_id}")
+        assert admin_detail.status_code == 200
+        assert admin_detail.json()["recruiter_available"] is False
+
+
+@pytest.mark.anyio
+async def test_recruiter_can_backfill_overdue_historical_onboarding(
+    onboarding_dependencies: OnboardingDependencies,
+) -> None:
+    expected_date = date.today() - timedelta(days=30)
+    actual_date = date.today() - timedelta(days=20)
+    with onboarding_dependencies.session_factory() as db:
+        onboarding = db.get(Onboarding, onboarding_dependencies.onboarding_id)
+        assert onboarding is not None
+        onboarding.offer.current_version.expected_start_date = expected_date
+        db.commit()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "onboarding-recruiter")
+        historical = await client.get(f"/onboardings/{onboarding_dependencies.onboarding_id}")
+        onboarded = await client.post(
+            f"/onboardings/{onboarding_dependencies.onboarding_id}/onboard",
+            json={
+                "idempotency_key": str(uuid.uuid4()),
+                "version": 1,
+                "actual_start_date": str(actual_date),
+                "note": "补录历史实际入职日期",
+            },
+        )
+
+    assert historical.status_code == 200
+    assert historical.json()["status"] == "pending_confirmation"
+    assert historical.json()["start_date_overdue"] is True
+    assert onboarded.status_code == 200
+    assert onboarded.json()["status"] == "onboarded"
+    assert onboarded.json()["actual_start_date"] == str(actual_date)
+    assert onboarded.json()["start_date_overdue"] is False
 
 
 @pytest.mark.anyio

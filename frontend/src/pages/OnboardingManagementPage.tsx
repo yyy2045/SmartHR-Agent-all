@@ -327,17 +327,29 @@ export function OnboardingManagementPage() {
     },
     {
       title: '当前责任方',
-      dataIndex: 'action_owner',
       key: 'owner',
       width: 130,
-      render: (owner: OnboardingSummaryRecord['action_owner']) =>
-        owner === 'candidate' ? '候选人' : owner === 'recruiter' ? '招聘专员' : '无需操作',
+      render: (_, item) => {
+        if (item.action_owner === 'recruiter' && !item.recruiter_available) {
+          return <Tag color="warning">待重新分配</Tag>
+        }
+        return item.action_owner === 'candidate'
+          ? '候选人'
+          : item.action_owner === 'recruiter'
+            ? '招聘专员'
+            : '无需操作'
+      },
     },
     {
       title: '当前日期',
       key: 'date',
       width: 150,
-      render: (_, item) => formatDate(currentDate(item)),
+      render: (_, item) => (
+        <Space size={4} wrap>
+          <span>{formatDate(currentDate(item))}</span>
+          {item.start_date_overdue && <Tag color="warning">已过期</Tag>}
+        </Space>
+      ),
     },
     {
       title: '最近更新',
@@ -459,6 +471,30 @@ export function OnboardingManagementPage() {
         )}
         {current && (
           <div className="onboarding-detail">
+            {!current.recruiter_available && (
+              <Alert
+                type="warning"
+                showIcon
+                message="职位当前没有可用招聘专员"
+                description="只有管理员可以继续处理，请先为职位分配一名有效招聘专员。"
+              />
+            )}
+            {current.job_status === 'archived' && (
+              <Alert
+                type="info"
+                showIcon
+                message="职位已归档"
+                description="已接受 Offer 的入职流程仍可继续处理，归档不会终止本记录。"
+              />
+            )}
+            {current.start_date_overdue && (
+              <Alert
+                type="warning"
+                showIcon
+                message="计划入职日期已过"
+                description="请补录实际入职日期、提出新的未来日期，或记录放弃入职。"
+              />
+            )}
             <Space wrap className="onboarding-detail-actions">
               {canWrite && current.status === 'candidate_proposed_date' && (
                 <Button
@@ -483,7 +519,7 @@ export function OnboardingManagementPage() {
                   提出新日期
                 </Button>
               )}
-              {canWrite && current.status === 'pending_start' && (
+              {canWrite && (current.status === 'pending_start' || current.start_date_overdue) && (
                 <Button type="primary" icon={<CheckOutlined />} onClick={() => openDialog('onboard')}>
                   标记已入职
                 </Button>
@@ -514,7 +550,13 @@ export function OnboardingManagementPage() {
                 <Tag color={statusMeta[current.status].color}>{statusMeta[current.status].label}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="责任方">
-                {current.action_owner === 'candidate' ? '候选人' : current.action_owner === 'recruiter' ? '招聘专员' : '无需操作'}
+                {current.action_owner === 'recruiter' && !current.recruiter_available
+                  ? '职位待重新分配'
+                  : current.action_owner === 'candidate'
+                    ? '候选人'
+                    : current.action_owner === 'recruiter'
+                      ? '招聘专员'
+                      : '无需操作'}
               </Descriptions.Item>
               <Descriptions.Item label="岗位">{current.job_title}</Descriptions.Item>
               <Descriptions.Item label="电话">{current.candidate_phone ?? '无权限查看'}</Descriptions.Item>
