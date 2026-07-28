@@ -2664,6 +2664,11 @@ input {
   gap: 24px;
 }
 
+.candidate-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .candidate-detail-content section {
   min-width: 0;
 }
@@ -2758,6 +2763,11 @@ input {
 
   .candidate-duplicate-review-footer .ant-btn {
     flex: 1;
+  }
+
+  .candidate-detail-actions,
+  .candidate-detail-actions .ant-btn {
+    width: 100%;
   }
 
   .candidate-merge-choices {

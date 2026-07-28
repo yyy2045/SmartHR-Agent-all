@@ -1,6 +1,7 @@
 import {
   ApartmentOutlined,
   BranchesOutlined,
+  EditOutlined,
   EyeOutlined,
   FileTextOutlined,
   MailOutlined,
@@ -19,6 +20,7 @@ import {
   Descriptions,
   Drawer,
   Empty,
+  Form,
   Input,
   Modal,
   Radio,
@@ -42,6 +44,7 @@ import {
   fetchCandidateDuplicateReviews,
   fetchCandidates,
   mergeCandidateDuplicateReview,
+  updateCandidatePhone,
   type CandidateApplicationSummaryRecord,
   type CandidateDetailRecord,
   type CandidateDuplicateReviewRecord,
@@ -61,6 +64,11 @@ type DuplicateStatusFilter = CandidateDuplicateReviewStatus | 'all'
 type ResolutionAction =
   | { type: 'dismiss'; review: CandidateDuplicateReviewRecord }
   | { type: 'merge'; review: CandidateDuplicateReviewRecord }
+
+interface PhoneUpdateValues {
+  phone: string
+  reason: string
+}
 
 const stageLabels: Record<CandidateStage, string> = {
   unprocessed: '待人工处理',
@@ -138,6 +146,7 @@ export function CandidateCenterPage() {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [messageApi, messageContext] = message.useMessage()
+  const [phoneForm] = Form.useForm<PhoneUpdateValues>()
   const [candidateStatus, setCandidateStatus] = useState<CandidateListStatus>('active')
   const [searchDraft, setSearchDraft] = useState('')
   const [search, setSearch] = useState('')
@@ -148,6 +157,7 @@ export function CandidateCenterPage() {
   const [resolutionAction, setResolutionAction] = useState<ResolutionAction>()
   const [targetCandidateId, setTargetCandidateId] = useState<string>()
   const [resolutionReason, setResolutionReason] = useState('')
+  const [phoneEditOpen, setPhoneEditOpen] = useState(false)
   const activeView: CandidateCenterView =
     searchParams.get('view') === 'duplicates' ? 'duplicates' : 'profiles'
 
@@ -216,6 +226,27 @@ export function CandidateCenterPage() {
     },
     onError: (error) => messageApi.error(errorMessage(error, '合并候选人失败')),
   })
+  const phoneUpdateMutation = useMutation({
+    mutationFn: (values: PhoneUpdateValues) =>
+      updateCandidatePhone(selectedCandidateId!, values.phone, values.reason),
+    onSuccess: async (result) => {
+      setPhoneEditOpen(false)
+      phoneForm.resetFields()
+      const revokedMessage = result.revoked_portal_link_count
+        ? `，已撤回 ${result.revoked_portal_link_count} 条旧门户链接`
+        : ''
+      void messageApi.success(`手机号已更新${revokedMessage}`)
+      await refreshCandidateData()
+    },
+    onError: (error) =>
+      void messageApi.error(errorMessage(error, '修正候选人手机号失败')),
+  })
+
+  function openPhoneEditor() {
+    if (!detail) return
+    phoneForm.setFieldsValue({ phone: detail.phone ?? '', reason: '' })
+    setPhoneEditOpen(true)
+  }
 
   function openResolution(action: ResolutionAction) {
     setResolutionAction(action)
@@ -632,9 +663,50 @@ export function CandidateCenterPage() {
             applicationColumns={applicationColumns}
             resumeColumns={resumeColumns}
             onOpenCandidate={setSelectedCandidateId}
+            onEditPhone={openPhoneEditor}
           />
         )}
       </Drawer>
+
+      <Modal
+        open={phoneEditOpen}
+        title="修正候选人手机号"
+        okText="确认修改"
+        cancelText="取消"
+        confirmLoading={phoneUpdateMutation.isPending}
+        onOk={() => phoneForm.submit()}
+        onCancel={() => {
+          setPhoneEditOpen(false)
+          phoneForm.resetFields()
+        }}
+        destroyOnHidden
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message="修改后，候选人的未撤回门户链接会立即失效。"
+        />
+        <Form<PhoneUpdateValues>
+          form={phoneForm}
+          layout="vertical"
+          onFinish={(values) => phoneUpdateMutation.mutate(values)}
+        >
+          <Form.Item
+            label="手机号"
+            name="phone"
+            rules={[{ required: true, whitespace: true, message: '请输入有效手机号' }]}
+          >
+            <Input maxLength={50} autoComplete="tel" />
+          </Form.Item>
+          <Form.Item
+            label="修改原因"
+            name="reason"
+            rules={[{ required: true, whitespace: true, message: '请填写修改原因' }]}
+          >
+            <Input.TextArea rows={4} maxLength={2_000} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         open={Boolean(resolutionAction)}
@@ -700,14 +772,23 @@ function CandidateDetailContent({
   applicationColumns,
   resumeColumns,
   onOpenCandidate,
+  onEditPhone,
 }: {
   detail: CandidateDetailRecord
   applicationColumns: ColumnsType<CandidateApplicationSummaryRecord>
   resumeColumns: ColumnsType<CandidateResumeSummaryRecord>
   onOpenCandidate: (candidateId: string) => void
+  onEditPhone: () => void
 }) {
   return (
     <div className="candidate-detail-content">
+      {detail.status === 'active' && (
+        <div className="candidate-detail-actions">
+          <Button icon={<EditOutlined />} onClick={onEditPhone}>
+            修正手机号
+          </Button>
+        </div>
+      )}
       <Descriptions column={{ xs: 1, sm: 2 }} bordered size="small">
         <Descriptions.Item label="档案状态">
           <Tag color={detail.status === 'active' ? 'success' : 'default'}>
