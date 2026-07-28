@@ -177,6 +177,7 @@ def test_item_contract_rejects_external_target_and_zero_count() -> None:
 
 
 def test_summary_contract_rejects_inconsistent_or_silent_partial_counts() -> None:
+    job_id = uuid.uuid4()
     base = {
         "as_of": datetime(2026, 7, 29, tzinfo=UTC),
         "total_count": 3,
@@ -192,6 +193,7 @@ def test_summary_contract_rejects_inconsistent_or_silent_partial_counts() -> Non
             {"priority": "normal", "count": 2},
         ],
         "types": [{"item_type": "manual_screening", "count": 3}],
+        "jobs": [{"id": job_id, "title": "后端工程师"}],
         "partial": False,
         "failed_sources": [],
     }
@@ -202,4 +204,15 @@ def test_summary_contract_rejects_inconsistent_or_silent_partial_counts() -> Non
     with pytest.raises(ValidationError, match="部分失败标记"):
         WorkbenchSummaryResponse.model_validate(
             {**base, "partial": True, "failed_sources": []}
+        )
+
+    with pytest.raises(ValidationError, match="岗位选项不能重复"):
+        WorkbenchSummaryResponse.model_validate(
+            {
+                **base,
+                "jobs": [
+                    {"id": job_id, "title": "后端工程师"},
+                    {"id": job_id, "title": "后端工程师"},
+                ],
+            }
         )

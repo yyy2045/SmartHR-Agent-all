@@ -72,6 +72,11 @@ class WorkbenchTypeCount(BaseModel):
     count: int = Field(ge=0)
 
 
+class WorkbenchJobOption(BaseModel):
+    id: uuid.UUID
+    title: str = Field(min_length=1, max_length=200)
+
+
 class WorkbenchSummaryResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +86,7 @@ class WorkbenchSummaryResponse(BaseModel):
     sections: list[WorkbenchSectionCount]
     priorities: list[WorkbenchPriorityCount]
     types: list[WorkbenchTypeCount]
+    jobs: list[WorkbenchJobOption] = Field(default_factory=list)
     partial: bool = False
     failed_sources: list[WorkbenchSource] = Field(default_factory=list)
 
@@ -95,6 +101,9 @@ class WorkbenchSummaryResponse(BaseModel):
         type_keys = [item.item_type for item in self.types]
         if len(type_keys) != len(set(type_keys)):
             raise ValueError("工作台类型计数不能重复")
+        job_keys = [item.id for item in self.jobs]
+        if len(job_keys) != len(set(job_keys)):
+            raise ValueError("工作台岗位选项不能重复")
         if sum(item.count for item in self.sections) != self.total_count:
             raise ValueError("工作台分区合计与总数不一致")
         action_count = next(

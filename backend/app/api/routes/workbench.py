@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models import Job, User
 from app.schemas.workbench import (
     WorkbenchItemType,
+    WorkbenchJobOption,
     WorkbenchListResponse,
     WorkbenchPriority,
     WorkbenchPriorityCount,
@@ -52,10 +53,13 @@ def get_workbench_summary(
     section_counts = Counter[str]()
     priority_counts = Counter[str]()
     type_counts = Counter[str]()
+    job_options: dict[uuid.UUID, str] = {}
     for item in collection.items:
         section_counts[item.section] += item.count
         priority_counts[item.priority] += item.count
         type_counts[item.item_type] += item.count
+        if item.job_id is not None and item.job_title is not None:
+            job_options[item.job_id] = item.job_title
     return WorkbenchSummaryResponse(
         as_of=as_of,
         total_count=sum(section_counts.values()),
@@ -71,6 +75,12 @@ def get_workbench_summary(
         types=[
             WorkbenchTypeCount(item_type=item_type, count=count)
             for item_type, count in sorted(type_counts.items())
+        ],
+        jobs=[
+            WorkbenchJobOption(id=job_id, title=title)
+            for job_id, title in sorted(
+                job_options.items(), key=lambda item: (item[1], str(item[0]))
+            )
         ],
         partial=bool(collection.failed_sources),
         failed_sources=list(collection.failed_sources),
