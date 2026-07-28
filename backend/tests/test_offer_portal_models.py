@@ -122,6 +122,10 @@ def _portal_link(
 def test_portal_models_keep_link_response_and_process_history(
     portal_session: Session,
 ) -> None:
+    assert CandidateProcess.__table__.c.current_stage.type.length == 40
+    assert CandidateProcessEvent.__table__.c.from_stage.type.length == 40
+    assert CandidateProcessEvent.__table__.c.to_stage.type.length == 40
+
     user = _seed_user(portal_session)
     offer = _seed_offer(portal_session, user)
     process = CandidateProcess(
