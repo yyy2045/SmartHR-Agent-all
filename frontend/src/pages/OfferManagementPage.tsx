@@ -1,10 +1,13 @@
 import {
   CheckOutlined,
+  CopyOutlined,
   EditOutlined,
   EyeOutlined,
+  LinkOutlined,
   ReloadOutlined,
   SendOutlined,
   StopOutlined,
+  SyncOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -35,13 +38,20 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ApiError,
   createOffer,
+  createOfferPortalLink,
   createOfferVersion,
   decideOfferAsApprover,
   decideOfferAsManager,
   fetchOffer,
+  fetchOfferPortalLinks,
   fetchOffers,
+  regenerateOfferPortalLink,
+  revokeOfferPortalLink,
   submitOffer,
   type OfferContentInput,
+  type OfferPortalLinkIssuedRecord,
+  type OfferPortalLinkRecord,
+  type OfferPortalLinkState,
   type OfferRecord,
   type OfferStatus,
   type OfferSummary,
@@ -72,6 +82,14 @@ type OfferFormValues = OfferContentInput
 interface DecisionFormValues {
   comment: string
 }
+
+interface PortalLinkReasonValues {
+  reason: string
+}
+
+type PortalLinkAction =
+  | { kind: 'regenerate'; link: OfferPortalLinkRecord }
+  | { kind: 'revoke'; link: OfferPortalLinkRecord }
 
 interface CreateTarget {
   jobId: string
@@ -132,6 +150,13 @@ function versionSummary(version: OfferVersion) {
   return `${money(version.monthly_salary)} × ${Number(version.annual_salary_months)} 薪`
 }
 
+const portalLinkStateMeta: Record<OfferPortalLinkState, { label: string; color: string }> = {
+  active: { label: '有效', color: 'processing' },
+  expired: { label: '已过期', color: 'default' },
+  revoked: { label: '已撤回', color: 'warning' },
+  responded: { label: '已回应', color: 'success' },
+}
+
 export function OfferManagementPage() {
   const auth = useAuth()
   const queryClient = useQueryClient()
@@ -140,12 +165,15 @@ export function OfferManagementPage() {
   const [modal, modalContext] = Modal.useModal()
   const [offerForm] = Form.useForm<OfferFormValues>()
   const [decisionForm] = Form.useForm<DecisionFormValues>()
+  const [portalLinkReasonForm] = Form.useForm<PortalLinkReasonValues>()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [selectedId, setSelectedId] = useState<string>()
   const [formOpen, setFormOpen] = useState(false)
   const [editingOffer, setEditingOffer] = useState<OfferRecord>()
   const [createTarget, setCreateTarget] = useState<CreateTarget>()
   const [decisionTarget, setDecisionTarget] = useState<DecisionTarget>()
+  const [portalLinkAction, setPortalLinkAction] = useState<PortalLinkAction>()
+  const [issuedPortalUrl, setIssuedPortalUrl] = useState<string>()
   const [versionKey, setVersionKey] = useState(() => crypto.randomUUID())
   const canWrite = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
@@ -164,6 +192,11 @@ export function OfferManagementPage() {
   const detail = useQuery({
     queryKey: ['offer', selectedId],
     queryFn: () => fetchOffer(selectedId!),
+    enabled: Boolean(selectedId),
+  })
+  const portalLinks = useQuery({
+    queryKey: ['offer-portal-links', selectedId],
+    queryFn: () => fetchOfferPortalLinks(selectedId!),
     enabled: Boolean(selectedId),
   })
   const visibleOffers = useMemo(
@@ -202,6 +235,11 @@ export function OfferManagementPage() {
     setFormOpen(true)
     setSearchParams({}, { replace: true })
   }, [canWrite, offerForm, searchParams, setSearchParams])
+
+  useEffect(() => {
+    setIssuedPortalUrl(undefined)
+    setPortalLinkAction(undefined)
+  }, [selectedId])
 
   function updateOfferCache(saved: OfferRecord) {
     queryClient.setQueryData(['offer', saved.id], saved)
@@ -305,6 +343,84 @@ export function OfferManagementPage() {
     onError: (error) =>
       void messageApi.error(error instanceof Error ? error.message : '处理 Offer 失败'),
   })
+
+  function refreshPortalState() {
+    void queryClient.invalidateQueries({ queryKey: ['offer-portal-links', selectedId] })
+    void queryClient.invalidateQueries({ queryKey: ['offer', selectedId] })
+    void queryClient.invalidateQueries({ queryKey: ['offers'] })
+  }
+
+  function rememberIssuedPortalLink(link: OfferPortalLinkIssuedRecord) {
+    if (!link.portal_token) {
+      void messageApi.warning('本次操作已处理，但原始链接不可再次读取，请重新生成')
+      return
+    }
+    setIssuedPortalUrl(`${window.location.origin}/offer#${link.portal_token}`)
+  }
+
+  const createPortalLinkMutation = useMutation({
+    mutationFn: (offerId: string) => createOfferPortalLink(offerId),
+    onSuccess: (link) => {
+      rememberIssuedPortalLink(link)
+      refreshPortalState()
+      void messageApi.success('候选人链接已生成')
+    },
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : '生成候选人链接失败'),
+  })
+  const regeneratePortalLinkMutation = useMutation({
+    mutationFn: ({ offerId, reason }: { offerId: string; reason: string }) =>
+      regenerateOfferPortalLink(offerId, reason),
+    onSuccess: (link) => {
+      rememberIssuedPortalLink(link)
+      setPortalLinkAction(undefined)
+      portalLinkReasonForm.resetFields()
+      refreshPortalState()
+      void messageApi.success('候选人链接已重新生成，旧链接已失效')
+    },
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : '重新生成链接失败'),
+  })
+  const revokePortalLinkMutation = useMutation({
+    mutationFn: ({ offerId, linkId, reason }: { offerId: string; linkId: string; reason: string }) =>
+      revokeOfferPortalLink(offerId, linkId, reason),
+    onSuccess: () => {
+      setIssuedPortalUrl(undefined)
+      setPortalLinkAction(undefined)
+      portalLinkReasonForm.resetFields()
+      refreshPortalState()
+      void messageApi.success('候选人链接已撤回')
+    },
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : '撤回候选人链接失败'),
+  })
+
+  async function copyIssuedPortalLink() {
+    if (!issuedPortalUrl) return
+    try {
+      if (!navigator.clipboard) throw new Error('当前浏览器不支持剪贴板')
+      await navigator.clipboard.writeText(issuedPortalUrl)
+      setIssuedPortalUrl(undefined)
+      void messageApi.success('候选人链接已复制，本页不再保留原始链接')
+    } catch (error) {
+      void messageApi.error(error instanceof Error ? error.message : '复制候选人链接失败')
+    }
+  }
+
+  function submitPortalLinkAction() {
+    if (!detail.data || !portalLinkAction) return
+    void portalLinkReasonForm.validateFields().then(({ reason }) => {
+      if (portalLinkAction.kind === 'regenerate') {
+        regeneratePortalLinkMutation.mutate({ offerId: detail.data!.id, reason })
+        return
+      }
+      revokePortalLinkMutation.mutate({
+        offerId: detail.data!.id,
+        linkId: portalLinkAction.link.id,
+        reason,
+      })
+    })
+  }
 
   function openRevision(offer: OfferRecord) {
     setEditingOffer(offer)
@@ -582,6 +698,131 @@ export function OfferManagementPage() {
             </Descriptions>
 
             <Divider />
+            <div className="offer-portal-section">
+              <div className="offer-section-heading">
+                <div>
+                  <Title level={4}>候选人门户</Title>
+                  <Text type="secondary">
+                    链接只在生成时返回一次，候选人需使用手机号后四位验证。
+                  </Text>
+                </div>
+                {canWrite &&
+                  detail.data.status === 'approved' &&
+                  !(portalLinks.data ?? []).some((link) => link.state === 'active') && (
+                    <Button
+                      type="primary"
+                      icon={<LinkOutlined />}
+                      loading={createPortalLinkMutation.isPending}
+                      onClick={() => createPortalLinkMutation.mutate(detail.data!.id)}
+                    >
+                      生成候选人链接
+                    </Button>
+                  )}
+              </div>
+
+              {issuedPortalUrl && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="请立即复制并通过外部工具发送"
+                  description={
+                    <div className="offer-portal-issued">
+                      <Input
+                        value={issuedPortalUrl}
+                        readOnly
+                        aria-label="新生成的候选人链接"
+                      />
+                      <Button
+                        type="primary"
+                        icon={<CopyOutlined />}
+                        onClick={() => void copyIssuedPortalLink()}
+                      >
+                        复制链接
+                      </Button>
+                    </div>
+                  }
+                />
+              )}
+
+              {portalLinks.isPending && <Skeleton active paragraph={{ rows: 3 }} />}
+              {portalLinks.error && (
+                <Alert
+                  type="error"
+                  showIcon
+                  message="无法读取候选人链接记录"
+                  description={
+                    portalLinks.error instanceof Error
+                      ? portalLinks.error.message
+                      : '请稍后重试'
+                  }
+                />
+              )}
+              {!portalLinks.isPending && !portalLinks.error && !portalLinks.data?.length && (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="尚未生成候选人链接"
+                />
+              )}
+              {Boolean(portalLinks.data?.length) && (
+                <div className="offer-portal-history">
+                  {(portalLinks.data ?? []).map((link, index) => (
+                    <div className="offer-portal-history-item" key={link.id}>
+                      <div>
+                        <Space wrap>
+                          <Text strong>链接记录 {portalLinks.data!.length - index}</Text>
+                          <Tag color={portalLinkStateMeta[link.state].color}>
+                            {portalLinkStateMeta[link.state].label}
+                          </Tag>
+                          <Text type="secondary">
+                            V
+                            {detail.data!.versions.find(
+                              (version) => version.id === link.version_id,
+                            )?.version_number ?? '-'}
+                          </Text>
+                        </Space>
+                        <div className="offer-portal-history-meta">
+                          <Text type="secondary">
+                            创建：{formatDateTime(link.created_at)} ·{' '}
+                            {link.created_by_display_name}
+                          </Text>
+                          <Text type="secondary">
+                            失效：{formatDateTime(link.expires_at)}
+                          </Text>
+                          {link.revoked_at && (
+                            <Text type="secondary">
+                              撤回：{formatDateTime(link.revoked_at)} ·{' '}
+                              {link.revoked_by_display_name || link.revoked_by_username}
+                            </Text>
+                          )}
+                          {link.revocation_reason && <Text>原因：{link.revocation_reason}</Text>}
+                        </div>
+                      </div>
+                      {canWrite && link.state === 'active' && (
+                        <Space wrap>
+                          <Button
+                            icon={<SyncOutlined />}
+                            onClick={() =>
+                              setPortalLinkAction({ kind: 'regenerate', link })
+                            }
+                          >
+                            重新生成
+                          </Button>
+                          <Button
+                            danger
+                            icon={<StopOutlined />}
+                            onClick={() => setPortalLinkAction({ kind: 'revoke', link })}
+                          >
+                            撤回链接
+                          </Button>
+                        </Space>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <Divider />
             <Title level={4}>版本与审批历史</Title>
             <Timeline
               items={[...detail.data.versions]
@@ -701,6 +942,44 @@ export function OfferManagementPage() {
           </Form.Item>
           <Form.Item label="备注" name="notes">
             <Input.TextArea rows={3} maxLength={5_000} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={
+          portalLinkAction?.kind === 'regenerate'
+            ? '重新生成候选人链接'
+            : '撤回候选人链接'
+        }
+        open={Boolean(portalLinkAction)}
+        okText={portalLinkAction?.kind === 'regenerate' ? '确认重新生成' : '确认撤回'}
+        okButtonProps={{ danger: portalLinkAction?.kind === 'revoke' }}
+        confirmLoading={
+          regeneratePortalLinkMutation.isPending || revokePortalLinkMutation.isPending
+        }
+        onCancel={() => {
+          setPortalLinkAction(undefined)
+          portalLinkReasonForm.resetFields()
+        }}
+        onOk={submitPortalLinkAction}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message={
+            portalLinkAction?.kind === 'regenerate'
+              ? '旧链接会立即失效，新链接仍只显示一次。'
+              : '撤回后候选人将无法继续访问该链接。'
+          }
+        />
+        <Form<PortalLinkReasonValues> form={portalLinkReasonForm} layout="vertical">
+          <Form.Item
+            label="操作原因"
+            name="reason"
+            rules={[{ required: true, whitespace: true, message: '请填写操作原因' }]}
+          >
+            <Input.TextArea rows={4} maxLength={2_000} showCount />
           </Form.Item>
         </Form>
       </Modal>

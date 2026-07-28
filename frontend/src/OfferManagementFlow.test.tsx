@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
@@ -301,5 +301,181 @@ describe('Offer management flow', () => {
       '/api/offers/offer-1/approval-decision',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('招聘专员生成并一次性复制候选人门户链接', async () => {
+    let saved = offerRecord('approved', {
+      ...version(),
+      approval: {
+        id: 'approval-1',
+        idempotency_key: 'approval-key',
+        approver_id: users.approver.id,
+        approver_username: users.approver.username,
+        approver_display_name: users.approver.display_name,
+        decision: 'approved',
+        comment: '审批通过',
+        decided_at: timestamp,
+      },
+    })
+    let links: Array<Record<string, unknown>> = []
+    const copyText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...window.navigator, clipboard: { writeText: copyText } })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      const common = commonResponse(path, users.recruiter, [saved])
+      if (common) return common
+      if (path === '/api/offers/offer-1') return jsonResponse(saved)
+      if (path === '/api/offers/offer-1/portal-links' && method === 'GET') {
+        return jsonResponse(links)
+      }
+      if (path === '/api/offers/offer-1/portal-links' && method === 'POST') {
+        saved = offerRecord('pending_response', saved.current_version)
+        links = [
+          {
+            id: 'link-1',
+            version_id: 'version-1',
+            state: 'active',
+            expires_at: '2026-08-15T15:59:59Z',
+            created_by_username: 'recruiter',
+            created_by_display_name: '招聘专员',
+            created_at: timestamp,
+            revoked_at: null,
+            revoked_by_username: null,
+            revoked_by_display_name: null,
+            revocation_reason: null,
+          },
+        ]
+        return jsonResponse({ ...links[0], portal_token: 'p'.repeat(48) }, 201)
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderApp('/offers')
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看 候选人A 的 Offer' }))
+    fireEvent.click(await screen.findByRole('button', { name: /生成候选人链接/ }))
+
+    const issuedInput = await screen.findByRole('textbox', {
+      name: '新生成的候选人链接',
+    })
+    expect(issuedInput).toHaveValue(`${window.location.origin}/offer#${'p'.repeat(48)}`)
+    fireEvent.click(screen.getByRole('button', { name: /复制链接/ }))
+    await waitFor(() => {
+      expect(copyText).toHaveBeenCalledWith(
+        `${window.location.origin}/offer#${'p'.repeat(48)}`,
+      )
+      expect(
+        screen.queryByRole('textbox', { name: '新生成的候选人链接' }),
+      ).not.toBeInTheDocument()
+    })
+    expect(await screen.findByText('有效')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /重新生成/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /撤回链接/ })).toBeInTheDocument()
+  })
+
+  it('招聘专员填写原因后重新生成并撤回候选人链接', async () => {
+    const approvedVersion = {
+      ...version(),
+      approval: {
+        id: 'approval-1',
+        idempotency_key: 'approval-key',
+        approver_id: users.approver.id,
+        approver_username: users.approver.username,
+        approver_display_name: users.approver.display_name,
+        decision: 'approved' as const,
+        comment: '审批通过',
+        decided_at: timestamp,
+      },
+    }
+    let saved = offerRecord('pending_response', approvedVersion)
+    const oldLink = {
+      id: 'link-1',
+      version_id: 'version-1',
+      state: 'active',
+      expires_at: '2026-08-15T15:59:59Z',
+      created_by_username: 'recruiter',
+      created_by_display_name: '招聘专员',
+      created_at: timestamp,
+      revoked_at: null,
+      revoked_by_username: null,
+      revoked_by_display_name: null,
+      revocation_reason: null,
+    }
+    let links: Array<Record<string, unknown>> = [oldLink]
+    const operationPayloads: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      const common = commonResponse(path, users.recruiter, [saved])
+      if (common) return common
+      if (path === '/api/offers/offer-1') return jsonResponse(saved)
+      if (path === '/api/offers/offer-1/portal-links' && method === 'GET') {
+        return jsonResponse(links)
+      }
+      if (path === '/api/offers/offer-1/portal-links/regenerate' && method === 'POST') {
+        operationPayloads.push(JSON.parse(init?.body as string) as Record<string, unknown>)
+        const revokedOld = {
+          ...oldLink,
+          state: 'revoked',
+          revoked_at: '2026-07-28T09:00:00Z',
+          revoked_by_username: 'recruiter',
+          revoked_by_display_name: '招聘专员',
+          revocation_reason: '候选人未收到旧链接',
+        }
+        const replacement = {
+          ...oldLink,
+          id: 'link-2',
+          created_at: '2026-07-28T09:00:00Z',
+        }
+        links = [replacement, revokedOld]
+        return jsonResponse({ ...replacement, portal_token: 'q'.repeat(48) }, 201)
+      }
+      if (path === '/api/offers/offer-1/portal-links/link-2/revoke' && method === 'POST') {
+        operationPayloads.push(JSON.parse(init?.body as string) as Record<string, unknown>)
+        links = [
+          {
+            ...links[0],
+            state: 'revoked',
+            revoked_at: '2026-07-28T10:00:00Z',
+            revoked_by_username: 'recruiter',
+            revoked_by_display_name: '招聘专员',
+            revocation_reason: '候选人决定暂缓',
+          },
+          links[1],
+        ]
+        saved = offerRecord('approved', approvedVersion)
+        return jsonResponse(links[0])
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderApp('/offers')
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看 候选人A 的 Offer' }))
+    fireEvent.click(await screen.findByRole('button', { name: /重新生成/ }))
+    const regenerateDialog = await findModalByTitle('重新生成候选人链接')
+    fireEvent.change(within(regenerateDialog).getByLabelText('操作原因'), {
+      target: { value: '候选人未收到旧链接' },
+    })
+    fireEvent.click(
+      within(regenerateDialog).getByRole('button', { name: /确认重新生成/ }),
+    )
+
+    expect(await screen.findByText('候选人链接已重新生成，旧链接已失效')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /撤回链接/ }))
+    const revokeDialog = await findModalByTitle('撤回候选人链接')
+    fireEvent.change(within(revokeDialog).getByLabelText('操作原因'), {
+      target: { value: '候选人决定暂缓' },
+    })
+    fireEvent.click(within(revokeDialog).getByRole('button', { name: /确认撤回/ }))
+
+    expect(await screen.findByText('候选人链接已撤回')).toBeInTheDocument()
+    expect(operationPayloads).toHaveLength(2)
+    expect(operationPayloads[0]).toMatchObject({ reason: '候选人未收到旧链接' })
+    expect(operationPayloads[1]).toMatchObject({ reason: '候选人决定暂缓' })
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /撤回链接/ })).not.toBeInTheDocument()
+    })
   })
 })

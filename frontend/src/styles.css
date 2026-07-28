@@ -2353,6 +2353,53 @@ input {
   border-bottom: 1px solid #e8edf3;
 }
 
+.offer-portal-section {
+  display: grid;
+  gap: 16px;
+}
+
+.offer-section-heading,
+.offer-portal-issued,
+.offer-portal-history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.offer-section-heading .ant-typography,
+.offer-portal-history-item .ant-typography {
+  margin: 0;
+}
+
+.offer-portal-issued .ant-input {
+  min-width: 0;
+}
+
+.offer-portal-issued .ant-btn {
+  flex: 0 0 auto;
+}
+
+.offer-portal-history {
+  border: 1px solid #e6e8eb;
+  border-radius: 6px;
+}
+
+.offer-portal-history-item {
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef0f2;
+}
+
+.offer-portal-history-item:last-child {
+  border-bottom: 0;
+}
+
+.offer-portal-history-meta {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+
 .offer-version-item {
   display: grid;
   gap: 6px;
@@ -2384,6 +2431,20 @@ input {
 
   .offer-detail-actions,
   .offer-detail-actions .ant-btn {
+    width: 100%;
+  }
+
+  .offer-section-heading,
+  .offer-portal-issued,
+  .offer-portal-history-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .offer-section-heading .ant-btn,
+  .offer-portal-issued .ant-btn,
+  .offer-portal-history-item > .ant-space,
+  .offer-portal-history-item > .ant-space .ant-btn {
     width: 100%;
   }
 }
