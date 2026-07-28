@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   AUTH_UNAUTHORIZED_EVENT,
+  createOfferPortalLink,
   createScreeningBatch,
+  fetchOfferPortalStatus,
   fetchCurrentUser,
   fetchJobs,
   fetchLiveHealth,
@@ -11,7 +13,10 @@ import {
   generateJDAIDraft,
   login,
   logout,
+  respondToOfferPortal,
   retryResumeParsing,
+  updateCandidatePhone,
+  verifyOfferPortal,
 } from './client'
 
 describe('API client', () => {
@@ -216,5 +221,95 @@ describe('API client', () => {
       method: 'POST',
       credentials: 'include',
     })
+  })
+
+  it('按后端契约生成门户链接并修正候选人手机号', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'link-1', portal_token: 'portal-token' }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidate_id: 'candidate-1',
+            phone: '13999995678',
+            revoked_portal_link_count: 1,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createOfferPortalLink('offer-1', '11111111-1111-4111-8111-111111111111')
+    await updateCandidatePhone('candidate-1', '13999995678', '候选人确认换号')
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/offers/offer-1/portal-links')
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      idempotency_key: '11111111-1111-4111-8111-111111111111',
+    })
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/candidates/candidate-1/phone')
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'PATCH' })
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+      phone: '13999995678',
+      reason: '候选人确认换号',
+    })
+  })
+
+  it('公共门户验证和回应不会触发内部会话失效事件', async () => {
+    const unauthorizedListener = vi.fn()
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, unauthorizedListener)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'verification_required' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: '验证信息不正确' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidate_name: '张三',
+            job_title: '后端工程师',
+            progress: 'accepted',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchOfferPortalStatus('x'.repeat(48))).resolves.toEqual({
+      status: 'verification_required',
+    })
+    await expect(verifyOfferPortal('x'.repeat(48), '1234')).rejects.toEqual(
+      new ApiError(401, '验证信息不正确'),
+    )
+    await respondToOfferPortal(
+      'x'.repeat(48),
+      'v'.repeat(48),
+      'accepted',
+      null,
+      null,
+      '22222222-2222-4222-8222-222222222222',
+    )
+
+    expect(unauthorizedListener).not.toHaveBeenCalled()
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toMatchObject({
+      decision: 'accepted',
+      rejection_reason_code: null,
+      rejection_note: null,
+      idempotency_key: '22222222-2222-4222-8222-222222222222',
+    })
+    window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, unauthorizedListener)
   })
 })

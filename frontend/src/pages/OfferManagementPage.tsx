@@ -57,6 +57,9 @@ const statusMeta: Record<OfferStatus, { label: string; color: string }> = {
   pending_approval: { label: '待最终审批', color: 'warning' },
   approved: { label: '已批准', color: 'success' },
   rejected: { label: '已驳回', color: 'error' },
+  pending_response: { label: '待候选人回应', color: 'processing' },
+  accepted: { label: '候选人已接受', color: 'success' },
+  declined: { label: '候选人已拒绝', color: 'error' },
 }
 
 type StatusFilter = 'all' | OfferStatus
