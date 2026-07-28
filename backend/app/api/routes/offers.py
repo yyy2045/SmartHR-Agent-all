@@ -12,7 +12,6 @@ from app.api.dependencies.auth import CurrentUser
 from app.database import get_db
 from app.models import (
     CandidateProcess,
-    CandidateProcessEvent,
     InterviewReport,
     Job,
     JobApplication,
@@ -43,6 +42,7 @@ from app.schemas.offer_portal import (
 )
 from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job
+from app.services.candidate_process import change_candidate_process_stage
 from app.services.offer_portal import (
     create_portal_token,
     hash_portal_token,
@@ -386,46 +386,6 @@ def _ensure_portal_link_can_be_created(offer: Offer) -> None:
         )
 
 
-def _change_process_stage(
-    db: Session,
-    offer: Offer,
-    *,
-    target_stage: str,
-    reason: str,
-    user: User,
-) -> None:
-    process = offer.application.process
-    previous_stage = process.current_stage if process is not None else "completed"
-    if previous_stage == target_stage:
-        return
-    now = datetime.now(UTC)
-    if process is None:
-        process = CandidateProcess(
-            application_id=offer.application_id,
-            current_stage=target_stage,
-            stage_entered_at=now,
-            updated_by_id=user.id,
-        )
-        db.add(process)
-        db.flush()
-        sequence_number = 1
-    else:
-        sequence_number = len(process.events) + 1
-        process.current_stage = target_stage
-        process.stage_entered_at = now
-        process.updated_by_id = user.id
-    db.add(
-        CandidateProcessEvent(
-            process_id=process.id,
-            sequence_number=sequence_number,
-            from_stage=previous_stage,
-            to_stage=target_stage,
-            reason=reason,
-            operator_id=user.id,
-        )
-    )
-
-
 def _revoke_portal_link(
     link: OfferPortalLink,
     *,
@@ -522,12 +482,12 @@ def create_offer_portal_link(
     )
     db.add(link)
     offer.status = "pending_response"
-    _change_process_stage(
+    change_candidate_process_stage(
         db,
-        offer,
+        offer.application,
         target_stage="offer_pending_response",
         reason="候选人 Offer 链接已生成",
-        user=current_user,
+        operator=current_user,
     )
     try:
         db.flush()
@@ -702,12 +662,12 @@ def revoke_offer_portal_link(
         user=current_user,
     )
     offer.status = "approved"
-    _change_process_stage(
+    change_candidate_process_stage(
         db,
-        offer,
+        offer.application,
         target_stage="completed",
         reason=f"候选人 Offer 链接已撤回：{payload.reason}",
-        user=current_user,
+        operator=current_user,
     )
     record_audit(
         db,

@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PortalLinkState = Literal["active", "expired", "revoked", "responded"]
 CandidateOfferDecision = Literal["accepted", "rejected"]
@@ -91,6 +91,31 @@ class OfferPortalVerifyRequest(OfferPortalTokenRequest):
 
 class OfferPortalDetailRequest(OfferPortalTokenRequest):
     verification_token: str = Field(min_length=32, max_length=256)
+
+
+class OfferPortalRespondRequest(OfferPortalDetailRequest):
+    idempotency_key: uuid.UUID
+    decision: CandidateOfferDecision
+    rejection_reason_code: CandidateRejectionReason | None = None
+    rejection_note: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("rejection_note")
+    @classmethod
+    def normalize_rejection_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_rejection_fields(self) -> "OfferPortalRespondRequest":
+        if self.decision == "accepted" and (
+            self.rejection_reason_code is not None or self.rejection_note is not None
+        ):
+            raise ValueError("接受 Offer 时不能填写拒绝原因")
+        if self.decision == "rejected" and self.rejection_reason_code is None:
+            raise ValueError("拒绝 Offer 时必须选择原因")
+        return self
 
 
 class OfferPortalStatusResponse(BaseModel):

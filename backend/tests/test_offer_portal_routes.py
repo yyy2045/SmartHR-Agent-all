@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import app.api.routes.offer_portal as offer_portal_routes
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
@@ -23,6 +24,7 @@ from app.models import (
     OfferApproval,
     OfferManagerConfirmation,
     OfferPortalLink,
+    OfferResponse,
     OfferVersion,
     Role,
     User,
@@ -168,6 +170,15 @@ async def _create_link(
         f"/offers/{dependencies.offer_id}/portal-links",
         json={"idempotency_key": str(key or uuid.uuid4())},
     )
+
+
+async def _verify_link(client: httpx.AsyncClient, token: str) -> str:
+    response = await client.post(
+        "/portal/offers/verify",
+        json={"token": token, "phone_last_four": "1234"},
+    )
+    assert response.status_code == 200
+    return response.json()["verification_token"]
 
 
 @pytest.mark.anyio
@@ -399,3 +410,207 @@ async def test_internal_permissions_missing_phone_and_expired_link(
 
     assert expired.status_code == 410
     assert unknown.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_candidate_accepts_offer_idempotently_and_updates_process(
+    portal_dependencies: PortalDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as internal:
+        await _login(internal, "portal-recruiter")
+        created = await _create_link(internal, portal_dependencies)
+        token = created.json()["portal_token"]
+
+    response_key = uuid.uuid4()
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as portal:
+        verification_token = await _verify_link(portal, token)
+        payload = {
+            "token": token,
+            "verification_token": verification_token,
+            "idempotency_key": str(response_key),
+            "decision": "accepted",
+        }
+        accepted = await portal.post("/portal/offers/respond", json=payload)
+        replay = await portal.post("/portal/offers/respond", json=payload)
+        detail = await portal.post(
+            "/portal/offers/detail",
+            json={"token": token, "verification_token": verification_token},
+        )
+
+    assert accepted.status_code == replay.status_code == detail.status_code == 200
+    assert accepted.json() == replay.json() == detail.json()
+    assert accepted.json()["progress"] == "accepted"
+    assert accepted.json()["response"]["decision"] == "accepted"
+    with portal_dependencies.session_factory() as db:
+        offer = db.get(Offer, portal_dependencies.offer_id)
+        responses = list(db.scalars(select(OfferResponse)).all())
+        audits = list(
+            db.scalars(
+                select(AuditLog).where(AuditLog.action == "offer_portal.responded")
+            ).all()
+        )
+        assert offer.status == "accepted"
+        assert offer.application.process.current_stage == "onboarding_pending_confirmation"
+        assert [item.to_stage for item in offer.application.process.events] == [
+            "offer_pending_response",
+            "onboarding_pending_confirmation",
+        ]
+        assert len(responses) == len(audits) == 1
+        assert responses[0].idempotency_key == response_key
+        assert audits[0].actor_username == "candidate_portal"
+        assert audits[0].details["decision"] == "accepted"
+
+
+@pytest.mark.anyio
+async def test_candidate_rejects_offer_with_structured_reason(
+    portal_dependencies: PortalDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as internal:
+        await _login(internal, "portal-recruiter")
+        created = await _create_link(internal, portal_dependencies)
+        token = created.json()["portal_token"]
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as portal:
+        verification_token = await _verify_link(portal, token)
+        missing_reason = await portal.post(
+            "/portal/offers/respond",
+            json={
+                "token": token,
+                "verification_token": verification_token,
+                "idempotency_key": str(uuid.uuid4()),
+                "decision": "rejected",
+            },
+        )
+        rejected = await portal.post(
+            "/portal/offers/respond",
+            json={
+                "token": token,
+                "verification_token": verification_token,
+                "idempotency_key": str(uuid.uuid4()),
+                "decision": "rejected",
+                "rejection_reason_code": "compensation",
+                "rejection_note": "  薪资未达到预期  ",
+            },
+        )
+
+    assert missing_reason.status_code == 422
+    assert rejected.status_code == 200
+    assert rejected.json()["progress"] == "declined"
+    assert rejected.json()["response"]["rejection_reason_code"] == "compensation"
+    assert rejected.json()["response"]["rejection_note"] == "薪资未达到预期"
+    with portal_dependencies.session_factory() as db:
+        offer = db.get(Offer, portal_dependencies.offer_id)
+        assert offer.status == "declined"
+        assert offer.application.process.current_stage == "offer_rejected"
+
+
+@pytest.mark.anyio
+async def test_candidate_response_rejects_invalid_session_and_conflicting_replies(
+    portal_dependencies: PortalDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as internal:
+        await _login(internal, "portal-recruiter")
+        created = await _create_link(internal, portal_dependencies)
+        token = created.json()["portal_token"]
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as portal:
+        invalid_session = await portal.post(
+            "/portal/offers/respond",
+            json={
+                "token": token,
+                "verification_token": "x" * 43,
+                "idempotency_key": str(uuid.uuid4()),
+                "decision": "accepted",
+            },
+        )
+        verification_token = await _verify_link(portal, token)
+        response_key = uuid.uuid4()
+        accepted = await portal.post(
+            "/portal/offers/respond",
+            json={
+                "token": token,
+                "verification_token": verification_token,
+                "idempotency_key": str(response_key),
+                "decision": "accepted",
+            },
+        )
+        different_key = await portal.post(
+            "/portal/offers/respond",
+            json={
+                "token": token,
+                "verification_token": verification_token,
+                "idempotency_key": str(uuid.uuid4()),
+                "decision": "accepted",
+            },
+        )
+        different_decision = await portal.post(
+            "/portal/offers/respond",
+            json={
+                "token": token,
+                "verification_token": verification_token,
+                "idempotency_key": str(response_key),
+                "decision": "rejected",
+                "rejection_reason_code": "other",
+            },
+        )
+
+    assert invalid_session.status_code == 401
+    assert accepted.status_code == 200
+    assert different_key.status_code == different_decision.status_code == 409
+    with portal_dependencies.session_factory() as db:
+        response = db.scalar(
+            select(OfferResponse).where(
+                OfferResponse.offer_id == portal_dependencies.offer_id
+            )
+        )
+        assert response is not None
+        assert response.decision == "accepted"
+
+
+@pytest.mark.anyio
+async def test_candidate_response_rolls_back_when_audit_write_fails(
+    portal_dependencies: PortalDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as internal:
+        await _login(internal, "portal-recruiter")
+        created = await _create_link(internal, portal_dependencies)
+        token = created.json()["portal_token"]
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as portal:
+        verification_token = await _verify_link(portal, token)
+
+    def fail_audit(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("synthetic audit failure")
+
+    monkeypatch.setattr(offer_portal_routes, "record_audit", fail_audit)
+    failing_transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(
+        transport=failing_transport,
+        base_url="http://test",
+    ) as portal:
+        failed = await portal.post(
+            "/portal/offers/respond",
+            json={
+                "token": token,
+                "verification_token": verification_token,
+                "idempotency_key": str(uuid.uuid4()),
+                "decision": "accepted",
+            },
+        )
+
+    assert failed.status_code == 500
+    with portal_dependencies.session_factory() as db:
+        offer = db.get(Offer, portal_dependencies.offer_id)
+        assert offer is not None
+        assert offer.status == "pending_response"
+        assert offer.candidate_response is None
+        assert offer.application.process.current_stage == "offer_pending_response"
+        assert [item.to_stage for item in offer.application.process.events] == [
+            "offer_pending_response"
+        ]
+        assert db.scalar(select(OfferResponse)) is None

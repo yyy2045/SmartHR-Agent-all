@@ -1,23 +1,27 @@
 import hmac
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.models import JobApplication, Offer, OfferPortalLink
+from app.models import CandidateProcess, JobApplication, Offer, OfferPortalLink, OfferResponse
 from app.redis_client import get_offer_portal_store
 from app.schemas.offer_portal import (
     CandidateOfferResponse,
     CandidateOfferView,
     OfferPortalDetailRequest,
+    OfferPortalRespondRequest,
     OfferPortalStatusResponse,
     OfferPortalTokenRequest,
     OfferPortalVerifiedResponse,
     OfferPortalVerifyRequest,
 )
 from app.services.audit import record_audit
+from app.services.candidate_process import change_candidate_process_stage
 from app.services.offer_portal import (
     OfferPortalVerificationStore,
     hash_portal_token,
@@ -64,6 +68,47 @@ def _ensure_link_usable(link: OfferPortalLink) -> None:
             status_code=status.HTTP_410_GONE,
             detail="候选人链接已过期",
         )
+
+
+def _get_locked_offer(db: Session, offer_id: uuid.UUID) -> Offer:
+    offer = db.scalar(
+        select(Offer)
+        .where(Offer.id == offer_id)
+        .with_for_update()
+        .options(
+            selectinload(Offer.application)
+            .selectinload(JobApplication.process)
+            .selectinload(CandidateProcess.events),
+            selectinload(Offer.application).selectinload(JobApplication.candidate),
+            selectinload(Offer.application).selectinload(JobApplication.job),
+            selectinload(Offer.versions),
+            selectinload(Offer.portal_links).selectinload(OfferPortalLink.response),
+            selectinload(Offer.candidate_response),
+        )
+        .execution_options(populate_existing=True)
+    )
+    if offer is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="候选人链接不存在或已失效",
+        )
+    return offer
+
+
+def _response_matches(response: OfferResponse, payload: OfferPortalRespondRequest) -> bool:
+    return (
+        response.idempotency_key == payload.idempotency_key
+        and response.decision == payload.decision
+        and response.rejection_reason_code == payload.rejection_reason_code
+        and response.rejection_note == payload.rejection_note
+    )
+
+
+def _response_conflict() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="候选人已经完成 Offer 回应，不能再次修改",
+    )
 
 
 def _candidate_offer_view(link: OfferPortalLink) -> CandidateOfferView:
@@ -214,3 +259,101 @@ def get_verified_offer_portal_detail(
             detail="候选人验证已失效，请重新验证",
         )
     return _candidate_offer_view(link)
+
+
+@router.post("/respond", response_model=CandidateOfferView)
+def respond_to_offer(
+    payload: OfferPortalRespondRequest,
+    db: DbSession,
+    portal_store: PortalStore,
+) -> CandidateOfferView:
+    initial_link = _get_portal_link(db, payload.token)
+    _ensure_link_usable(initial_link)
+    try:
+        identity = portal_store.get_verification(payload.verification_token)
+    except Exception as error:
+        raise _verification_unavailable() from error
+    if identity is None or identity.link_id != initial_link.id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="候选人验证已失效，请重新验证",
+        )
+
+    offer = _get_locked_offer(db, initial_link.offer_id)
+    link = next((item for item in offer.portal_links if item.id == initial_link.id), None)
+    if link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="候选人链接不存在或已失效",
+        )
+    _ensure_link_usable(link)
+
+    existing = offer.candidate_response
+    if existing is not None:
+        if _response_matches(existing, payload) and existing.portal_link_id == link.id:
+            return _candidate_offer_view(link)
+        raise _response_conflict()
+    if offer.status != "pending_response" or offer.current_version.id != link.version_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="当前 Offer 状态不允许候选人回应",
+        )
+
+    response = OfferResponse(
+        offer_id=offer.id,
+        version_id=link.version_id,
+        portal_link_id=link.id,
+        idempotency_key=payload.idempotency_key,
+        decision=payload.decision,
+        rejection_reason_code=payload.rejection_reason_code,
+        rejection_note=payload.rejection_note,
+        verification_completed_at=identity.verified_at,
+    )
+    db.add(response)
+    if payload.decision == "accepted":
+        offer.status = "accepted"
+        target_stage = "onboarding_pending_confirmation"
+        process_reason = "候选人已接受 Offer"
+    else:
+        offer.status = "declined"
+        target_stage = "offer_rejected"
+        process_reason = "候选人已拒绝 Offer"
+    change_candidate_process_stage(
+        db,
+        offer.application,
+        target_stage=target_stage,
+        reason=process_reason,
+        operator=None,
+    )
+    try:
+        db.flush()
+        record_audit(
+            db,
+            action="offer_portal.responded",
+            target_type="offer_response",
+            target_id=response.id,
+            job_id=offer.application.job_id,
+            result="success",
+            actor_username="candidate_portal",
+            details={
+                "offer_id": str(offer.id),
+                "portal_link_id": str(link.id),
+                "decision": payload.decision,
+                "rejection_reason_code": payload.rejection_reason_code,
+            },
+        )
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        concurrent_link = _get_portal_link(db, payload.token)
+        concurrent = concurrent_link.offer.candidate_response
+        if (
+            concurrent is not None
+            and concurrent.portal_link_id == concurrent_link.id
+            and _response_matches(concurrent, payload)
+        ):
+            return _candidate_offer_view(concurrent_link)
+        raise _response_conflict() from error
+
+    db.expire_all()
+    return _candidate_offer_view(_get_portal_link(db, payload.token))
