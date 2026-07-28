@@ -11,6 +11,9 @@ OfferStatus = Literal[
     "pending_approval",
     "approved",
     "rejected",
+    "pending_response",
+    "accepted",
+    "declined",
 ]
 class OfferContent(BaseModel):
     model_config = ConfigDict(extra="forbid")

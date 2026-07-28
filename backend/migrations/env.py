@@ -17,6 +17,8 @@ from app.models import (  # noqa: F401
     Offer,
     OfferApproval,
     OfferManagerConfirmation,
+    OfferPortalLink,
+    OfferResponse,
     OfferVersion,
     RecruitmentRequest,
     RecruitmentRequestApproval,

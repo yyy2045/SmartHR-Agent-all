@@ -10,6 +10,8 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     Integer,
     Numeric,
     String,
@@ -17,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,7 +37,8 @@ class Offer(Base):
         UniqueConstraint("application_id", name="uq_offers_application"),
         CheckConstraint(
             "status IN ('draft', 'pending_manager_confirmation', "
-            "'pending_approval', 'approved', 'rejected')",
+            "'pending_approval', 'approved', 'rejected', "
+            "'pending_response', 'accepted', 'declined')",
             name="ck_offers_status",
         ),
         CheckConstraint(
@@ -73,6 +77,18 @@ class Offer(Base):
         cascade="all, delete-orphan",
         order_by="OfferVersion.version_number",
     )
+    portal_links: Mapped[list[OfferPortalLink]] = relationship(
+        back_populates="offer",
+        cascade="all, delete-orphan",
+        order_by="OfferPortalLink.created_at",
+        overlaps="portal_links,version",
+    )
+    candidate_response: Mapped[OfferResponse | None] = relationship(
+        back_populates="offer",
+        cascade="all, delete-orphan",
+        uselist=False,
+        overlaps="candidate_responses,offer,response,version",
+    )
 
     @property
     def current_version(self) -> OfferVersion:
@@ -89,6 +105,11 @@ class OfferVersion(Base):
             "offer_id",
             "version_number",
             name="uq_offer_version_number",
+        ),
+        UniqueConstraint(
+            "offer_id",
+            "id",
+            name="uq_offer_versions_offer_id_id",
         ),
         UniqueConstraint(
             "offer_id",
@@ -168,6 +189,14 @@ class OfferVersion(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    portal_links: Mapped[list[OfferPortalLink]] = relationship(
+        back_populates="version",
+        overlaps="offer,portal_links",
+    )
+    candidate_responses: Mapped[list[OfferResponse]] = relationship(
+        back_populates="version",
+        overlaps="candidate_response,offer,portal_link,response",
+    )
 
 
 class OfferManagerConfirmation(Base):
@@ -228,3 +257,151 @@ class OfferApproval(Base):
 
     version: Mapped[OfferVersion] = relationship(back_populates="approval")
     approver: Mapped[User | None] = relationship(foreign_keys=[approver_id])
+
+
+class OfferPortalLink(Base):
+    __tablename__ = "offer_portal_links"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_offer_portal_links_token_hash"),
+        UniqueConstraint(
+            "offer_id",
+            "id",
+            name="uq_offer_portal_links_offer_id_id",
+        ),
+        UniqueConstraint(
+            "offer_id",
+            "idempotency_key",
+            name="uq_offer_portal_links_idempotency",
+        ),
+        Index(
+            "uq_offer_portal_links_active_offer",
+            "offer_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+        CheckConstraint(
+            "expires_at > created_at",
+            name="ck_offer_portal_links_expiry",
+        ),
+        CheckConstraint(
+            "(revoked_at IS NULL AND revoked_by_id IS NULL AND revocation_reason IS NULL) OR "
+            "(revoked_at IS NOT NULL AND revocation_reason IS NOT NULL)",
+            name="ck_offer_portal_links_revocation",
+        ),
+        ForeignKeyConstraint(
+            ["offer_id", "version_id"],
+            ["offer_versions.offer_id", "offer_versions.id"],
+            ondelete="CASCADE",
+            name="fk_offer_portal_links_offer_version",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    offer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    created_by_username: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    revoked_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    revoked_by_username: Mapped[str | None] = mapped_column(String(64))
+    revoked_by_display_name: Mapped[str | None] = mapped_column(String(100))
+    revocation_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    offer: Mapped[Offer] = relationship(
+        back_populates="portal_links",
+        overlaps="portal_links,version",
+    )
+    version: Mapped[OfferVersion] = relationship(
+        back_populates="portal_links",
+        overlaps="offer,portal_links",
+    )
+    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
+    revoked_by: Mapped[User | None] = relationship(foreign_keys=[revoked_by_id])
+    response: Mapped[OfferResponse | None] = relationship(
+        back_populates="portal_link",
+        uselist=False,
+        overlaps="candidate_response,candidate_responses,offer,version",
+    )
+
+
+class OfferResponse(Base):
+    __tablename__ = "offer_responses"
+    __table_args__ = (
+        UniqueConstraint("offer_id", name="uq_offer_responses_offer"),
+        UniqueConstraint("portal_link_id", name="uq_offer_responses_portal_link"),
+        UniqueConstraint(
+            "offer_id",
+            "idempotency_key",
+            name="uq_offer_responses_idempotency",
+        ),
+        CheckConstraint(
+            "decision IN ('accepted', 'rejected')",
+            name="ck_offer_responses_decision",
+        ),
+        CheckConstraint(
+            "(decision = 'accepted' AND rejection_reason_code IS NULL "
+            "AND rejection_note IS NULL) OR "
+            "(decision = 'rejected' AND rejection_reason_code IS NOT NULL "
+            "AND rejection_reason_code IN "
+            "('compensation', 'career', 'location', 'timing', 'other'))",
+            name="ck_offer_responses_rejection",
+        ),
+        ForeignKeyConstraint(
+            ["offer_id", "version_id"],
+            ["offer_versions.offer_id", "offer_versions.id"],
+            ondelete="CASCADE",
+            name="fk_offer_responses_offer_version",
+        ),
+        ForeignKeyConstraint(
+            ["offer_id", "portal_link_id"],
+            ["offer_portal_links.offer_id", "offer_portal_links.id"],
+            ondelete="CASCADE",
+            name="fk_offer_responses_offer_portal_link",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    offer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    portal_link_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    rejection_reason_code: Mapped[str | None] = mapped_column(String(30))
+    rejection_note: Mapped[str | None] = mapped_column(Text)
+    verification_completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    responded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    offer: Mapped[Offer] = relationship(
+        back_populates="candidate_response",
+        overlaps="candidate_responses,portal_link,response,version",
+    )
+    version: Mapped[OfferVersion] = relationship(
+        back_populates="candidate_responses",
+        overlaps="candidate_response,offer,portal_link,response",
+    )
+    portal_link: Mapped[OfferPortalLink] = relationship(
+        back_populates="response",
+        overlaps="candidate_response,candidate_responses,offer,version",
+    )

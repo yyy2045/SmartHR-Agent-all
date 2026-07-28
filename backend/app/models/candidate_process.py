@@ -33,6 +33,9 @@ PROCESS_STAGES = (
     "to_interview",
     "completed",
     "rejected",
+    "offer_pending_response",
+    "offer_rejected",
+    "onboarding_pending_confirmation",
 )
 PROCESS_STAGE_SQL = ", ".join(f"'{stage}'" for stage in PROCESS_STAGES)
 
