@@ -238,9 +238,7 @@ async def test_onboarding_list_and_detail_enforce_role_scope(
         assert recruiter_list.json()["items"][0]["candidate_phone"] == "13800001234"
 
         await _login(client, "onboarding-manager")
-        manager_detail = await client.get(
-            f"/onboardings/{onboarding_dependencies.onboarding_id}"
-        )
+        manager_detail = await client.get(f"/onboardings/{onboarding_dependencies.onboarding_id}")
         manager_write = await client.post(
             f"/onboardings/{onboarding_dependencies.onboarding_id}/date-decision",
             json={
@@ -257,17 +255,13 @@ async def test_onboarding_list_and_detail_enforce_role_scope(
 
         await _login(client, "other-onboarding-recruiter")
         other_list = await client.get("/onboardings")
-        other_detail = await client.get(
-            f"/onboardings/{onboarding_dependencies.onboarding_id}"
-        )
+        other_detail = await client.get(f"/onboardings/{onboarding_dependencies.onboarding_id}")
         assert other_list.json()["total"] == 0
         assert other_detail.status_code == 404
 
         await _login(client, "onboarding-approver")
         approver_list = await client.get("/onboardings")
-        approver_detail = await client.get(
-            f"/onboardings/{onboarding_dependencies.onboarding_id}"
-        )
+        approver_detail = await client.get(f"/onboardings/{onboarding_dependencies.onboarding_id}")
         assert approver_list.json()["total"] == 0
         assert approver_detail.status_code == 404
 
@@ -364,10 +358,30 @@ async def test_candidate_proposes_recruiter_accepts_and_admin_corrects_onboardin
         assert corrected.json()["status"] == "pending_start"
         assert corrected.json()["actual_start_date"] is None
         assert corrected.json()["version"] == 5
+        offer_detail = await client.get(f"/offers/{onboarding_dependencies.offer_id}")
+        assert offer_detail.status_code == 200
+        assert offer_detail.json()["onboarding"] == {
+            "id": str(onboarding_dependencies.onboarding_id),
+            "status": "pending_start",
+            "version": 5,
+            "action_owner": "none",
+            "expected_start_date": str(date.today() + timedelta(days=30)),
+            "candidate_proposed_date": str(proposed_date),
+            "recruiter_proposed_date": None,
+            "confirmed_start_date": str(proposed_date),
+            "actual_start_date": None,
+        }
 
     with onboarding_dependencies.session_factory() as db:
         onboarding = db.get(Onboarding, onboarding_dependencies.onboarding_id)
         assert onboarding.offer.status == "accepted"
+        assert onboarding.application.process.current_stage == "onboarding_pending_start"
+        assert [event.to_stage for event in onboarding.application.process.events] == [
+            "onboarding_pending_confirmation",
+            "onboarding_pending_start",
+            "onboarding_completed",
+            "onboarding_pending_start",
+        ]
         assert [event.action for event in onboarding.events] == [
             "created",
             "candidate_proposed_date",
@@ -377,15 +391,11 @@ async def test_candidate_proposes_recruiter_accepts_and_admin_corrects_onboardin
         ]
         proposal_audits = list(
             db.scalars(
-                select(AuditLog).where(
-                    AuditLog.action == "onboarding.candidate_proposed_date"
-                )
+                select(AuditLog).where(AuditLog.action == "onboarding.candidate_proposed_date")
             )
         )
         accept_audits = list(
-            db.scalars(
-                select(AuditLog).where(AuditLog.action == "onboarding.date_accept")
-            )
+            db.scalars(select(AuditLog).where(AuditLog.action == "onboarding.date_accept"))
         )
         assert len(proposal_audits) == len(accept_audits) == 1
 
@@ -454,6 +464,12 @@ async def test_recruiter_proposes_candidate_confirms_then_abandons(
         offer = db.get(Offer, onboarding_dependencies.offer_id)
         assert offer.status == "accepted"
         assert offer.candidate_response.decision == "accepted"
+        assert offer.application.process.current_stage == "onboarding_abandoned"
+        assert [event.to_stage for event in offer.application.process.events] == [
+            "onboarding_pending_confirmation",
+            "onboarding_pending_start",
+            "onboarding_abandoned",
+        ]
 
 
 @pytest.mark.anyio
@@ -545,9 +561,7 @@ async def test_recruiter_regenerates_onboarding_access_link_without_new_response
         assert len(list(db.scalars(select(Onboarding)))) == 1
         audits = list(
             db.scalars(
-                select(AuditLog).where(
-                    AuditLog.action == "onboarding.portal_link_regenerated"
-                )
+                select(AuditLog).where(AuditLog.action == "onboarding.portal_link_regenerated")
             )
         )
         assert len(audits) == 1

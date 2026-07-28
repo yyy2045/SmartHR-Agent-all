@@ -163,7 +163,7 @@ def candidate_process_dependencies() -> Generator[CandidateProcessDependencies, 
                         replacement_text="[PHONE]",
                         start_offset=19,
                         end_offset=30,
-                    )
+                    ),
                 ],
             )
         ]
@@ -264,8 +264,7 @@ async def test_deep_job_permissions_and_contact_field_scope(
             f"{dependency.document_id}/file"
         )
         stage_change = await manager.post(
-            f"/jobs/{dependency.job_id}/candidate-processes/"
-            f"{dependency.document_id}/stage",
+            f"/jobs/{dependency.job_id}/candidate-processes/{dependency.document_id}/stage",
             json={"expected_stage": "unprocessed", "target_stage": "pending"},
         )
 
@@ -313,6 +312,31 @@ async def test_board_requires_authentication_and_lists_latest_candidate(
     assert body[0]["skills"] == ["Python"]
     assert body[0]["batch_name"] == "七月批次"
     assert body[0]["interview_evaluation"] is None
+    assert body[0]["onboarding"] is None
+
+
+@pytest.mark.asyncio
+async def test_board_sorts_automated_onboarding_stage_without_manual_transition(
+    candidate_process_dependencies: CandidateProcessDependencies,
+) -> None:
+    dependency = candidate_process_dependencies
+    with dependency.session_factory() as db:
+        db.add(
+            CandidateProcess(
+                application_id=dependency.application_id,
+                current_stage="onboarding_pending_start",
+            )
+        )
+        db.commit()
+
+    path = f"/jobs/{dependency.job_id}/candidate-processes"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.get(path)
+
+    assert response.status_code == 200
+    assert response.json()[0]["current_stage"] == "onboarding_pending_start"
 
 
 @pytest.mark.asyncio
@@ -432,10 +456,7 @@ async def test_stage_changes_are_concurrency_safe_and_record_timeline(
     candidate_process_dependencies: CandidateProcessDependencies,
 ) -> None:
     dependency = candidate_process_dependencies
-    path = (
-        f"/jobs/{dependency.job_id}/candidate-processes/"
-        f"{dependency.document_id}/stage"
-    )
+    path = f"/jobs/{dependency.job_id}/candidate-processes/{dependency.document_id}/stage"
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         await login(client)
@@ -456,8 +477,7 @@ async def test_stage_changes_are_concurrency_safe_and_record_timeline(
             json={"decision": "pending"},
         )
         timeline = await client.get(
-            f"/jobs/{dependency.job_id}/candidate-processes/"
-            f"{dependency.document_id}/timeline"
+            f"/jobs/{dependency.job_id}/candidate-processes/{dependency.document_id}/timeline"
         )
 
     assert shortlisted.status_code == 200
@@ -490,10 +510,7 @@ async def test_backward_and_rejection_require_reason_and_terminal_stage_is_locke
     candidate_process_dependencies: CandidateProcessDependencies,
 ) -> None:
     dependency = candidate_process_dependencies
-    path = (
-        f"/jobs/{dependency.job_id}/candidate-processes/"
-        f"{dependency.document_id}/stage"
-    )
+    path = f"/jobs/{dependency.job_id}/candidate-processes/{dependency.document_id}/stage"
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         await login(client)

@@ -27,6 +27,7 @@ from app.schemas.offer import (
     OfferApprovalDecisionRequest,
     OfferCreateRequest,
     OfferManagerDecisionRequest,
+    OfferOnboardingSummaryResponse,
     OfferResponse,
     OfferStatus,
     OfferSubmitRequest,
@@ -52,6 +53,7 @@ from app.services.offer_portal import (
     portal_link_is_expired,
     revoke_portal_link,
 )
+from app.services.onboarding import onboarding_action_owner
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -67,6 +69,7 @@ _OFFER_LOAD_OPTIONS = (
     selectinload(Offer.versions).selectinload(OfferVersion.approval),
     selectinload(Offer.portal_links).selectinload(OfferPortalLink.response),
     selectinload(Offer.candidate_response),
+    selectinload(Offer.onboarding),
 )
 _CONTENT_FIELDS = (
     "monthly_salary",
@@ -147,9 +150,7 @@ def _get_writable_application(
         )
         .options(
             selectinload(JobApplication.candidate),
-            selectinload(JobApplication.interview_report).selectinload(
-                InterviewReport.versions
-            ),
+            selectinload(JobApplication.interview_report).selectinload(InterviewReport.versions),
             selectinload(JobApplication.offer).selectinload(Offer.versions),
         )
     )
@@ -264,6 +265,7 @@ def _version_response(version: OfferVersion) -> OfferVersionResponse:
 
 def _offer_response(offer: Offer) -> OfferResponse:
     application = offer.application
+    onboarding = offer.onboarding
     return OfferResponse(
         id=offer.id,
         application_id=application.id,
@@ -280,6 +282,21 @@ def _offer_response(offer: Offer) -> OfferResponse:
         created_by_id=offer.created_by_id,
         created_at=offer.created_at,
         updated_at=offer.updated_at,
+        onboarding=(
+            OfferOnboardingSummaryResponse(
+                id=onboarding.id,
+                status=onboarding.status,
+                version=onboarding.version,
+                action_owner=onboarding_action_owner(onboarding),
+                expected_start_date=offer.current_version.expected_start_date,
+                candidate_proposed_date=onboarding.candidate_proposed_date,
+                recruiter_proposed_date=onboarding.recruiter_proposed_date,
+                confirmed_start_date=onboarding.confirmed_start_date,
+                actual_start_date=onboarding.actual_start_date,
+            )
+            if onboarding is not None
+            else None
+        ),
     )
 
 
@@ -514,9 +531,7 @@ def create_offer_portal_link(
     except IntegrityError as error:
         db.rollback()
         concurrent = _get_offer(db, offer_id, current_user)
-        replay = _find_portal_link_by_creation_key(
-            concurrent, payload.idempotency_key
-        )
+        replay = _find_portal_link_by_creation_key(concurrent, payload.idempotency_key)
         if replay is not None:
             return _portal_link_response(replay)
         raise HTTPException(
@@ -546,8 +561,7 @@ def regenerate_offer_portal_link(
             (
                 item
                 for item in offer.portal_links
-                if item.revocation_idempotency_key
-                == payload.revocation_idempotency_key
+                if item.revocation_idempotency_key == payload.revocation_idempotency_key
             ),
             None,
         )
@@ -653,9 +667,7 @@ def revoke_offer_portal_link(
             link.revocation_idempotency_key == payload.idempotency_key
             and link.revocation_reason == payload.reason
         ):
-            return OfferPortalLinkResponse.model_validate(
-                _portal_link_response(link)
-            )
+            return OfferPortalLinkResponse.model_validate(_portal_link_response(link))
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="候选人链接已经撤回",
@@ -706,9 +718,7 @@ def create_offer(
     current_user: CurrentUser,
     db: DbSession,
 ) -> OfferResponse:
-    job, application = _get_writable_application(
-        db, job_id, application_id, current_user
-    )
+    job, application = _get_writable_application(db, job_id, application_id, current_user)
     report = _confirmed_hire_report(application)
     if application.offer is not None:
         replay = _find_version_by_key(application.offer, payload.idempotency_key)

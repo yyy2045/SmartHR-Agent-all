@@ -5,6 +5,8 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.schemas.onboarding import OnboardingActionOwner, OnboardingStatus
+
 OfferStatus = Literal[
     "draft",
     "pending_manager_confirmation",
@@ -15,6 +17,8 @@ OfferStatus = Literal[
     "accepted",
     "declined",
 ]
+
+
 class OfferContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -152,6 +156,18 @@ class OfferVersionResponse(OfferContent):
     approval: OfferApprovalResponse | None
 
 
+class OfferOnboardingSummaryResponse(BaseModel):
+    id: uuid.UUID
+    status: OnboardingStatus
+    version: int
+    action_owner: OnboardingActionOwner
+    expected_start_date: date
+    candidate_proposed_date: date | None
+    recruiter_proposed_date: date | None
+    confirmed_start_date: date | None
+    actual_start_date: date | None
+
+
 class OfferResponse(BaseModel):
     id: uuid.UUID
     application_id: uuid.UUID
@@ -168,6 +184,7 @@ class OfferResponse(BaseModel):
     created_by_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    onboarding: OfferOnboardingSummaryResponse | None
 
 
 class OfferSummaryResponse(BaseModel):

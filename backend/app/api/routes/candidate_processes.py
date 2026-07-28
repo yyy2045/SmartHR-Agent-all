@@ -25,6 +25,7 @@ from app.models import (
 )
 from app.schemas.candidate_process import (
     CandidateProcessCardResponse,
+    CandidateProcessOnboardingResponse,
     CandidateProcessTimelineEventResponse,
     CandidateStage,
     CandidateStageUpdate,
@@ -46,6 +47,12 @@ STAGE_ORDER: tuple[CandidateStage, ...] = (
     "contacted",
     "to_interview",
     "completed",
+    "offer_pending_response",
+    "onboarding_pending_confirmation",
+    "onboarding_pending_start",
+    "onboarding_completed",
+    "offer_rejected",
+    "onboarding_abandoned",
     "rejected",
 )
 STAGE_RANK = {stage: index for index, stage in enumerate(STAGE_ORDER)}
@@ -57,6 +64,12 @@ ALLOWED_TRANSITIONS: dict[CandidateStage, set[CandidateStage]] = {
     "contacted": {"to_contact", "to_interview", "rejected"},
     "to_interview": {"contacted", "completed", "rejected"},
     "completed": set(),
+    "offer_pending_response": set(),
+    "offer_rejected": set(),
+    "onboarding_pending_confirmation": set(),
+    "onboarding_pending_start": set(),
+    "onboarding_completed": set(),
+    "onboarding_abandoned": set(),
     "rejected": set(),
 }
 
@@ -70,6 +83,9 @@ def _result_options() -> tuple[object, ...]:
         .selectinload(CandidateProcess.events),
         selectinload(ScreeningResult.document)
         .selectinload(ResumeDocument.application)
+        .selectinload(JobApplication.onboarding),
+        selectinload(ScreeningResult.document)
+        .selectinload(ResumeDocument.application)
         .selectinload(JobApplication.interview_schedule)
         .selectinload(CandidateInterviewSchedule.rounds)
         .selectinload(CandidateInterviewRound.plan_round),
@@ -80,9 +96,7 @@ def _result_options() -> tuple[object, ...]:
         .selectinload(CandidateInterviewRound.evaluation),
         selectinload(ScreeningResult.candidate_profile),
         selectinload(ScreeningResult.criteria_version),
-        selectinload(ScreeningResult.recruiter_decisions).selectinload(
-            RecruiterDecision.operator
-        ),
+        selectinload(ScreeningResult.recruiter_decisions).selectinload(RecruiterDecision.operator),
     )
 
 
@@ -126,9 +140,7 @@ def _interview_evaluation_progress(
     action_status = None
     if action_round is not None:
         action_status = (
-            action_round.evaluation.status
-            if action_round.evaluation is not None
-            else "not_started"
+            action_round.evaluation.status if action_round.evaluation is not None else "not_started"
         )
     return InterviewEvaluationProgressResponse(
         status=progress_status,
@@ -157,7 +169,18 @@ def _manual_decision(
             return "rejected"
         if process.current_stage in {"pending", "shortlisted"}:
             return process.current_stage  # type: ignore[return-value]
-        if process.current_stage in {"to_contact", "contacted", "to_interview", "completed"}:
+        if process.current_stage in {
+            "to_contact",
+            "contacted",
+            "to_interview",
+            "completed",
+            "offer_pending_response",
+            "offer_rejected",
+            "onboarding_pending_confirmation",
+            "onboarding_pending_start",
+            "onboarding_completed",
+            "onboarding_abandoned",
+        }:
             return "shortlisted"
     latest = _latest_document_decision(results)
     return latest.decision if latest is not None else "unprocessed"  # type: ignore[return-value]
@@ -400,8 +423,14 @@ def list_candidate_processes(
                 stage_entered_at=_stage_entered_at(result, document_results, process),
                 skills=skills,
                 analysis_created_at=result.created_at,
-                interview_evaluation=_interview_evaluation_progress(
-                    application.interview_schedule
+                interview_evaluation=_interview_evaluation_progress(application.interview_schedule),
+                onboarding=(
+                    CandidateProcessOnboardingResponse(
+                        id=application.onboarding.id,
+                        status=application.onboarding.status,
+                    )
+                    if application.onboarding is not None
+                    else None
                 ),
             )
         )
@@ -581,11 +610,7 @@ def get_candidate_process_timeline(
     application = document.application
     process = application.process if application is not None else None
     if process is not None:
-        decisions = [
-            decision
-            for decision in decisions
-            if decision.created_at < process.created_at
-        ]
+        decisions = [decision for decision in decisions if decision.created_at < process.created_at]
     timeline = [
         CandidateProcessTimelineEventResponse(
             event_type="decision",

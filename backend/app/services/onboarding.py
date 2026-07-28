@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.models import Offer, OfferPortalLink, OfferResponse, Onboarding, OnboardingEvent, User
+from app.services.candidate_process import change_candidate_process_stage
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _WRITABLE_STATUSES = {
@@ -14,6 +15,29 @@ _WRITABLE_STATUSES = {
     "candidate_proposed_date",
     "pending_start",
 }
+_PROCESS_STAGE_BY_STATUS = {
+    "pending_confirmation": "onboarding_pending_confirmation",
+    "candidate_proposed_date": "onboarding_pending_confirmation",
+    "pending_start": "onboarding_pending_start",
+    "onboarded": "onboarding_completed",
+    "abandoned": "onboarding_abandoned",
+}
+
+
+def _sync_candidate_process(
+    db: Session,
+    onboarding: Onboarding,
+    *,
+    reason: str,
+    actor: User | None,
+) -> None:
+    change_candidate_process_stage(
+        db,
+        onboarding.application,
+        target_stage=_PROCESS_STAGE_BY_STATUS[onboarding.status],
+        reason=reason,
+        operator=actor,
+    )
 
 
 class OnboardingConflictError(Exception):
@@ -133,9 +157,7 @@ def create_onboarding_for_acceptance(
         reason="候选人接受 Offer，系统创建入职记录",
         actor_type="system",
     )
-    portal_link.expires_at = onboarding_portal_expiry(
-        offer.current_version.expected_start_date
-    )
+    portal_link.expires_at = onboarding_portal_expiry(offer.current_version.expected_start_date)
     return onboarding
 
 
@@ -156,11 +178,7 @@ def ensure_replay(
     date_after: date | None,
     reason: str | None,
 ) -> None:
-    if (
-        event.action != action
-        or event.date_after != date_after
-        or event.reason != reason
-    ):
+    if event.action != action or event.date_after != date_after or event.reason != reason:
         raise OnboardingConflictError("幂等键已用于不同的入职操作")
 
 
@@ -200,8 +218,7 @@ def candidate_confirm_date(
     if onboarding.status != "pending_confirmation":
         raise OnboardingConflictError("当前入职状态不等待候选人确认日期")
     expected = (
-        onboarding.recruiter_proposed_date
-        or onboarding.offer.current_version.expected_start_date
+        onboarding.recruiter_proposed_date or onboarding.offer.current_version.expected_start_date
     )
     if start_date != expected:
         raise OnboardingConflictError("确认日期不是招聘方当前提议日期")
@@ -221,6 +238,12 @@ def candidate_confirm_date(
         date_before=previous_date,
         date_after=start_date,
         actor_type="candidate",
+    )
+    _sync_candidate_process(
+        db,
+        onboarding,
+        reason="候选人已确认入职日期",
+        actor=None,
     )
     sync_portal_access_expiry(onboarding)
     return event
@@ -268,6 +291,12 @@ def candidate_propose_date(
         date_after=proposed_date,
         reason=note,
         actor_type="candidate",
+    )
+    _sync_candidate_process(
+        db,
+        onboarding,
+        reason="候选人提出新的入职日期",
+        actor=None,
     )
     sync_portal_access_expiry(onboarding)
     return event
@@ -334,6 +363,12 @@ def recruiter_date_decision(
         actor_type="admin" if actor.has_role("administrator") else "recruiter",
         actor=actor,
     )
+    _sync_candidate_process(
+        db,
+        onboarding,
+        reason=("招聘方已确认候选人入职日期" if decision == "accept" else "招聘方提出新的入职日期"),
+        actor=actor,
+    )
     sync_portal_access_expiry(onboarding)
     return event
 
@@ -377,6 +412,12 @@ def mark_onboarded(
         date_after=actual_start_date,
         reason=note,
         actor_type="admin" if actor.has_role("administrator") else "recruiter",
+        actor=actor,
+    )
+    _sync_candidate_process(
+        db,
+        onboarding,
+        reason="招聘方已标记候选人入职",
         actor=actor,
     )
     sync_portal_access_expiry(onboarding)
@@ -424,6 +465,12 @@ def abandon_onboarding(
         actor_type=actor_type,
         actor=actor,
     )
+    _sync_candidate_process(
+        db,
+        onboarding,
+        reason="入职流程已标记为放弃",
+        actor=actor,
+    )
     sync_portal_access_expiry(onboarding)
     return event
 
@@ -464,6 +511,12 @@ def correct_onboarded_status(
         date_after=onboarding.confirmed_start_date,
         reason=reason,
         actor_type="admin",
+        actor=actor,
+    )
+    _sync_candidate_process(
+        db,
+        onboarding,
+        reason="管理员更正误标的已入职状态",
         actor=actor,
     )
     sync_portal_access_expiry(onboarding)

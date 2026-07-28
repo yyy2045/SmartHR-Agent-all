@@ -16,6 +16,9 @@ CandidateStage = Literal[
     "offer_pending_response",
     "offer_rejected",
     "onboarding_pending_confirmation",
+    "onboarding_pending_start",
+    "onboarding_completed",
+    "onboarding_abandoned",
 ]
 CandidateProcessEventType = Literal["decision", "stage"]
 InterviewEvaluationProgressStatus = Literal[
@@ -39,6 +42,17 @@ class InterviewEvaluationProgressResponse(BaseModel):
     action_evaluation_status: InterviewEvaluationActionStatus | None
 
 
+class CandidateProcessOnboardingResponse(BaseModel):
+    id: uuid.UUID
+    status: Literal[
+        "pending_confirmation",
+        "candidate_proposed_date",
+        "pending_start",
+        "onboarded",
+        "abandoned",
+    ]
+
+
 class CandidateProcessCardResponse(BaseModel):
     process_id: uuid.UUID | None
     application_id: uuid.UUID
@@ -57,6 +71,7 @@ class CandidateProcessCardResponse(BaseModel):
     skills: list[str]
     analysis_created_at: datetime
     interview_evaluation: InterviewEvaluationProgressResponse | None
+    onboarding: CandidateProcessOnboardingResponse | None
 
 
 class CandidateStageUpdate(BaseModel):

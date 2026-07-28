@@ -10,6 +10,7 @@ from app.api.dependencies.auth import CurrentUser
 from app.config import settings
 from app.database import get_db
 from app.models import (
+    CandidateProcess,
     Job,
     JobApplication,
     Offer,
@@ -62,6 +63,9 @@ DbSession = Annotated[Session, Depends(get_db)]
 _LOAD_OPTIONS = (
     selectinload(Onboarding.application).selectinload(JobApplication.candidate),
     selectinload(Onboarding.application).selectinload(JobApplication.job),
+    selectinload(Onboarding.application)
+    .selectinload(JobApplication.process)
+    .selectinload(CandidateProcess.events),
     selectinload(Onboarding.offer).selectinload(Offer.versions),
     selectinload(Onboarding.offer)
     .selectinload(Offer.portal_links)
@@ -332,9 +336,7 @@ def abandon_candidate_onboarding(
             source=payload.source,
             reason_code=payload.reason_code,
             note=payload.note,
-            actor_type=(
-                "admin" if current_user.has_role("administrator") else "recruiter"
-            ),
+            actor_type=("admin" if current_user.has_role("administrator") else "recruiter"),
             actor=current_user,
         )
     except (OnboardingConflictError, OnboardingValidationError) as error:
@@ -403,11 +405,7 @@ def _verification_digest(onboarding: Onboarding, link_id: uuid.UUID) -> str:
 
 def _active_link(onboarding: Onboarding) -> OfferPortalLink | None:
     return next(
-        (
-            link
-            for link in reversed(onboarding.offer.portal_links)
-            if link.revoked_at is None
-        ),
+        (link for link in reversed(onboarding.offer.portal_links) if link.revoked_at is None),
         None,
     )
 
@@ -547,8 +545,7 @@ def regenerate_onboarding_access_link(
             (
                 link
                 for link in onboarding.offer.portal_links
-                if link.revocation_idempotency_key
-                == payload.revocation_idempotency_key
+                if link.revocation_idempotency_key == payload.revocation_idempotency_key
             ),
             None,
         )
