@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from app.models.interview_report import InterviewReport
     from app.models.job import Job
     from app.models.offer import Offer
+    from app.models.onboarding import Onboarding
     from app.models.resume import ResumeDocument
     from app.models.user import User
 
@@ -168,6 +169,13 @@ class JobApplication(Base):
         back_populates="application",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    onboarding: Mapped[Onboarding | None] = relationship(
+        back_populates="application",
+        cascade="all, delete-orphan",
+        uselist=False,
+        foreign_keys="Onboarding.application_id",
+        overlaps="offer,onboarding",
     )
 
 

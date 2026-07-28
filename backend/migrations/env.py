@@ -20,6 +20,8 @@ from app.models import (  # noqa: F401
     OfferPortalLink,
     OfferResponse,
     OfferVersion,
+    Onboarding,
+    OnboardingEvent,
     RecruitmentRequest,
     RecruitmentRequestApproval,
     RecruitmentRequestVersion,

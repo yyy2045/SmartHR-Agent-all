@@ -28,6 +28,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.candidate import JobApplication
     from app.models.interview_report import InterviewReportVersion
+    from app.models.onboarding import Onboarding
     from app.models.user import User
 
 
@@ -35,6 +36,11 @@ class Offer(Base):
     __tablename__ = "offers"
     __table_args__ = (
         UniqueConstraint("application_id", name="uq_offers_application"),
+        UniqueConstraint(
+            "application_id",
+            "id",
+            name="uq_offers_application_id_id",
+        ),
         CheckConstraint(
             "status IN ('draft', 'pending_manager_confirmation', "
             "'pending_approval', 'approved', 'rejected', "
@@ -88,6 +94,13 @@ class Offer(Base):
         cascade="all, delete-orphan",
         uselist=False,
         overlaps="candidate_responses,offer,response,version",
+    )
+    onboarding: Mapped[Onboarding | None] = relationship(
+        back_populates="offer",
+        cascade="all, delete-orphan",
+        uselist=False,
+        foreign_keys="[Onboarding.application_id, Onboarding.offer_id]",
+        overlaps="application,onboarding",
     )
 
     @property
@@ -353,6 +366,11 @@ class OfferResponse(Base):
     __tablename__ = "offer_responses"
     __table_args__ = (
         UniqueConstraint("offer_id", name="uq_offer_responses_offer"),
+        UniqueConstraint(
+            "offer_id",
+            "id",
+            name="uq_offer_responses_offer_id_id",
+        ),
         UniqueConstraint("portal_link_id", name="uq_offer_responses_portal_link"),
         UniqueConstraint(
             "offer_id",
@@ -413,4 +431,11 @@ class OfferResponse(Base):
     portal_link: Mapped[OfferPortalLink] = relationship(
         back_populates="response",
         overlaps="candidate_response,candidate_responses,offer,version",
+    )
+    onboarding: Mapped[Onboarding | None] = relationship(
+        back_populates="offer_response",
+        cascade="all, delete-orphan",
+        uselist=False,
+        foreign_keys="[Onboarding.offer_id, Onboarding.offer_response_id]",
+        overlaps="offer,onboarding",
     )

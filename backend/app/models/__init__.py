@@ -24,6 +24,7 @@ from app.models.offer import (
     OfferResponse,
     OfferVersion,
 )
+from app.models.onboarding import Onboarding, OnboardingEvent
 from app.models.recruitment_request import (
     RecruitmentRequest,
     RecruitmentRequestApproval,
@@ -73,6 +74,8 @@ __all__ = [
     "OfferPortalLink",
     "OfferResponse",
     "OfferVersion",
+    "Onboarding",
+    "OnboardingEvent",
     "RecruiterDecision",
     "RecruitmentRequest",
     "RecruitmentRequestApproval",
