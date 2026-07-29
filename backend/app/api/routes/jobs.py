@@ -37,6 +37,7 @@ from app.services.ai_client import (
 )
 from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job, job_scope_clause
+from app.services.talent_recommendation import mark_runs_stale_for_new_criteria
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -446,6 +447,12 @@ def confirm_criteria_version(
     version.status = "confirmed"
     version.confirmed_by_id = current_user.id
     version.confirmed_at = datetime.now(UTC)
+    mark_runs_stale_for_new_criteria(
+        db,
+        job_id=job.id,
+        criteria_version_id=version.id,
+        actor=current_user,
+    )
     record_audit(
         db,
         action="criteria.confirmed",
