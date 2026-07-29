@@ -24,7 +24,7 @@ export function LoginPage() {
   const [formError, setFormError] = useState<string | null>(null)
 
   if (!auth.isLoading && auth.user) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/workbench" replace />
   }
 
   async function handleSubmit(credentials: LoginCredentials) {
@@ -35,7 +35,7 @@ export function LoginPage() {
         navigate('/change-password', { replace: true })
         return
       }
-      const destination = (location.state as LocationState | null)?.from || '/'
+      const destination = (location.state as LocationState | null)?.from || '/workbench'
       navigate(destination, { replace: true })
     } catch (error) {
       setFormError(error instanceof ApiError ? error.message : '登录失败，请稍后重试')

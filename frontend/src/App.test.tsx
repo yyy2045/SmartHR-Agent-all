@@ -13,6 +13,48 @@ const user = {
   roles: ['recruiter'],
 }
 
+function workbenchResponse(path: string): Response | null {
+  if (path === '/api/workbench/summary') {
+    return new Response(
+      JSON.stringify({
+        as_of: '2026-07-29T08:00:00Z',
+        total_count: 0,
+        action_required_count: 0,
+        sections: [
+          { section: 'action_required', count: 0 },
+          { section: 'waiting_external', count: 0 },
+          { section: 'risk_failure', count: 0 },
+        ],
+        priorities: [
+          { priority: 'urgent', count: 0 },
+          { priority: 'high', count: 0 },
+          { priority: 'normal', count: 0 },
+        ],
+        types: [],
+        jobs: [],
+        partial: false,
+        failed_sources: [],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+  if (path.startsWith('/api/workbench/items')) {
+    return new Response(
+      JSON.stringify({
+        as_of: '2026-07-29T08:00:00Z',
+        items: [],
+        total: 0,
+        page: 1,
+        page_size: 6,
+        partial: false,
+        failed_sources: [],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+  return null
+}
+
 describe('authentication flow', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -22,6 +64,8 @@ describe('authentication flow', () => {
   it('将未登录用户引导到登录页，并支持登录和退出', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = input.toString()
+      const workbench = workbenchResponse(path)
+      if (workbench) return workbench
       if (path === '/api/auth/me') {
         return new Response(JSON.stringify({ detail: '请先登录' }), {
           status: 401,
@@ -69,7 +113,8 @@ describe('authentication flow', () => {
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'example-password' } })
     fireEvent.click(screen.getByRole('button', { name: /登\s*录/ }))
 
-    expect(await screen.findByRole('heading', { name: '岗位管理' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '招聘工作台' })).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/workbench')
     expect(screen.getByText('招聘专员')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
@@ -82,6 +127,8 @@ describe('authentication flow', () => {
     const temporaryUser = { ...user, must_change_password: true }
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = input.toString()
+      const workbench = workbenchResponse(path)
+      if (workbench) return workbench
       if (path === '/api/auth/me') {
         return new Response(JSON.stringify(temporaryUser), {
           status: 200,
@@ -133,7 +180,7 @@ describe('authentication flow', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存并进入工作台' }))
 
-    expect(await screen.findByRole('heading', { name: '岗位管理' })).toBeInTheDocument()
-    expect(window.location.pathname).toBe('/')
+    expect(await screen.findByRole('heading', { name: '招聘工作台' })).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/workbench')
   })
 })

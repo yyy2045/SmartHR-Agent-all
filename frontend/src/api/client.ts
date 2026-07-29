@@ -53,6 +53,78 @@ export interface JobRecord extends JobInput {
   updated_at: string
 }
 
+export type WorkbenchSection = 'action_required' | 'waiting_external' | 'risk_failure'
+export type WorkbenchPriority = 'urgent' | 'high' | 'normal'
+export type WorkbenchItemType =
+  | 'recruitment_request_revision'
+  | 'recruitment_request_approval'
+  | 'manual_screening'
+  | 'interview_scheduling'
+  | 'interview_evaluation'
+  | 'interview_report'
+  | 'offer_manager_confirmation'
+  | 'offer_approval'
+  | 'offer_link'
+  | 'onboarding_date'
+  | 'onboarding_outcome'
+  | 'system_failure'
+  | 'temporary_password_account'
+export type WorkbenchSource =
+  | 'recruitment_requests'
+  | 'screening'
+  | 'interviews'
+  | 'offers'
+  | 'onboardings'
+  | 'system_failures'
+  | 'accounts'
+
+export interface WorkbenchItemRecord {
+  stable_key: string
+  section: WorkbenchSection
+  item_type: WorkbenchItemType
+  source: WorkbenchSource
+  priority: WorkbenchPriority
+  title: string
+  summary: string
+  count: number
+  occurred_at: string
+  risk_at: string | null
+  job_id: string | null
+  job_title: string | null
+  target_path: string
+}
+
+export interface WorkbenchSummaryRecord {
+  as_of: string
+  total_count: number
+  action_required_count: number
+  sections: Array<{ section: WorkbenchSection; count: number }>
+  priorities: Array<{ priority: WorkbenchPriority; count: number }>
+  types: Array<{ item_type: WorkbenchItemType; count: number }>
+  jobs: Array<{ id: string; title: string }>
+  partial: boolean
+  failed_sources: WorkbenchSource[]
+}
+
+export interface WorkbenchListRecord {
+  as_of: string
+  items: WorkbenchItemRecord[]
+  total: number
+  page: number
+  page_size: number
+  partial: boolean
+  failed_sources: WorkbenchSource[]
+}
+
+export interface WorkbenchFilters {
+  section?: WorkbenchSection
+  itemType?: WorkbenchItemType
+  priority?: WorkbenchPriority
+  jobId?: string
+  page?: number
+  pageSize?: number
+}
+
 export type RecruitmentRequestStatus =
   | 'draft'
   | 'pending_approval'
@@ -1412,6 +1484,24 @@ export function fetchUserOptions(role: RoleKey): Promise<UserOption[]> {
 export function fetchJobs(includeArchived = false): Promise<JobRecord[]> {
   const query = includeArchived ? '?include_archived=true' : ''
   return apiRequest(`/api/jobs${query}`, {}, '无法读取职位列表')
+}
+
+export function fetchWorkbenchSummary(): Promise<WorkbenchSummaryRecord> {
+  return apiRequest('/api/workbench/summary', {}, '无法读取工作台摘要')
+}
+
+export function fetchWorkbenchItems(
+  filters: WorkbenchFilters = {},
+): Promise<WorkbenchListRecord> {
+  const query = new URLSearchParams()
+  if (filters.section) query.set('section', filters.section)
+  if (filters.itemType) query.set('item_type', filters.itemType)
+  if (filters.priority) query.set('priority', filters.priority)
+  if (filters.jobId) query.set('job_id', filters.jobId)
+  if (filters.page !== undefined) query.set('page', String(filters.page))
+  if (filters.pageSize !== undefined) query.set('page_size', String(filters.pageSize))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/workbench/items${suffix}`, {}, '无法读取工作台待办')
 }
 
 export function fetchJob(jobId: string): Promise<JobDetail> {

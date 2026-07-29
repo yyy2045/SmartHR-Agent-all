@@ -1,4 +1,5 @@
 import {
+  ArrowLeftOutlined,
   AppstoreOutlined,
   AuditOutlined,
   BarChartOutlined,
@@ -29,6 +30,7 @@ import {
   businessModuleForPath,
   defaultPathForModule,
   jobIdFromPath,
+  safeWorkbenchReturnPath,
   type BusinessModule,
 } from './navigation'
 
@@ -44,6 +46,9 @@ interface NavigationItem {
 }
 
 function pageMeta(pathname: string) {
+  if (pathname.startsWith('/workbench')) {
+    return { title: '招聘工作台', subtitle: '聚合当前需要处理、等待回应与风险事项' }
+  }
   if (pathname.startsWith('/recruitment-requests')) {
     return { title: '招聘需求', subtitle: '发起、审批并追踪招聘任务来源' }
   }
@@ -104,6 +109,9 @@ export function AppLayout() {
   const meta = pageMeta(location.pathname)
   const activeModule = businessModuleForPath(location.pathname)
   const jobId = jobIdFromPath(location.pathname)
+  const workbenchReturnTo = safeWorkbenchReturnPath(
+    new URLSearchParams(location.search).get('returnTo'),
+  )
   const canAccessJobs = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
   )
@@ -125,7 +133,7 @@ export function AppLayout() {
       key: 'workbench',
       label: '工作台',
       icon: <AppstoreOutlined />,
-      badge: '待开发',
+      path: '/workbench',
     },
     ...(canAccessRequests
       ? [
@@ -149,7 +157,7 @@ export function AppLayout() {
       : []),
     ...(canAccessJobs
       ? [
-          { key: 'jobs' as const, label: '岗位管理', icon: <ProfileOutlined />, path: '/' },
+          { key: 'jobs' as const, label: '岗位管理', icon: <ProfileOutlined />, path: '/jobs' },
           {
             key: 'screening' as const,
             label: '智能筛选',
@@ -232,7 +240,11 @@ export function AppLayout() {
         className={`app-sider${mobileNavOpen ? ' is-open' : ''}`}
         trigger={null}
       >
-        <button className="brand-button sidebar-brand" type="button" onClick={() => navigate('/')}>
+        <button
+          className="brand-button sidebar-brand"
+          type="button"
+          onClick={() => navigate('/workbench')}
+        >
           <span className="brand-mark" aria-hidden="true">
             <SolutionOutlined />
           </span>
@@ -304,6 +316,16 @@ export function AppLayout() {
               icon={mobileNavOpen ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />}
               onClick={() => setMobileNavOpen((open) => !open)}
             />
+            {workbenchReturnTo && (
+              <Button
+                className="workbench-return-button"
+                aria-label="返回工作台"
+                icon={<ArrowLeftOutlined />}
+                onClick={() => navigate(workbenchReturnTo)}
+              >
+                返回工作台
+              </Button>
+            )}
             <div>
               <div className="header-page-title">{meta.title}</div>
               <Text className="header-page-subtitle">{meta.subtitle}</Text>

@@ -7,7 +7,6 @@ import { RoleRoute } from './auth/RoleRoute'
 import { AppLayout } from './components/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
-import { useAuth } from './auth/context'
 
 const CriteriaPage = lazy(() =>
   import('./pages/CriteriaPage').then((module) => ({ default: module.CriteriaPage })),
@@ -96,17 +95,12 @@ const OnboardingManagementPage = lazy(() =>
     default: module.OnboardingManagementPage,
   })),
 )
+const WorkbenchPage = lazy(() =>
+  import('./pages/WorkbenchPage').then((module) => ({ default: module.WorkbenchPage })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
-}
-
-function HomeRoute() {
-  const auth = useAuth()
-  const canAccessJobs = auth.user?.roles.some((role) =>
-    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
-  )
-  return canAccessJobs ? <JobListPage /> : <Navigate to="/recruitment-requests" replace />
 }
 
 function AppRoutes() {
@@ -121,7 +115,16 @@ function AppRoutes() {
             <Route element={<ProtectedRoute />}>
               <Route path="/change-password" element={<ChangePasswordPage />} />
               <Route element={<AppLayout />}>
-                <Route path="/" element={<HomeRoute />} />
+                <Route path="/" element={<Navigate to="/workbench" replace />} />
+                <Route
+                  element={
+                    <RoleRoute
+                      roles={['administrator', 'recruiter', 'hiring_manager', 'approver']}
+                    />
+                  }
+                >
+                  <Route path="/workbench" element={<WorkbenchPage />} />
+                </Route>
                 <Route
                   element={
                     <RoleRoute
@@ -176,6 +179,13 @@ function AppRoutes() {
                 <Route element={<RoleRoute roles={['administrator', 'recruiter']} />}>
                   <Route path="/jobs/new" element={<JobFormPage />} />
                   <Route path="/candidates" element={<CandidateCenterPage />} />
+                </Route>
+                <Route
+                  element={
+                    <RoleRoute roles={['administrator', 'recruiter', 'hiring_manager']} />
+                  }
+                >
+                  <Route path="/jobs" element={<JobListPage />} />
                 </Route>
                 <Route element={<RoleRoute roles={['administrator']} />}>
                   <Route path="/settings/users" element={<UserManagementPage />} />
