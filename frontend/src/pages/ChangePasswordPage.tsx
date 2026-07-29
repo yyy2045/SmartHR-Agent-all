@@ -30,7 +30,7 @@ export function ChangePasswordPage() {
         current_password: values.current_password,
         new_password: values.new_password,
       })
-      navigate('/', { replace: true })
+      navigate('/workbench', { replace: true })
     } catch (error) {
       setFormError(error instanceof ApiError ? error.message : '修改密码失败，请稍后重试')
     }

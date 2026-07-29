@@ -12,6 +12,7 @@ export type BusinessModule =
   | 'settings'
 
 export function businessModuleForPath(pathname: string): BusinessModule {
+  if (pathname === '/workbench' || pathname.startsWith('/workbench/')) return 'workbench'
   if (pathname.startsWith('/recruitment-requests')) return 'requests'
   if (pathname.startsWith('/candidates')) return 'candidates'
   if (pathname.startsWith('/offers')) return 'hiring'
@@ -36,6 +37,31 @@ export function businessModuleForPath(pathname: string): BusinessModule {
     return 'interviews'
   }
   return 'jobs'
+}
+
+export function safeWorkbenchReturnPath(value: string | null): string | null {
+  if (!value || !value.startsWith('/') || value.startsWith('//')) return null
+  try {
+    const resolved = new URL(value, window.location.origin)
+    if (resolved.origin !== window.location.origin || resolved.pathname !== '/workbench') {
+      return null
+    }
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`
+  } catch {
+    return null
+  }
+}
+
+export function withWorkbenchReturnTo(targetPath: string, returnTo: string): string {
+  if (!targetPath.startsWith('/') || targetPath.startsWith('//')) return '/workbench'
+  try {
+    const target = new URL(targetPath, window.location.origin)
+    if (target.origin !== window.location.origin) return '/workbench'
+    target.searchParams.set('returnTo', safeWorkbenchReturnPath(returnTo) ?? '/workbench')
+    return `${target.pathname}${target.search}${target.hash}`
+  } catch {
+    return '/workbench'
+  }
 }
 
 export function jobIdFromPath(pathname: string): string | null {

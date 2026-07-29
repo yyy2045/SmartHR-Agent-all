@@ -160,7 +160,7 @@ describe('招聘业务导航', () => {
 
   it('无岗位上下文时展示完整导航，并禁用岗位级模块', () => {
     mockApi()
-    renderLayout('/')
+    renderLayout('/jobs')
 
     expect(screen.getByRole('button', { name: /岗位管理/ })).toHaveAttribute(
       'aria-current',
@@ -171,9 +171,35 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: /候选人中心/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /面试管理/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /录用管理/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /工作台/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /人才库/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /数据分析/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /系统设置/ })).toBeDisabled()
+  })
+
+  it('将工作台归入独立全局模块且不绑定岗位', () => {
+    expect(businessModuleForPath('/workbench')).toBe('workbench')
+    expect(jobIdFromPath('/workbench')).toBeNull()
+    mockApi()
+    renderLayout('/workbench')
+    expect(screen.getByRole('button', { name: '工作台' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
+  })
+
+  it('只接受指向工作台的站内返回地址', async () => {
+    mockApi()
+    const safe = renderLayout('/offers?returnTo=%2Fworkbench%3Fpriority%3Dhigh')
+    fireEvent.click(screen.getByRole('button', { name: '返回工作台' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/workbench'),
+    )
+    safe.unmount()
+
+    renderLayout('/offers?returnTo=https%3A%2F%2Fevil.example%2Fworkbench')
+    expect(screen.queryByRole('button', { name: '返回工作台' })).not.toBeInTheDocument()
   })
 
   it('管理员可进入系统设置并保持菜单高亮', () => {

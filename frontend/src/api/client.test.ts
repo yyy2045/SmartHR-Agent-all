@@ -9,6 +9,8 @@ import {
   fetchCurrentUser,
   fetchJobs,
   fetchLiveHealth,
+  fetchWorkbenchItems,
+  fetchWorkbenchSummary,
   fetchResumeDocumentDetail,
   generateJDAIDraft,
   login,
@@ -113,6 +115,33 @@ describe('API client', () => {
     expect(unauthorizedListener).toHaveBeenCalledOnce()
 
     window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, unauthorizedListener)
+  })
+
+  it('按工作台筛选契约生成摘要和分页查询', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchWorkbenchSummary()
+    await fetchWorkbenchItems({
+      section: 'action_required',
+      itemType: 'offer_approval',
+      priority: 'high',
+      jobId: 'job-1',
+      page: 2,
+      pageSize: 6,
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/workbench/summary')
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      '/api/workbench/items?section=action_required&item_type=offer_approval&priority=high&job_id=job-1&page=2&page_size=6',
+    )
   })
 
   it('使用浏览器生成的 multipart 边界上传简历批次', async () => {

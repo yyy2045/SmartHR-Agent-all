@@ -170,7 +170,7 @@ describe('job and criteria flow', () => {
       return jsonResponse({ detail: 'not found' }, 404)
     })
     vi.stubGlobal('fetch', fetchMock)
-    window.history.replaceState({}, '', '/')
+    window.history.replaceState({}, '', '/jobs')
 
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
