@@ -1,6 +1,7 @@
 import {
   ApartmentOutlined,
   BranchesOutlined,
+  DatabaseOutlined,
   EditOutlined,
   EyeOutlined,
   FileTextOutlined,
@@ -55,6 +56,7 @@ import {
   type CandidateStage,
   type CandidateSummaryRecord,
 } from '../api/client'
+import { TalentPoolMembershipModal } from '../components/TalentPoolMembershipModal'
 
 const { Title, Text } = Typography
 const PAGE_SIZE = 20
@@ -164,6 +166,8 @@ export function CandidateCenterPage() {
   const [targetCandidateId, setTargetCandidateId] = useState<string>()
   const [resolutionReason, setResolutionReason] = useState('')
   const [phoneEditOpen, setPhoneEditOpen] = useState(false)
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([])
+  const [membershipCandidateIds, setMembershipCandidateIds] = useState<string[]>([])
   const activeView: CandidateCenterView =
     searchParams.get('view') === 'duplicates' ? 'duplicates' : 'profiles'
 
@@ -202,6 +206,23 @@ export function CandidateCenterPage() {
       queryClient.invalidateQueries({ queryKey: ['candidates'] }),
       queryClient.invalidateQueries({ queryKey: ['candidate'] }),
       queryClient.invalidateQueries({ queryKey: ['candidate-duplicate-reviews'] }),
+    ])
+  }
+
+  async function handleTalentPoolSuccess(result: {
+    items: Array<{ status: string }>
+  }) {
+    const changed = result.items.filter((item) =>
+      ['added', 'reactivated'].includes(item.status),
+    ).length
+    const unchanged = result.items.length - changed
+    const suffix = unchanged ? `，${unchanged} 位已在该分组` : ''
+    messageApi.success(`已将 ${changed} 位候选人加入人才库${suffix}`)
+    setMembershipCandidateIds([])
+    setSelectedCandidateIds([])
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['talent-pool-groups'] }),
+      queryClient.invalidateQueries({ queryKey: ['talent-pool-memberships'] }),
     ])
   }
 
@@ -490,6 +511,7 @@ export function CandidateCenterPage() {
               onSearch={(value) => {
                 setSearch(value.trim())
                 setPage(1)
+                setSelectedCandidateIds([])
               }}
             />
             <Segmented<CandidateListStatus>
@@ -503,8 +525,17 @@ export function CandidateCenterPage() {
               onChange={(value) => {
                 setCandidateStatus(value)
                 setPage(1)
+                setSelectedCandidateIds([])
               }}
             />
+            <Button
+              type="primary"
+              icon={<DatabaseOutlined />}
+              disabled={!selectedCandidateIds.length}
+              onClick={() => setMembershipCandidateIds(selectedCandidateIds)}
+            >
+              加入人才库{selectedCandidateIds.length ? ` (${selectedCandidateIds.length})` : ''}
+            </Button>
             <Button
               aria-label="刷新候选人档案"
               icon={<ReloadOutlined />}
@@ -528,6 +559,14 @@ export function CandidateCenterPage() {
             dataSource={candidates.data?.items ?? []}
             loading={candidates.isPending}
             scroll={{ x: 840 }}
+            rowSelection={{
+              selectedRowKeys: selectedCandidateIds,
+              getCheckboxProps: (candidate) => ({
+                disabled: candidate.status !== 'active',
+                name: candidate.full_name || candidate.candidate_code,
+              }),
+              onChange: (keys) => setSelectedCandidateIds(keys.map(String)),
+            }}
             pagination={{
               current: page,
               pageSize,
@@ -538,6 +577,7 @@ export function CandidateCenterPage() {
               onChange: (nextPage, nextPageSize) => {
                 setPage(nextPageSize === pageSize ? nextPage : 1)
                 setPageSize(nextPageSize)
+                setSelectedCandidateIds([])
               },
             }}
             locale={{ emptyText: <Empty description="暂无候选人档案" /> }}
@@ -670,9 +710,17 @@ export function CandidateCenterPage() {
             resumeColumns={resumeColumns}
             onOpenCandidate={setSelectedCandidateId}
             onEditPhone={openPhoneEditor}
+            onAddToTalentPool={() => setMembershipCandidateIds([detail.id])}
           />
         )}
       </Drawer>
+
+      <TalentPoolMembershipModal
+        open={Boolean(membershipCandidateIds.length)}
+        candidateIds={membershipCandidateIds}
+        onClose={() => setMembershipCandidateIds([])}
+        onSuccess={(result) => void handleTalentPoolSuccess(result)}
+      />
 
       <Modal
         open={phoneEditOpen}
@@ -779,17 +827,22 @@ function CandidateDetailContent({
   resumeColumns,
   onOpenCandidate,
   onEditPhone,
+  onAddToTalentPool,
 }: {
   detail: CandidateDetailRecord
   applicationColumns: ColumnsType<CandidateApplicationSummaryRecord>
   resumeColumns: ColumnsType<CandidateResumeSummaryRecord>
   onOpenCandidate: (candidateId: string) => void
   onEditPhone: () => void
+  onAddToTalentPool: () => void
 }) {
   return (
     <div className="candidate-detail-content">
       {detail.status === 'active' && (
         <div className="candidate-detail-actions">
+          <Button icon={<DatabaseOutlined />} onClick={onAddToTalentPool}>
+            加入人才库
+          </Button>
           <Button icon={<EditOutlined />} onClick={onEditPhone}>
             修正手机号
           </Button>

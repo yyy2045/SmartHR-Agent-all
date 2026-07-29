@@ -101,6 +101,9 @@ const WorkbenchPage = lazy(() =>
 const AnalyticsPage = lazy(() =>
   import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })),
 )
+const TalentPoolPage = lazy(() =>
+  import('./pages/TalentPoolPage').then((module) => ({ default: module.TalentPoolPage })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -183,6 +186,13 @@ function AppRoutes() {
                 <Route element={<RoleRoute roles={['administrator', 'recruiter']} />}>
                   <Route path="/jobs/new" element={<JobFormPage />} />
                   <Route path="/candidates" element={<CandidateCenterPage />} />
+                </Route>
+                <Route
+                  element={
+                    <RoleRoute roles={['administrator', 'recruiter', 'hiring_manager']} />
+                  }
+                >
+                  <Route path="/talent" element={<TalentPoolPage />} />
                 </Route>
                 <Route
                   element={

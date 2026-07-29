@@ -1415,6 +1415,75 @@ export interface CandidateListFilters {
   offset?: number
 }
 
+export type TalentPoolGroupStatus = 'active' | 'archived' | 'all'
+export type TalentPoolMembershipStatus = 'active' | 'removed' | 'all'
+
+export interface TalentPoolGroupRecord {
+  id: string
+  name: string
+  description: string | null
+  version: number
+  is_archived: boolean
+  member_count: number
+  created_by_id: string | null
+  created_by_display_name: string | null
+  archived_at: string | null
+  archived_by_id: string | null
+  archived_by_display_name: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TalentPoolGroupListRecord {
+  items: TalentPoolGroupRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface TalentPoolMembershipRecord {
+  id: string
+  group_id: string
+  group_name: string
+  group_archived: boolean
+  candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  phone: string | null
+  email: string | null
+  status: 'active' | 'removed'
+  reason: string
+  source_application_id: string | null
+  version: number
+  joined_at: string
+  removed_at: string | null
+  updated_at: string
+}
+
+export interface TalentPoolMembershipListRecord {
+  items: TalentPoolMembershipRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface TalentPoolMembershipOperationRecord {
+  group_id: string
+  group_version: number
+  items: Array<{
+    requested_candidate_id: string
+    candidate_id: string
+    membership_id: string | null
+    status:
+      | 'added'
+      | 'reactivated'
+      | 'already_active'
+      | 'removed'
+      | 'already_removed'
+      | 'not_member'
+  }>
+}
+
 export interface ScreeningResultDetail {
   id: string
   document_id: string
@@ -2712,6 +2781,134 @@ export function fetchCandidate(candidateId: string): Promise<CandidateDetailReco
     `/api/candidates/${encodeURIComponent(candidateId)}`,
     {},
     '无法读取候选人详情',
+  )
+}
+
+export function fetchTalentPoolGroups(filters: {
+  status?: TalentPoolGroupStatus
+  query?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<TalentPoolGroupListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.query?.trim()) query.set('query', filters.query.trim())
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/talent-pool/groups${suffix}`, {}, '无法读取人才分组')
+}
+
+export function createTalentPoolGroup(
+  name: string,
+  description: string | null,
+): Promise<TalentPoolGroupRecord> {
+  return apiRequest(
+    '/api/talent-pool/groups',
+    {
+      method: 'POST',
+      body: JSON.stringify({ name, description, idempotency_key: crypto.randomUUID() }),
+    },
+    '创建人才分组失败',
+  )
+}
+
+export function updateTalentPoolGroup(
+  groupId: string,
+  expectedVersion: number,
+  values: { name?: string; description?: string | null },
+): Promise<TalentPoolGroupRecord> {
+  return apiRequest(
+    `/api/talent-pool/groups/${encodeURIComponent(groupId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...values,
+        expected_version: expectedVersion,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    },
+    '更新人才分组失败',
+  )
+}
+
+export function archiveTalentPoolGroup(
+  groupId: string,
+  expectedVersion: number,
+  reason: string,
+): Promise<TalentPoolGroupRecord> {
+  return apiRequest(
+    `/api/talent-pool/groups/${encodeURIComponent(groupId)}/archive`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+        reason,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    },
+    '归档人才分组失败',
+  )
+}
+
+export function fetchTalentPoolMemberships(filters: {
+  status?: TalentPoolMembershipStatus
+  groupStatus?: TalentPoolGroupStatus
+  groupId?: string
+  query?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<TalentPoolMembershipListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.groupStatus) query.set('group_status', filters.groupStatus)
+  if (filters.groupId) query.set('group_id', filters.groupId)
+  if (filters.query?.trim()) query.set('query', filters.query.trim())
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/talent-pool/memberships${suffix}`, {}, '无法读取人才成员')
+}
+
+export function addTalentPoolMemberships(
+  groupId: string,
+  expectedGroupVersion: number,
+  candidateIds: string[],
+  reason: string,
+): Promise<TalentPoolMembershipOperationRecord> {
+  return apiRequest(
+    `/api/talent-pool/groups/${encodeURIComponent(groupId)}/memberships`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        members: candidateIds.map((candidateId) => ({ candidate_id: candidateId })),
+        reason,
+        expected_group_version: expectedGroupVersion,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    },
+    '加入人才库失败',
+  )
+}
+
+export function removeTalentPoolMemberships(
+  groupId: string,
+  expectedGroupVersion: number,
+  candidateIds: string[],
+  reason: string,
+): Promise<TalentPoolMembershipOperationRecord> {
+  return apiRequest(
+    `/api/talent-pool/groups/${encodeURIComponent(groupId)}/memberships/remove`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        candidate_ids: candidateIds,
+        reason,
+        expected_group_version: expectedGroupVersion,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    },
+    '移出人才库失败',
   )
 }
 

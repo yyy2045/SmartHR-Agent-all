@@ -15,6 +15,7 @@ export function businessModuleForPath(pathname: string): BusinessModule {
   if (pathname === '/workbench' || pathname.startsWith('/workbench/')) return 'workbench'
   if (pathname.startsWith('/recruitment-requests')) return 'requests'
   if (pathname.startsWith('/candidates')) return 'candidates'
+  if (pathname.startsWith('/talent')) return 'talent'
   if (pathname.startsWith('/offers')) return 'hiring'
   if (pathname.startsWith('/onboardings')) return 'hiring'
   if (pathname.startsWith('/analytics')) return 'analytics'

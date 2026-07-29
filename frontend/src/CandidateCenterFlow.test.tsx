@@ -293,4 +293,143 @@ describe('candidate center', () => {
       expect(screen.getAllByText('13999995678').length).toBeGreaterThan(0)
     })
   })
+
+  it('批量选择候选人并加入指定人才分组', async () => {
+    let membershipPayload: Record<string, unknown> | undefined
+    const talentGroup = {
+      id: '11111111-1111-4111-8111-111111111111',
+      name: '后端人才',
+      description: null,
+      version: 3,
+      is_archived: false,
+      member_count: 0,
+      created_by_id: recruiter.id,
+      created_by_display_name: recruiter.display_name,
+      archived_at: null,
+      archived_by_id: null,
+      archived_by_display_name: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      const base = baseResponse(path)
+      if (base) return base
+      if (path === '/api/talent-pool/groups?status=active&limit=100') {
+        return jsonResponse({ items: [talentGroup], total: 1, limit: 100, offset: 0 })
+      }
+      if (
+        path === `/api/talent-pool/groups/${talentGroup.id}/memberships` &&
+        method === 'POST'
+      ) {
+        membershipPayload = JSON.parse(init?.body as string) as Record<string, unknown>
+        return jsonResponse({
+          group_id: talentGroup.id,
+          group_version: 4,
+          items: [
+            {
+              requested_candidate_id: targetCandidate.id,
+              candidate_id: targetCandidate.id,
+              membership_id: '55555555-5555-4555-8555-555555555555',
+              status: 'added',
+            },
+            {
+              requested_candidate_id: sourceCandidate.id,
+              candidate_id: sourceCandidate.id,
+              membership_id: '66666666-6666-4666-8666-666666666666',
+              status: 'added',
+            },
+          ],
+        })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    renderCandidateCenter(fetchMock)
+
+    await screen.findByText('张三')
+    const checkboxes = screen.getAllByRole('checkbox')
+    fireEvent.click(checkboxes[1])
+    fireEvent.click(checkboxes[2])
+    fireEvent.click(screen.getByRole('button', { name: /加入人才库 \(2\)/ }))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '人才分组' }))
+    fireEvent.click(await screen.findByText('后端人才（0 人）'))
+    fireEvent.change(screen.getByRole('textbox', { name: '入库原因' }), {
+      target: { value: '具备平台开发经验，适合持续关注' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认加入' }))
+
+    expect(await screen.findByText('已将 2 位候选人加入人才库')).toBeInTheDocument()
+    expect(membershipPayload).toMatchObject({
+      members: [
+        { candidate_id: targetCandidate.id },
+        { candidate_id: sourceCandidate.id },
+      ],
+      reason: '具备平台开发经验，适合持续关注',
+      expected_group_version: 3,
+    })
+    expect(membershipPayload?.idempotency_key).toEqual(expect.any(String))
+  })
+
+  it('从候选人详情发起单人入库', async () => {
+    const talentGroup = {
+      id: '11111111-1111-4111-8111-111111111111',
+      name: '重点关注',
+      description: null,
+      version: 1,
+      is_archived: false,
+      member_count: 1,
+      created_by_id: recruiter.id,
+      created_by_display_name: recruiter.display_name,
+      archived_at: null,
+      archived_by_id: null,
+      archived_by_display_name: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      const base = baseResponse(path)
+      if (base) return base
+      if (path === '/api/talent-pool/groups?status=active&limit=100') {
+        return jsonResponse({ items: [talentGroup], total: 1, limit: 100, offset: 0 })
+      }
+      if (
+        path === `/api/talent-pool/groups/${talentGroup.id}/memberships` &&
+        method === 'POST'
+      ) {
+        return jsonResponse({
+          group_id: talentGroup.id,
+          group_version: 2,
+          items: [
+            {
+              requested_candidate_id: targetCandidate.id,
+              candidate_id: targetCandidate.id,
+              membership_id: '55555555-5555-4555-8555-555555555555',
+              status: 'already_active',
+            },
+          ],
+        })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    renderCandidateCenter(fetchMock)
+
+    fireEvent.click((await screen.findAllByRole('button', { name: /查看/ }))[0])
+    await screen.findByText('张三 · CAND-000000000001')
+    const addButton = screen.getAllByRole('button', { name: /加入人才库/ }).find(
+      (button) => !button.hasAttribute('disabled'),
+    )
+    expect(addButton).toBeDefined()
+    fireEvent.click(addButton!)
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '人才分组' }))
+    fireEvent.click(await screen.findByText('重点关注（1 人）'))
+    fireEvent.change(screen.getByRole('textbox', { name: '入库原因' }), {
+      target: { value: '更新人才归档原因' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认加入' }))
+
+    expect(await screen.findByText('已将 0 位候选人加入人才库，1 位已在该分组')).toBeInTheDocument()
+  })
 })

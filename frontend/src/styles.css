@@ -3761,6 +3761,10 @@ input {
   width: min(420px, 100%);
 }
 
+.candidate-center-toolbar > .ant-btn {
+  flex: 0 0 auto;
+}
+
 .candidate-center-table .ant-table-container {
   overflow: hidden;
   border: 1px solid #e2e7ee;
@@ -3868,7 +3872,64 @@ input {
 
 .candidate-detail-actions {
   display: flex;
+  gap: 8px;
   justify-content: flex-end;
+}
+
+/* 人才库 */
+.talent-page-heading {
+  margin-bottom: 4px;
+}
+
+.talent-page-tabs {
+  margin-bottom: 16px;
+}
+
+.talent-page-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.talent-page-section {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.talent-page-section > * {
+  min-width: 0;
+}
+
+.talent-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(160px, 220px) auto 40px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e3e8ef;
+}
+
+.talent-candidate-cell {
+  display: flex;
+  min-width: 0;
+  gap: 10px;
+  align-items: center;
+}
+
+.talent-candidate-cell > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.talent-candidate-cell .ant-avatar {
+  flex: 0 0 auto;
+  color: #176b52;
+  background: #e1f3ec;
+}
+
+.talent-reason-input,
+.talent-modal-alert {
+  margin-top: 16px;
 }
 
 .candidate-detail-content section {
@@ -3972,8 +4033,30 @@ input {
     width: 100%;
   }
 
+  .candidate-detail-actions {
+    flex-direction: column;
+  }
+
   .candidate-merge-choices {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .talent-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .talent-toolbar .ant-input-search,
+  .talent-toolbar .ant-select,
+  .talent-toolbar .ant-segmented,
+  .talent-toolbar > .ant-btn {
+    width: 100%;
+  }
+
+  .talent-toolbar .ant-segmented-group {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
