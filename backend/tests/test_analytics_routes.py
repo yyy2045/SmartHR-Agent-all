@@ -15,11 +15,14 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     Candidate,
+    CandidateInterviewRound,
     CandidateInterviewSchedule,
     CandidateProcess,
+    InterviewEvaluation,
     InterviewPlanVersion,
     InterviewReport,
     InterviewReportVersion,
+    InterviewRound,
     Job,
     JobApplication,
     JobCriteriaVersion,
@@ -153,16 +156,36 @@ def _complete_hiring_chain(
     *,
     base_time: datetime,
 ) -> None:
-    db.add(
-        CandidateInterviewSchedule(
-            application=application,
-            plan_version=plan,
-            status="scheduled",
-            created_by_id=recruiter.id,
-            created_at=base_time,
-            updated_at=base_time,
-        )
+    schedule = CandidateInterviewSchedule(
+        application=application,
+        plan_version=plan,
+        status="scheduled",
+        created_by_id=recruiter.id,
+        created_at=base_time,
+        updated_at=base_time,
     )
+    candidate_round = CandidateInterviewRound(
+        schedule=schedule,
+        plan_round=plan.rounds[0],
+        sort_order=0,
+        scheduled_start_at=base_time,
+        interview_method="online",
+        status="scheduled",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    candidate_round.evaluation = InterviewEvaluation(
+        status="submitted",
+        overall_recommendation="recommend",
+        overall_comment="通过",
+        total_score=Decimal("85"),
+        passed=True,
+        submitted_by_id=recruiter.id,
+        submitted_at=base_time + timedelta(hours=1),
+        created_at=base_time,
+        updated_at=base_time + timedelta(hours=1),
+    )
+    db.add(schedule)
     report = InterviewReport(
         application=application,
         status="confirmed",
@@ -376,6 +399,16 @@ def analytics_dependencies() -> Generator[AnalyticsDependencies, None, None]:
                 status="completed",
             )
             plan = InterviewPlanVersion(job=job, version_number=1, status="confirmed")
+            plan.rounds.append(
+                InterviewRound(
+                    name="综合面试",
+                    round_type="business",
+                    duration_minutes=60,
+                    pass_threshold=60,
+                    focus="综合能力",
+                    sort_order=0,
+                )
+            )
             db.add_all([criteria, batch, plan])
             resources[job.id] = (criteria, batch, plan)
         db.flush()
@@ -577,6 +610,110 @@ async def test_trend_uses_shanghai_dates_and_requires_week_for_long_ranges(
         )
         assert rejected_daily.status_code == 422
         assert rejected_daily.json()["detail"] == "超过 30 天的趋势必须按周聚合"
+
+
+@pytest.mark.asyncio
+async def test_stage_duration_uses_first_main_stage_facts_and_keeps_open_counts(
+    analytics_dependencies: AnalyticsDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        response = await client.get("/analytics/stage-duration", params=_range())
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["stages"]) == 7
+        application_stage = body["stages"][0]
+        assert application_stage["stage"] == "application_created"
+        assert application_stage["sample_size"] == 2
+        assert application_stage["current_open_count"] == 1
+        assert application_stage["p50_seconds"] is not None
+        assert application_stage["p90_seconds"] >= application_stage["p50_seconds"]
+        assert body["quality"] == {
+            "complete": True,
+            "excluded_count": 0,
+            "reasons": [],
+        }
+
+
+@pytest.mark.asyncio
+async def test_quality_and_conversion_endpoints_keep_confirmed_denominators_separate(
+    analytics_dependencies: AnalyticsDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        interviews = (await client.get("/analytics/interviews", params=_range())).json()
+        assert interviews["round_pass_rate"]["numerator"] == 1
+        assert interviews["round_pass_rate"]["denominator"] == 1
+        assert interviews["candidate_pass_rate"]["numerator"] == 1
+        assert interviews["candidate_pass_rate"]["denominator"] == 1
+
+        offers = (await client.get("/analytics/offers", params=_range())).json()
+        offer_statuses = {item["key"]: item["count"] for item in offers["statuses"]}
+        assert offers["total_offers"] == 1
+        assert offer_statuses["accepted"] == 1
+        assert offers["acceptance_rate"]["numerator"] == 1
+        assert offers["acceptance_rate"]["denominator"] == 1
+
+        onboardings = (
+            await client.get("/analytics/onboardings", params=_range())
+        ).json()
+        onboarding_statuses = {
+            item["key"]: item["count"] for item in onboardings["statuses"]
+        }
+        assert onboardings["total_records"] == 1
+        assert onboarding_statuses["onboarded"] == 1
+        assert onboardings["completion_rate"]["numerator"] == 1
+        assert onboardings["completion_rate"]["denominator"] == 1
+        assert onboardings["abandonment_sources"] == []
+
+
+@pytest.mark.asyncio
+async def test_ai_human_difference_uses_latest_ai_and_pre_progress_decision(
+    analytics_dependencies: AnalyticsDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        response = await client.get("/analytics/decision-difference", params=_range())
+        assert response.status_code == 200
+        body = response.json()
+        counts = {item["key"]: item["count"] for item in body["categories"]}
+        assert body["ai_screened_count"] == 2
+        assert counts == {
+            "consistent": 1,
+            "human_upgraded": 0,
+            "human_downgraded": 0,
+            "missing_human_decision": 1,
+        }
+        assert body["categories"][0]["percentage"] == 50.0
+
+
+@pytest.mark.asyncio
+async def test_zero_denominator_metrics_return_null_instead_of_zero_percent(
+    analytics_dependencies: AnalyticsDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    params = {
+        **_range(),
+        "job_id": str(analytics_dependencies.archived_job_id),
+    }
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        interviews = (await client.get("/analytics/interviews", params=params)).json()
+        assert interviews["round_pass_rate"]["percentage"] is None
+        assert interviews["candidate_pass_rate"]["percentage"] is None
+
+        offers = (await client.get("/analytics/offers", params=params)).json()
+        assert offers["total_offers"] == 0
+        assert offers["acceptance_rate"]["percentage"] is None
+
+        onboardings = (
+            await client.get("/analytics/onboardings", params=params)
+        ).json()
+        assert onboardings["total_records"] == 0
+        assert onboardings["completion_rate"]["percentage"] is None
 
 
 @pytest.mark.asyncio

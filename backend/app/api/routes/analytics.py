@@ -12,16 +12,26 @@ from app.database import get_db
 from app.schemas.analytics import (
     ANALYTICS_TIMEZONE,
     AnalyticsCurrentDistributionResponse,
+    AnalyticsDecisionDifferenceResponse,
     AnalyticsFunnelResponse,
+    AnalyticsInterviewResponse,
+    AnalyticsOfferResponse,
+    AnalyticsOnboardingResponse,
     AnalyticsOverviewResponse,
     AnalyticsQuery,
+    AnalyticsStageDurationResponse,
     AnalyticsTrendResponse,
 )
 from app.services.analytics import (
     build_analytics_context,
     collect_current_distribution,
+    collect_decision_differences,
     collect_funnel,
+    collect_interviews,
+    collect_offers,
+    collect_onboardings,
     collect_overview,
+    collect_stage_durations,
     collect_trend,
 )
 
@@ -130,3 +140,76 @@ def get_analytics_trend(
             detail="超过 30 天的趋势必须按周聚合",
         )
     return collect_trend(db, context, interval=resolved_interval)
+
+
+@router.get("/stage-duration", response_model=AnalyticsStageDurationResponse)
+def get_analytics_stage_duration(
+    current_user: CurrentUser,
+    db: DbSession,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    job_id: uuid.UUID | None = None,
+) -> AnalyticsStageDurationResponse:
+    return collect_stage_durations(
+        db,
+        _context(db, current_user, start_date, end_date, job_id),
+    )
+
+
+@router.get("/interviews", response_model=AnalyticsInterviewResponse)
+def get_analytics_interviews(
+    current_user: CurrentUser,
+    db: DbSession,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    job_id: uuid.UUID | None = None,
+) -> AnalyticsInterviewResponse:
+    return collect_interviews(
+        db,
+        _context(db, current_user, start_date, end_date, job_id),
+    )
+
+
+@router.get("/offers", response_model=AnalyticsOfferResponse)
+def get_analytics_offers(
+    current_user: CurrentUser,
+    db: DbSession,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    job_id: uuid.UUID | None = None,
+) -> AnalyticsOfferResponse:
+    return collect_offers(
+        db,
+        _context(db, current_user, start_date, end_date, job_id),
+    )
+
+
+@router.get("/onboardings", response_model=AnalyticsOnboardingResponse)
+def get_analytics_onboardings(
+    current_user: CurrentUser,
+    db: DbSession,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    job_id: uuid.UUID | None = None,
+) -> AnalyticsOnboardingResponse:
+    return collect_onboardings(
+        db,
+        _context(db, current_user, start_date, end_date, job_id),
+    )
+
+
+@router.get(
+    "/decision-difference",
+    response_model=AnalyticsDecisionDifferenceResponse,
+)
+def get_analytics_decision_difference(
+    current_user: CurrentUser,
+    db: DbSession,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    job_id: uuid.UUID | None = None,
+) -> AnalyticsDecisionDifferenceResponse:
+    return collect_decision_differences(
+        db,
+        _context(db, current_user, start_date, end_date, job_id),
+    )

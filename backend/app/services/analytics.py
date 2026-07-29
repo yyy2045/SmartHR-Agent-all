@@ -11,8 +11,10 @@ from sqlalchemy import and_, false, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    CandidateInterviewRound,
     CandidateInterviewSchedule,
     CandidateProcess,
+    InterviewEvaluation,
     InterviewReport,
     InterviewReportVersion,
     Job,
@@ -33,16 +35,29 @@ from app.models import (
 from app.schemas.analytics import (
     ANALYTICS_TIMEZONE,
     CURRENT_STAGE_ORDER,
+    DECISION_DIFFERENCE_ORDER,
     FUNNEL_STAGE_ORDER,
+    OFFER_STATUS_ORDER,
+    ONBOARDING_STATUS_ORDER,
     AnalyticsCurrentDistributionResponse,
+    AnalyticsDecisionDifferenceResponse,
     AnalyticsFunnelResponse,
+    AnalyticsInterviewResponse,
     AnalyticsMeta,
+    AnalyticsOfferResponse,
+    AnalyticsOnboardingResponse,
     AnalyticsOverviewResponse,
     AnalyticsQuery,
     AnalyticsRatioMetric,
+    AnalyticsStageDurationResponse,
     AnalyticsTrendResponse,
     CurrentStageMetric,
+    DecisionDifferenceMetric,
     FunnelStageMetric,
+    OfferStatusMetric,
+    OnboardingAbandonmentMetric,
+    OnboardingStatusMetric,
+    StageDurationMetric,
 )
 
 SHANGHAI = ZoneInfo(ANALYTICS_TIMEZONE)
@@ -521,4 +536,505 @@ def collect_trend(
         meta=context.meta,
         interval=interval,
         points=points,
+    )
+
+
+def _first_timestamp_by_application(rows) -> dict[uuid.UUID, datetime]:
+    timestamps: dict[uuid.UUID, datetime] = {}
+    for application_id, occurred_at in rows:
+        if occurred_at is None:
+            continue
+        occurred_at = _aware(occurred_at)
+        current = timestamps.get(application_id)
+        if current is None or occurred_at < current:
+            timestamps[application_id] = occurred_at
+    return timestamps
+
+
+def _stage_timestamps(
+    db: Session,
+    context: AnalyticsContext,
+) -> dict[str, dict[uuid.UUID, datetime]]:
+    application_ids = context.application_ids
+    timestamps: dict[str, dict[uuid.UUID, datetime]] = {
+        key: {} for key in FUNNEL_STAGE_ORDER
+    }
+    timestamps["application_created"] = {
+        item.id: item.created_at for item in context.applications
+    }
+    if not application_ids:
+        return timestamps
+
+    timestamps["ai_screening_completed"] = _first_timestamp_by_application(
+        db.execute(
+            select(ResumeDocument.application_id, ScreeningResult.completed_at)
+            .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
+            .where(
+                ResumeDocument.application_id.in_(application_ids),
+                ScreeningResult.status == "completed",
+                ScreeningResult.completed_at.is_not(None),
+                ScreeningResult.completed_at <= context.as_of,
+            )
+        ).all()
+    )
+    timestamps["recruiter_shortlisted"] = _first_timestamp_by_application(
+        db.execute(
+            select(ResumeDocument.application_id, RecruiterDecision.created_at)
+            .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
+            .join(
+                RecruiterDecision,
+                RecruiterDecision.screening_result_id == ScreeningResult.id,
+            )
+            .where(
+                ResumeDocument.application_id.in_(application_ids),
+                RecruiterDecision.decision == "shortlisted",
+                RecruiterDecision.created_at <= context.as_of,
+            )
+        ).all()
+    )
+    timestamps["interview_started"] = _first_timestamp_by_application(
+        db.execute(
+            select(
+                CandidateInterviewSchedule.application_id,
+                CandidateInterviewSchedule.created_at,
+            ).where(
+                CandidateInterviewSchedule.application_id.in_(application_ids),
+                CandidateInterviewSchedule.created_at <= context.as_of,
+            )
+        ).all()
+    )
+    timestamps["interview_passed"] = _first_timestamp_by_application(
+        db.execute(
+            select(InterviewReport.application_id, InterviewReport.confirmed_at)
+            .join(
+                InterviewReportVersion,
+                and_(
+                    InterviewReportVersion.report_id == InterviewReport.id,
+                    InterviewReportVersion.version_number
+                    == InterviewReport.current_version_number,
+                ),
+            )
+            .where(
+                InterviewReport.application_id.in_(application_ids),
+                InterviewReport.status == "confirmed",
+                InterviewReport.confirmed_at.is_not(None),
+                InterviewReport.confirmed_at <= context.as_of,
+                InterviewReportVersion.conclusion.in_(("hire", "next_round")),
+            )
+        ).all()
+    )
+    timestamps["offer_approved"] = _first_timestamp_by_application(
+        db.execute(
+            select(Offer.application_id, OfferApproval.decided_at)
+            .join(OfferVersion, OfferVersion.offer_id == Offer.id)
+            .join(OfferApproval, OfferApproval.version_id == OfferVersion.id)
+            .where(
+                Offer.application_id.in_(application_ids),
+                OfferApproval.decision == "approved",
+                OfferApproval.decided_at <= context.as_of,
+            )
+        ).all()
+    )
+    timestamps["offer_accepted"] = _first_timestamp_by_application(
+        db.execute(
+            select(Offer.application_id, OfferResponse.responded_at)
+            .join(OfferResponse, OfferResponse.offer_id == Offer.id)
+            .where(
+                Offer.application_id.in_(application_ids),
+                OfferResponse.decision == "accepted",
+                OfferResponse.responded_at <= context.as_of,
+            )
+        ).all()
+    )
+    timestamps["onboarding_completed"] = _first_timestamp_by_application(
+        db.execute(
+            select(Onboarding.application_id, OnboardingEvent.created_at)
+            .join(OnboardingEvent, OnboardingEvent.onboarding_id == Onboarding.id)
+            .where(
+                Onboarding.application_id.in_(application_ids),
+                OnboardingEvent.action == "onboarded",
+                OnboardingEvent.created_at <= context.as_of,
+            )
+        ).all()
+    )
+    return timestamps
+
+
+def _percentile(values: list[int], percentile: float) -> int | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return round(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction)
+
+
+def collect_stage_durations(
+    db: Session,
+    context: AnalyticsContext,
+) -> AnalyticsStageDurationResponse:
+    timestamps = _stage_timestamps(db, context)
+    metrics = []
+    total_excluded = 0
+    for index, stage in enumerate(FUNNEL_STAGE_ORDER[:-1]):
+        next_stage = FUNNEL_STAGE_ORDER[index + 1]
+        durations: list[int] = []
+        excluded_count = 0
+        current_open_count = 0
+        for application_id in context.application_ids:
+            entered_at = timestamps[stage].get(application_id)
+            next_at = timestamps[next_stage].get(application_id)
+            if entered_at is not None and next_at is not None:
+                seconds = round((next_at - entered_at).total_seconds())
+                if seconds < 0:
+                    excluded_count += 1
+                else:
+                    durations.append(seconds)
+            elif entered_at is not None:
+                current_open_count += 1
+            elif next_at is not None:
+                excluded_count += 1
+        total_excluded += excluded_count
+        metrics.append(
+            StageDurationMetric(
+                stage=stage,
+                label=FUNNEL_STAGE_LABELS[stage],
+                sample_size=len(durations),
+                p50_seconds=_percentile(durations, 0.5),
+                p90_seconds=_percentile(durations, 0.9),
+                excluded_count=excluded_count,
+                current_open_count=current_open_count,
+            )
+        )
+    return AnalyticsStageDurationResponse(
+        meta=context.meta,
+        quality={
+            "complete": total_excluded == 0,
+            "excluded_count": total_excluded,
+            "reasons": (
+                [] if total_excluded == 0 else ["阶段事件缺失或时间顺序异常"]
+            ),
+        },
+        stages=metrics,
+    )
+
+
+def collect_interviews(
+    db: Session,
+    context: AnalyticsContext,
+) -> AnalyticsInterviewResponse:
+    submitted_rounds: list[bool] = []
+    report_conclusions: list[str | None] = []
+    if context.application_ids:
+        submitted_rounds = list(
+            db.scalars(
+                select(InterviewEvaluation.passed)
+                .join(
+                    CandidateInterviewRound,
+                    CandidateInterviewRound.id == InterviewEvaluation.candidate_round_id,
+                )
+                .join(
+                    CandidateInterviewSchedule,
+                    CandidateInterviewSchedule.id == CandidateInterviewRound.schedule_id,
+                )
+                .where(
+                    CandidateInterviewSchedule.application_id.in_(context.application_ids),
+                    InterviewEvaluation.status == "submitted",
+                    InterviewEvaluation.submitted_at.is_not(None),
+                    InterviewEvaluation.submitted_at <= context.as_of,
+                )
+            ).all()
+        )
+        report_conclusions = list(
+            db.scalars(
+                select(InterviewReportVersion.conclusion)
+                .join(InterviewReport, InterviewReport.id == InterviewReportVersion.report_id)
+                .where(
+                    InterviewReport.application_id.in_(context.application_ids),
+                    InterviewReport.status == "confirmed",
+                    InterviewReport.confirmed_at.is_not(None),
+                    InterviewReport.confirmed_at <= context.as_of,
+                    InterviewReportVersion.version_number
+                    == InterviewReport.current_version_number,
+                )
+            ).all()
+        )
+    return AnalyticsInterviewResponse(
+        meta=context.meta,
+        round_pass_rate=_ratio(
+            "interview_round_pass_rate",
+            "面试轮次通过率",
+            sum(item is True for item in submitted_rounds),
+            len(submitted_rounds),
+        ),
+        candidate_pass_rate=_ratio(
+            "interview_candidate_pass_rate",
+            "候选人面试通过率",
+            sum(item in ("hire", "next_round") for item in report_conclusions),
+            len(report_conclusions),
+        ),
+    )
+
+
+def _approved_offer_application_ids(
+    db: Session,
+    context: AnalyticsContext,
+) -> set[uuid.UUID]:
+    if not context.application_ids:
+        return set()
+    return _application_id_set(
+        db,
+        select(Offer.application_id)
+        .join(OfferVersion, OfferVersion.offer_id == Offer.id)
+        .join(OfferApproval, OfferApproval.version_id == OfferVersion.id)
+        .where(
+            Offer.application_id.in_(context.application_ids),
+            OfferApproval.decision == "approved",
+            OfferApproval.decided_at <= context.as_of,
+        ),
+    )
+
+
+def _accepted_offer_application_ids(
+    db: Session,
+    context: AnalyticsContext,
+) -> set[uuid.UUID]:
+    if not context.application_ids:
+        return set()
+    return _application_id_set(
+        db,
+        select(Offer.application_id)
+        .join(OfferResponse, OfferResponse.offer_id == Offer.id)
+        .where(
+            Offer.application_id.in_(context.application_ids),
+            OfferResponse.decision == "accepted",
+            OfferResponse.responded_at <= context.as_of,
+        ),
+    )
+
+
+def collect_offers(db: Session, context: AnalyticsContext) -> AnalyticsOfferResponse:
+    statuses: list[str] = []
+    if context.application_ids:
+        statuses = list(
+            db.scalars(
+                select(Offer.status).where(Offer.application_id.in_(context.application_ids))
+            ).all()
+        )
+    counts = Counter(statuses)
+    approved = _approved_offer_application_ids(db, context)
+    accepted = _accepted_offer_application_ids(db, context) & approved
+    labels = {
+        "draft": "草稿",
+        "pending_manager_confirmation": "待用人经理确认",
+        "pending_approval": "待审批",
+        "approved": "已批准",
+        "rejected": "已驳回",
+        "pending_response": "待候选人回应",
+        "accepted": "已接受",
+        "declined": "已拒绝",
+    }
+    return AnalyticsOfferResponse(
+        meta=context.meta,
+        total_offers=len(statuses),
+        statuses=[
+            OfferStatusMetric(key=key, label=labels[key], count=counts[key])
+            for key in OFFER_STATUS_ORDER
+        ],
+        acceptance_rate=_ratio(
+            "offer_acceptance_rate",
+            "Offer 接受率",
+            len(accepted),
+            len(approved),
+        ),
+    )
+
+
+def collect_onboardings(
+    db: Session,
+    context: AnalyticsContext,
+) -> AnalyticsOnboardingResponse:
+    rows: list[tuple[str, str | None]] = []
+    if context.application_ids:
+        rows = list(
+            db.execute(
+                select(Onboarding.status, Onboarding.abandonment_source).where(
+                    Onboarding.application_id.in_(context.application_ids)
+                )
+            ).all()
+        )
+    status_counts = Counter(row[0] for row in rows)
+    abandonment_counts = Counter(row[1] for row in rows if row[0] == "abandoned")
+    accepted = _accepted_offer_application_ids(db, context)
+    onboarded: set[uuid.UUID] = set()
+    if context.application_ids:
+        onboarded = set(
+            db.scalars(
+                select(Onboarding.application_id).where(
+                    Onboarding.application_id.in_(context.application_ids),
+                    Onboarding.status == "onboarded",
+                )
+            ).all()
+        )
+    status_labels = {
+        "pending_confirmation": "待确认",
+        "candidate_proposed_date": "候选人已提日期",
+        "pending_start": "待入职",
+        "onboarded": "已入职",
+        "abandoned": "放弃入职",
+    }
+    abandonment_labels = {
+        "candidate_withdrew": "候选人放弃",
+        "company_cancelled": "公司取消",
+        "other": "其他",
+    }
+    return AnalyticsOnboardingResponse(
+        meta=context.meta,
+        total_records=len(rows),
+        statuses=[
+            OnboardingStatusMetric(
+                key=key,
+                label=status_labels[key],
+                count=status_counts[key],
+            )
+            for key in ONBOARDING_STATUS_ORDER
+        ],
+        completion_rate=_ratio(
+            "onboarding_completion_rate",
+            "入职完成率",
+            len(onboarded & accepted),
+            len(accepted),
+        ),
+        abandonment_sources=[
+            OnboardingAbandonmentMetric(
+                key=key,
+                label=abandonment_labels[key],
+                count=abandonment_counts[key],
+            )
+            for key in ("candidate_withdrew", "company_cancelled", "other")
+            if abandonment_counts[key] > 0
+        ],
+    )
+
+
+def collect_decision_differences(
+    db: Session,
+    context: AnalyticsContext,
+) -> AnalyticsDecisionDifferenceResponse:
+    latest_results: dict[
+        uuid.UUID, tuple[uuid.UUID, str, datetime, int]
+    ] = {}
+    if context.application_ids:
+        result_rows = db.execute(
+            select(
+                ResumeDocument.application_id,
+                ScreeningResult.id,
+                ScreeningResult.ai_group,
+                ScreeningResult.completed_at,
+                ScreeningResult.analysis_version,
+            )
+            .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
+            .where(
+                ResumeDocument.application_id.in_(context.application_ids),
+                ScreeningResult.status == "completed",
+                ScreeningResult.ai_group.is_not(None),
+                ScreeningResult.completed_at.is_not(None),
+                ScreeningResult.completed_at <= context.as_of,
+            )
+        ).all()
+        for application_id, result_id, ai_group, completed_at, version in result_rows:
+            candidate = (result_id, ai_group, _aware(completed_at), version)
+            current = latest_results.get(application_id)
+            if current is None or (candidate[2], candidate[3], str(candidate[0])) > (
+                current[2],
+                current[3],
+                str(current[0]),
+            ):
+                latest_results[application_id] = candidate
+
+    result_to_application = {
+        result[0]: application_id for application_id, result in latest_results.items()
+    }
+    decisions: dict[uuid.UUID, list[tuple[str, datetime]]] = {
+        application_id: [] for application_id in latest_results
+    }
+    if result_to_application:
+        for result_id, decision, created_at in db.execute(
+            select(
+                RecruiterDecision.screening_result_id,
+                RecruiterDecision.decision,
+                RecruiterDecision.created_at,
+            ).where(
+                RecruiterDecision.screening_result_id.in_(result_to_application),
+                RecruiterDecision.created_at <= context.as_of,
+            )
+        ).all():
+            decisions[result_to_application[result_id]].append(
+                (decision, _aware(created_at))
+            )
+
+    cutoff_rows = []
+    if latest_results:
+        cutoff_rows.extend(
+            db.execute(
+                select(
+                    CandidateInterviewSchedule.application_id,
+                    CandidateInterviewSchedule.created_at,
+                ).where(
+                    CandidateInterviewSchedule.application_id.in_(latest_results),
+                    CandidateInterviewSchedule.created_at <= context.as_of,
+                )
+            ).all()
+        )
+        cutoff_rows.extend(
+            db.execute(
+                select(Offer.application_id, Offer.created_at).where(
+                    Offer.application_id.in_(latest_results),
+                    Offer.created_at <= context.as_of,
+                )
+            ).all()
+        )
+    cutoffs = _first_timestamp_by_application(cutoff_rows)
+
+    baseline = {"auto_rejected": 0, "low_match": 1, "passed": 2}
+    human_rank = {"rejected": 0, "pending": 1, "shortlisted": 2}
+    counts = Counter()
+    for application_id, (_, ai_group, _, _) in latest_results.items():
+        cutoff = cutoffs.get(application_id, context.as_of)
+        eligible = [item for item in decisions[application_id] if item[1] <= cutoff]
+        if not eligible:
+            counts["missing_human_decision"] += 1
+            continue
+        human_decision = max(eligible, key=lambda item: item[1])[0]
+        difference = human_rank[human_decision] - baseline[ai_group]
+        if difference == 0:
+            counts["consistent"] += 1
+        elif difference > 0:
+            counts["human_upgraded"] += 1
+        else:
+            counts["human_downgraded"] += 1
+
+    total = len(latest_results)
+    labels = {
+        "consistent": "一致",
+        "human_upgraded": "人工上调",
+        "human_downgraded": "人工下调",
+        "missing_human_decision": "缺少人工决定",
+    }
+    return AnalyticsDecisionDifferenceResponse(
+        meta=context.meta,
+        ai_screened_count=total,
+        categories=[
+            DecisionDifferenceMetric(
+                key=key,
+                label=labels[key],
+                count=counts[key],
+                percentage=(
+                    None if total == 0 else round(counts[key] / total * 100, 1)
+                ),
+            )
+            for key in DECISION_DIFFERENCE_ORDER
+        ],
     )
