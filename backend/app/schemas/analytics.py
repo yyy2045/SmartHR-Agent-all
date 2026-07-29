@@ -206,6 +206,7 @@ class AnalyticsOverviewResponse(AnalyticsModel):
     unique_candidate_count: int = Field(ge=0)
     approved_headcount: int = Field(ge=0)
     hired_count: int = Field(ge=0)
+    linked_hired_count: int = Field(ge=0)
     hiring_completion_rate: AnalyticsRatioMetric
 
     @model_validator(mode="after")
@@ -213,10 +214,12 @@ class AnalyticsOverviewResponse(AnalyticsModel):
         metric = self.hiring_completion_rate
         if metric.key != "hiring_completion_rate":
             raise ValueError("招聘完成率口径键错误")
-        if metric.numerator != self.hired_count:
-            raise ValueError("招聘完成率分子必须等于已入职人数")
+        if metric.numerator != self.linked_hired_count:
+            raise ValueError("招聘完成率分子必须等于关联批准需求的已入职人数")
         if metric.denominator != self.approved_headcount:
             raise ValueError("招聘完成率分母必须等于批准需求人数")
+        if self.linked_hired_count > self.hired_count:
+            raise ValueError("关联批准需求的已入职人数不能大于全部已入职人数")
         if self.unique_candidate_count > self.application_count:
             raise ValueError("去重候选人数不能大于应聘数")
         if self.active_job_count > self.selected_job_count:

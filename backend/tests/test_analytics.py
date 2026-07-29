@@ -109,12 +109,30 @@ def test_fixed_overview_contract_counts_applications_and_people_separately() -> 
         unique_candidate_count=7,
         approved_headcount=5,
         hired_count=2,
+        linked_hired_count=2,
         hiring_completion_rate=_ratio("hiring_completion_rate", 2, 5),
     )
 
     assert response.application_count == 8
     assert response.unique_candidate_count == 7
     assert response.hiring_completion_rate.percentage == 40.0
+
+
+def test_historical_jobs_show_hires_without_fabricating_completion_rate() -> None:
+    response = AnalyticsOverviewResponse(
+        meta=_meta(),
+        active_job_count=1,
+        selected_job_count=1,
+        application_count=2,
+        unique_candidate_count=2,
+        approved_headcount=0,
+        hired_count=1,
+        linked_hired_count=0,
+        hiring_completion_rate=_ratio("hiring_completion_rate", 0, 0),
+    )
+
+    assert response.hired_count == 1
+    assert response.hiring_completion_rate.percentage is None
 
 
 def test_fixed_eight_stage_historical_funnel_is_monotonic() -> None:
