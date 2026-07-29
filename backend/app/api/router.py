@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.routes.analytics import router as analytics_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.batches import router as batches_router
 from app.api.routes.candidate_processes import router as candidate_processes_router
@@ -25,6 +26,7 @@ api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(health_router, prefix="/health", tags=["health"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(workbench_router, prefix="/workbench", tags=["workbench"])
+api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(candidates_router, prefix="/candidates", tags=["candidates"])
 api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
