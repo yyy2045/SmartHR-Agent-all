@@ -25,7 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
-    from app.models.candidate import Candidate, JobApplication
+    from app.models.candidate import ApplicationResumeDocument, Candidate, JobApplication
     from app.models.job import Job, JobCriteriaVersion
     from app.models.knowledge import ResumeEmbeddingChunk
     from app.models.user import User
@@ -98,9 +98,8 @@ class ResumeDocument(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    batch_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("screening_batches.id", ondelete="CASCADE"),
-        nullable=False,
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("screening_batches.id", ondelete="SET NULL"),
         index=True,
     )
     candidate_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -145,9 +144,16 @@ class ResumeDocument(Base):
         onupdate=func.now(),
     )
 
-    batch: Mapped[ScreeningBatch] = relationship(back_populates="documents")
+    batch: Mapped[ScreeningBatch | None] = relationship(back_populates="documents")
     candidate: Mapped[Candidate | None] = relationship(back_populates="documents")
-    application: Mapped[JobApplication | None] = relationship(back_populates="documents")
+    application: Mapped[JobApplication | None] = relationship(
+        back_populates="documents",
+        foreign_keys=[application_id],
+    )
+    application_links: Mapped[list[ApplicationResumeDocument]] = relationship(
+        back_populates="document",
+        foreign_keys="ApplicationResumeDocument.document_id",
+    )
     text_segments: Mapped[list[ResumeTextSegment]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",

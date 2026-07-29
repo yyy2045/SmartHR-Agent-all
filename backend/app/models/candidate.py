@@ -9,6 +9,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     String,
     Text,
@@ -111,6 +112,18 @@ class JobApplication(Base):
             postgresql_where=text("status = 'active'"),
             sqlite_where=text("status = 'active'"),
         ),
+        ForeignKeyConstraint(
+            ["id", "primary_document_id"],
+            [
+                "application_resume_documents.application_id",
+                "application_resume_documents.document_id",
+            ],
+            name="fk_job_applications_primary_document_link",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -129,6 +142,15 @@ class JobApplication(Base):
     )
     merged_into_application_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("job_applications.id", ondelete="SET NULL"),
+        index=True,
+    )
+    primary_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "resume_documents.id",
+            name="fk_job_applications_primary_document_id",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
         index=True,
     )
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -153,7 +175,25 @@ class JobApplication(Base):
     )
     documents: Mapped[list[ResumeDocument]] = relationship(
         back_populates="application",
+        foreign_keys="ResumeDocument.application_id",
         order_by="ResumeDocument.created_at",
+    )
+    document_links: Mapped[list[ApplicationResumeDocument]] = relationship(
+        back_populates="application",
+        cascade="all, delete-orphan",
+        foreign_keys="ApplicationResumeDocument.application_id",
+        order_by="ApplicationResumeDocument.created_at",
+    )
+    shared_documents: Mapped[list[ResumeDocument]] = relationship(
+        secondary="application_resume_documents",
+        primaryjoin="JobApplication.id == ApplicationResumeDocument.application_id",
+        secondaryjoin="ApplicationResumeDocument.document_id == ResumeDocument.id",
+        viewonly=True,
+        order_by="ResumeDocument.created_at",
+    )
+    primary_document: Mapped[ResumeDocument | None] = relationship(
+        foreign_keys=[primary_document_id],
+        post_update=True,
     )
     process: Mapped[CandidateProcess | None] = relationship(
         back_populates="application",
@@ -182,6 +222,31 @@ class JobApplication(Base):
         foreign_keys="Onboarding.application_id",
         overlaps="offer,onboarding",
     )
+
+
+class ApplicationResumeDocument(Base):
+    __tablename__ = "application_resume_documents"
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_applications.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("resume_documents.id", ondelete="RESTRICT"),
+        primary_key=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    application: Mapped[JobApplication] = relationship(
+        back_populates="document_links",
+        foreign_keys=[application_id],
+    )
+    document: Mapped[ResumeDocument] = relationship(back_populates="application_links")
 
 
 class CandidateDuplicateReview(Base):
