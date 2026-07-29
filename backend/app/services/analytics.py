@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, false, or_, select
+from sqlalchemy import Uuid, and_, any_, bindparam, false, or_, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -90,6 +92,27 @@ CURRENT_STAGE_LABELS = {
     "onboarding_completed": "已入职",
     "onboarding_abandoned": "放弃入职",
 }
+
+
+def _uuid_membership(column, values: Iterable[uuid.UUID], *, dialect_name: str):
+    if dialect_name == "postgresql":
+        return column == any_(
+            bindparam(
+                None,
+                value=list(values),
+                type_=ARRAY(Uuid(as_uuid=True)),
+                unique=True,
+            )
+        )
+    return column.in_(values)
+
+
+def _uuid_ids_clause(db: Session, column, values: Iterable[uuid.UUID]):
+    return _uuid_membership(
+        column,
+        values,
+        dialect_name=db.get_bind().dialect.name,
+    )
 
 
 @dataclass(frozen=True)
@@ -254,7 +277,11 @@ def collect_overview(db: Session, context: AnalyticsContext) -> AnalyticsOvervie
         hired_application_ids = set(
             db.scalars(
                 select(Onboarding.application_id).where(
-                    Onboarding.application_id.in_(context.application_ids),
+                    _uuid_ids_clause(
+                        db,
+                        Onboarding.application_id,
+                        context.application_ids,
+                    ),
                     Onboarding.status == "onboarded",
                 )
             ).all()
@@ -302,7 +329,7 @@ def collect_funnel(db: Session, context: AnalyticsContext) -> AnalyticsFunnelRes
             select(ResumeDocument.application_id)
             .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
             .where(
-                ResumeDocument.application_id.in_(cohort),
+                _uuid_ids_clause(db, ResumeDocument.application_id, cohort),
                 ScreeningResult.status == "completed",
                 ScreeningResult.completed_at <= context.as_of,
             ),
@@ -316,7 +343,7 @@ def collect_funnel(db: Session, context: AnalyticsContext) -> AnalyticsFunnelRes
                 RecruiterDecision.screening_result_id == ScreeningResult.id,
             )
             .where(
-                ResumeDocument.application_id.in_(cohort),
+                _uuid_ids_clause(db, ResumeDocument.application_id, cohort),
                 RecruiterDecision.decision == "shortlisted",
                 RecruiterDecision.created_at <= context.as_of,
             ),
@@ -324,7 +351,11 @@ def collect_funnel(db: Session, context: AnalyticsContext) -> AnalyticsFunnelRes
         raw["interview_started"] = _application_id_set(
             db,
             select(CandidateInterviewSchedule.application_id).where(
-                CandidateInterviewSchedule.application_id.in_(cohort),
+                _uuid_ids_clause(
+                    db,
+                    CandidateInterviewSchedule.application_id,
+                    cohort,
+                ),
                 CandidateInterviewSchedule.created_at <= context.as_of,
             ),
         )
@@ -340,7 +371,7 @@ def collect_funnel(db: Session, context: AnalyticsContext) -> AnalyticsFunnelRes
                 ),
             )
             .where(
-                InterviewReport.application_id.in_(cohort),
+                _uuid_ids_clause(db, InterviewReport.application_id, cohort),
                 InterviewReport.status == "confirmed",
                 InterviewReport.confirmed_at <= context.as_of,
                 InterviewReportVersion.conclusion.in_(("hire", "next_round")),
@@ -352,7 +383,7 @@ def collect_funnel(db: Session, context: AnalyticsContext) -> AnalyticsFunnelRes
             .join(OfferVersion, OfferVersion.offer_id == Offer.id)
             .join(OfferApproval, OfferApproval.version_id == OfferVersion.id)
             .where(
-                Offer.application_id.in_(cohort),
+                _uuid_ids_clause(db, Offer.application_id, cohort),
                 OfferApproval.decision == "approved",
                 OfferApproval.decided_at <= context.as_of,
             ),
@@ -362,7 +393,7 @@ def collect_funnel(db: Session, context: AnalyticsContext) -> AnalyticsFunnelRes
             select(Offer.application_id)
             .join(OfferResponse, OfferResponse.offer_id == Offer.id)
             .where(
-                Offer.application_id.in_(cohort),
+                _uuid_ids_clause(db, Offer.application_id, cohort),
                 OfferResponse.decision == "accepted",
                 OfferResponse.responded_at <= context.as_of,
             ),
@@ -372,7 +403,7 @@ def collect_funnel(db: Session, context: AnalyticsContext) -> AnalyticsFunnelRes
             select(Onboarding.application_id)
             .outerjoin(OnboardingEvent, OnboardingEvent.onboarding_id == Onboarding.id)
             .where(
-                Onboarding.application_id.in_(cohort),
+                _uuid_ids_clause(db, Onboarding.application_id, cohort),
                 or_(
                     Onboarding.status == "onboarded",
                     and_(
@@ -418,7 +449,11 @@ def collect_current_distribution(
         stage_by_application = dict(
             db.execute(
                 select(CandidateProcess.application_id, CandidateProcess.current_stage).where(
-                    CandidateProcess.application_id.in_(context.application_ids)
+                    _uuid_ids_clause(
+                        db,
+                        CandidateProcess.application_id,
+                        context.application_ids,
+                    )
                 )
             ).all()
         )
@@ -572,7 +607,7 @@ def _stage_timestamps(
             select(ResumeDocument.application_id, ScreeningResult.completed_at)
             .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
             .where(
-                ResumeDocument.application_id.in_(application_ids),
+                _uuid_ids_clause(db, ResumeDocument.application_id, application_ids),
                 ScreeningResult.status == "completed",
                 ScreeningResult.completed_at.is_not(None),
                 ScreeningResult.completed_at <= context.as_of,
@@ -588,7 +623,7 @@ def _stage_timestamps(
                 RecruiterDecision.screening_result_id == ScreeningResult.id,
             )
             .where(
-                ResumeDocument.application_id.in_(application_ids),
+                _uuid_ids_clause(db, ResumeDocument.application_id, application_ids),
                 RecruiterDecision.decision == "shortlisted",
                 RecruiterDecision.created_at <= context.as_of,
             )
@@ -600,7 +635,11 @@ def _stage_timestamps(
                 CandidateInterviewSchedule.application_id,
                 CandidateInterviewSchedule.created_at,
             ).where(
-                CandidateInterviewSchedule.application_id.in_(application_ids),
+                _uuid_ids_clause(
+                    db,
+                    CandidateInterviewSchedule.application_id,
+                    application_ids,
+                ),
                 CandidateInterviewSchedule.created_at <= context.as_of,
             )
         ).all()
@@ -617,7 +656,7 @@ def _stage_timestamps(
                 ),
             )
             .where(
-                InterviewReport.application_id.in_(application_ids),
+                _uuid_ids_clause(db, InterviewReport.application_id, application_ids),
                 InterviewReport.status == "confirmed",
                 InterviewReport.confirmed_at.is_not(None),
                 InterviewReport.confirmed_at <= context.as_of,
@@ -631,7 +670,7 @@ def _stage_timestamps(
             .join(OfferVersion, OfferVersion.offer_id == Offer.id)
             .join(OfferApproval, OfferApproval.version_id == OfferVersion.id)
             .where(
-                Offer.application_id.in_(application_ids),
+                _uuid_ids_clause(db, Offer.application_id, application_ids),
                 OfferApproval.decision == "approved",
                 OfferApproval.decided_at <= context.as_of,
             )
@@ -642,7 +681,7 @@ def _stage_timestamps(
             select(Offer.application_id, OfferResponse.responded_at)
             .join(OfferResponse, OfferResponse.offer_id == Offer.id)
             .where(
-                Offer.application_id.in_(application_ids),
+                _uuid_ids_clause(db, Offer.application_id, application_ids),
                 OfferResponse.decision == "accepted",
                 OfferResponse.responded_at <= context.as_of,
             )
@@ -653,7 +692,7 @@ def _stage_timestamps(
             select(Onboarding.application_id, OnboardingEvent.created_at)
             .join(OnboardingEvent, OnboardingEvent.onboarding_id == Onboarding.id)
             .where(
-                Onboarding.application_id.in_(application_ids),
+                _uuid_ids_clause(db, Onboarding.application_id, application_ids),
                 OnboardingEvent.action == "onboarded",
                 OnboardingEvent.created_at <= context.as_of,
             )
@@ -742,7 +781,11 @@ def collect_interviews(
                     CandidateInterviewSchedule.id == CandidateInterviewRound.schedule_id,
                 )
                 .where(
-                    CandidateInterviewSchedule.application_id.in_(context.application_ids),
+                    _uuid_ids_clause(
+                        db,
+                        CandidateInterviewSchedule.application_id,
+                        context.application_ids,
+                    ),
                     InterviewEvaluation.status == "submitted",
                     InterviewEvaluation.submitted_at.is_not(None),
                     InterviewEvaluation.submitted_at <= context.as_of,
@@ -754,7 +797,11 @@ def collect_interviews(
                 select(InterviewReportVersion.conclusion)
                 .join(InterviewReport, InterviewReport.id == InterviewReportVersion.report_id)
                 .where(
-                    InterviewReport.application_id.in_(context.application_ids),
+                    _uuid_ids_clause(
+                        db,
+                        InterviewReport.application_id,
+                        context.application_ids,
+                    ),
                     InterviewReport.status == "confirmed",
                     InterviewReport.confirmed_at.is_not(None),
                     InterviewReport.confirmed_at <= context.as_of,
@@ -792,7 +839,7 @@ def _approved_offer_application_ids(
         .join(OfferVersion, OfferVersion.offer_id == Offer.id)
         .join(OfferApproval, OfferApproval.version_id == OfferVersion.id)
         .where(
-            Offer.application_id.in_(context.application_ids),
+            _uuid_ids_clause(db, Offer.application_id, context.application_ids),
             OfferApproval.decision == "approved",
             OfferApproval.decided_at <= context.as_of,
         ),
@@ -810,7 +857,7 @@ def _accepted_offer_application_ids(
         select(Offer.application_id)
         .join(OfferResponse, OfferResponse.offer_id == Offer.id)
         .where(
-            Offer.application_id.in_(context.application_ids),
+            _uuid_ids_clause(db, Offer.application_id, context.application_ids),
             OfferResponse.decision == "accepted",
             OfferResponse.responded_at <= context.as_of,
         ),
@@ -822,7 +869,9 @@ def collect_offers(db: Session, context: AnalyticsContext) -> AnalyticsOfferResp
     if context.application_ids:
         statuses = list(
             db.scalars(
-                select(Offer.status).where(Offer.application_id.in_(context.application_ids))
+                select(Offer.status).where(
+                    _uuid_ids_clause(db, Offer.application_id, context.application_ids)
+                )
             ).all()
         )
     counts = Counter(statuses)
@@ -863,7 +912,11 @@ def collect_onboardings(
         rows = list(
             db.execute(
                 select(Onboarding.status, Onboarding.abandonment_source).where(
-                    Onboarding.application_id.in_(context.application_ids)
+                    _uuid_ids_clause(
+                        db,
+                        Onboarding.application_id,
+                        context.application_ids,
+                    )
                 )
             ).all()
         )
@@ -875,7 +928,11 @@ def collect_onboardings(
         onboarded = set(
             db.scalars(
                 select(Onboarding.application_id).where(
-                    Onboarding.application_id.in_(context.application_ids),
+                    _uuid_ids_clause(
+                        db,
+                        Onboarding.application_id,
+                        context.application_ids,
+                    ),
                     Onboarding.status == "onboarded",
                 )
             ).all()
@@ -939,7 +996,11 @@ def collect_decision_differences(
             )
             .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
             .where(
-                ResumeDocument.application_id.in_(context.application_ids),
+                _uuid_ids_clause(
+                    db,
+                    ResumeDocument.application_id,
+                    context.application_ids,
+                ),
                 ScreeningResult.status == "completed",
                 ScreeningResult.ai_group.is_not(None),
                 ScreeningResult.completed_at.is_not(None),
@@ -969,7 +1030,11 @@ def collect_decision_differences(
                 RecruiterDecision.decision,
                 RecruiterDecision.created_at,
             ).where(
-                RecruiterDecision.screening_result_id.in_(result_to_application),
+                _uuid_ids_clause(
+                    db,
+                    RecruiterDecision.screening_result_id,
+                    result_to_application,
+                ),
                 RecruiterDecision.created_at <= context.as_of,
             )
         ).all():
@@ -985,7 +1050,11 @@ def collect_decision_differences(
                     CandidateInterviewSchedule.application_id,
                     CandidateInterviewSchedule.created_at,
                 ).where(
-                    CandidateInterviewSchedule.application_id.in_(latest_results),
+                    _uuid_ids_clause(
+                        db,
+                        CandidateInterviewSchedule.application_id,
+                        latest_results,
+                    ),
                     CandidateInterviewSchedule.created_at <= context.as_of,
                 )
             ).all()
@@ -993,7 +1062,7 @@ def collect_decision_differences(
         cutoff_rows.extend(
             db.execute(
                 select(Offer.application_id, Offer.created_at).where(
-                    Offer.application_id.in_(latest_results),
+                    _uuid_ids_clause(db, Offer.application_id, latest_results),
                     Offer.created_at <= context.as_of,
                 )
             ).all()
