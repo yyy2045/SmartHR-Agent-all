@@ -10,6 +10,7 @@ from app.api.dependencies.auth import CurrentUser
 from app.config import settings
 from app.database import get_db
 from app.models import (
+    ApplicationResumeDocument,
     Candidate,
     CandidateProfile,
     DimensionScore,
@@ -444,6 +445,10 @@ async def create_batch(
         )
         batch.documents.append(document)
         db.flush()
+        application.document_links.append(
+            ApplicationResumeDocument(document=document)
+        )
+        application.primary_document = document
         await process_upload(db, batch=batch, document=document, upload=upload)
         db.flush()
 

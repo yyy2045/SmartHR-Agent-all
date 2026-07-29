@@ -18,6 +18,7 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    ApplicationResumeDocument,
     AuditLog,
     Candidate,
     CandidateDuplicateReview,
@@ -379,6 +380,9 @@ async def test_partial_failure_download_duplicate_and_retry(
     assert all(path.name not in {"private.pdf", "replacement.png"} for path in stored_files)
     with batch_dependencies.session_factory() as db:
         duplicate_review = db.scalar(select(CandidateDuplicateReview))
+        documents = list(db.scalars(select(ResumeDocument)).all())
+        document_links = list(db.scalars(select(ApplicationResumeDocument)).all())
+        applications = list(db.scalars(select(JobApplication)).all())
         audit = db.scalar(
             select(AuditLog).where(AuditLog.action == "resume.file_viewed")
         )
@@ -386,6 +390,13 @@ async def test_partial_failure_download_duplicate_and_retry(
             select(AuditLog).where(AuditLog.action == "candidate.duplicate_detected")
         )
     assert duplicate_review is not None
+    assert len(document_links) == len(documents) == len(applications) == 3
+    assert {link.document_id for link in document_links} == {
+        document.id for document in documents
+    }
+    assert {application.primary_document_id for application in applications} == {
+        document.id for document in documents
+    }
     assert duplicate_review.status == "pending"
     assert duplicate_review.confidence == "strong"
     assert duplicate_review.signals == ["resume_sha256_exact"]
