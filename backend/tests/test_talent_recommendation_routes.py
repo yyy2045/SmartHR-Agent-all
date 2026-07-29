@@ -14,6 +14,7 @@ from app.api.routes import talent_recommendations as recommendation_routes
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    ApplicationResumeDocument,
     AuditLog,
     Candidate,
     CandidateProfile,
@@ -276,6 +277,21 @@ def recommendation_route_dependencies(
                 applied_membership,
             ]
         )
+        db.flush()
+        db.add_all(
+            [
+                ApplicationResumeDocument(
+                    application=application,
+                    document=document,
+                ),
+                ApplicationResumeDocument(
+                    application=source_application,
+                    document=applied_document,
+                ),
+            ]
+        )
+        application.primary_document = document
+        source_application.primary_document = applied_document
         db.commit()
         dependencies = RecommendationRouteDependencies(
             session_factory=testing_session,
@@ -394,6 +410,10 @@ async def test_create_run_is_idempotent_and_reuses_active_run(
         assert run is not None
         assert run.celery_task_id == "recommendation-task-1"
         assert len(run.group_snapshots) == 1
+        assert len(run.candidate_snapshots) == 1
+        assert run.candidate_snapshots[0].candidate_id == run.candidate_snapshots[0].candidate.id
+        assert run.candidate_snapshots[0].document_id == run.candidate_snapshots[0].document.id
+        assert run.scope_candidate_count == len(run.candidate_snapshots)
         assert run.criteria_snapshot["version_number"] == 1
         assert (
             db.scalar(

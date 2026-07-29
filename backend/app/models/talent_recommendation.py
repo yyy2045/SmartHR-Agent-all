@@ -220,6 +220,11 @@ class TalentRecommendationRun(Base):
         cascade="all, delete-orphan",
         order_by="TalentRecommendationRunGroup.group_name_snapshot",
     )
+    candidate_snapshots: Mapped[list[TalentRecommendationRunCandidate]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="TalentRecommendationRunCandidate.candidate_code_snapshot",
+    )
     results: Mapped[list[TalentRecommendationResult]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
@@ -261,6 +266,79 @@ class TalentRecommendationRunGroup(Base):
 
     run: Mapped[TalentRecommendationRun] = relationship(back_populates="group_snapshots")
     group: Mapped[TalentPoolGroup] = relationship(foreign_keys=[group_id])
+
+
+class TalentRecommendationRunCandidate(Base):
+    __tablename__ = "talent_recommendation_run_candidates"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("talent_recommendation_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("candidates.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    candidate_code_snapshot: Mapped[str] = mapped_column(String(40), nullable=False)
+    candidate_name_snapshot: Mapped[str | None] = mapped_column(String(200))
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("resume_documents.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    document_sha256_snapshot: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_updated_at_snapshot: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    candidate_profile_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    profile_version_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding_model_snapshot: Mapped[str] = mapped_column(String(200), nullable=False)
+    embedding_version_snapshot: Mapped[str] = mapped_column(String(100), nullable=False)
+    embedding_dimension_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_group_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(candidate_code_snapshot)) > 0",
+            name="ck_talent_recommendation_run_candidates_code",
+        ),
+        CheckConstraint(
+            "length(document_sha256_snapshot) = 64",
+            name="ck_talent_recommendation_run_candidates_sha256",
+        ),
+        CheckConstraint(
+            "profile_version_snapshot >= 1 AND embedding_dimension_snapshot >= 1",
+            name="ck_talent_recommendation_run_candidates_versions",
+        ),
+        ForeignKeyConstraint(
+            ["candidate_profile_id", "document_id", "profile_version_snapshot"],
+            [
+                "candidate_profiles.id",
+                "candidate_profiles.document_id",
+                "candidate_profiles.version_number",
+            ],
+            name="fk_talent_recommendation_run_candidates_profile_snapshot",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "run_id",
+            "document_id",
+            name="uq_talent_recommendation_run_candidates_document",
+        ),
+    )
+
+    run: Mapped[TalentRecommendationRun] = relationship(back_populates="candidate_snapshots")
+    candidate: Mapped[Candidate] = relationship(foreign_keys=[candidate_id])
+    document: Mapped[ResumeDocument] = relationship(foreign_keys=[document_id])
+    candidate_profile: Mapped[CandidateProfile] = relationship(
+        foreign_keys=[candidate_profile_id]
+    )
 
 
 class TalentRecommendationResult(Base):
@@ -561,6 +639,15 @@ def _protect_group_snapshot(
     target: TalentRecommendationRunGroup,
 ) -> None:
     raise ValueError("推荐运行的人才组快照不可修改")
+
+
+@event.listens_for(TalentRecommendationRunCandidate, "before_update")
+def _protect_candidate_snapshot(
+    _mapper: object,
+    _connection: object,
+    target: TalentRecommendationRunCandidate,
+) -> None:
+    raise ValueError("推荐运行的候选人输入快照不可修改")
 
 
 @event.listens_for(TalentRecommendationResult, "before_update")

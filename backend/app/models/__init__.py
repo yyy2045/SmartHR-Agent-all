@@ -54,6 +54,7 @@ from app.models.talent_pool import (
 from app.models.talent_recommendation import (
     TalentRecommendationResult,
     TalentRecommendationRun,
+    TalentRecommendationRunCandidate,
     TalentRecommendationRunEvent,
     TalentRecommendationRunGroup,
 )
@@ -110,6 +111,7 @@ __all__ = [
     "TalentPoolMembershipEvent",
     "TalentRecommendationResult",
     "TalentRecommendationRun",
+    "TalentRecommendationRunCandidate",
     "TalentRecommendationRunEvent",
     "TalentRecommendationRunGroup",
     "User",

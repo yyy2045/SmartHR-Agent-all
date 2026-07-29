@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -18,6 +19,7 @@ from app.models import (
     TalentPoolGroup,
     TalentPoolMembership,
     TalentRecommendationRun,
+    TalentRecommendationRunCandidate,
     TalentRecommendationRunEvent,
     TalentRecommendationRunGroup,
     User,
@@ -56,6 +58,7 @@ def recommendation_run_options(*, include_results: bool = False) -> tuple[object
         selectinload(TalentRecommendationRun.job),
         selectinload(TalentRecommendationRun.criteria_version),
         selectinload(TalentRecommendationRun.group_snapshots),
+        selectinload(TalentRecommendationRun.candidate_snapshots),
     ]
     if include_results:
         options.append(selectinload(TalentRecommendationRun.results))
@@ -132,43 +135,123 @@ def _load_groups(
     return ordered
 
 
-def _eligible_candidate_count(
+def _candidate_scope_snapshots(
     db: Session,
     group_ids: list[uuid.UUID],
     *,
     job_id: uuid.UUID,
-) -> int:
-    completed_profile_exists = exists(
-        select(CandidateProfile.id)
-        .join(ResumeDocument, ResumeDocument.id == CandidateProfile.document_id)
+) -> list[TalentRecommendationRunCandidate]:
+    membership_rows = db.execute(
+        select(TalentPoolMembership.candidate_id, TalentPoolMembership.group_id)
+        .join(Candidate, Candidate.id == TalentPoolMembership.candidate_id)
         .where(
-            ResumeDocument.candidate_id == Candidate.id,
-            ResumeDocument.status == "completed",
+            TalentPoolMembership.group_id.in_(group_ids),
+            TalentPoolMembership.status == "active",
+            Candidate.status == "active",
         )
-    )
+    ).all()
+    groups_by_candidate: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    for candidate_id, group_id in membership_rows:
+        groups_by_candidate[candidate_id].add(group_id)
+    if not groups_by_candidate:
+        return []
+
     target_application_exists = exists(
         select(JobApplication.id).where(
             JobApplication.candidate_id == Candidate.id,
             JobApplication.job_id == job_id,
+            JobApplication.status == "active",
         )
     )
-    return (
-        db.scalar(
-            select(func.count(func.distinct(Candidate.id)))
-            .join(
-                TalentPoolMembership,
-                TalentPoolMembership.candidate_id == Candidate.id,
-            )
-            .where(
-                TalentPoolMembership.group_id.in_(group_ids),
-                TalentPoolMembership.status == "active",
+    candidate_ids = set(
+        db.scalars(
+            select(Candidate.id).where(
+                Candidate.id.in_(groups_by_candidate),
                 Candidate.status == "active",
-                completed_profile_exists,
                 ~target_application_exists,
             )
-        )
-        or 0
+        ).all()
     )
+    if not candidate_ids:
+        return []
+
+    application_rows = db.execute(
+        select(JobApplication.candidate_id, ResumeDocument)
+        .join(
+            ResumeDocument,
+            ResumeDocument.id == JobApplication.primary_document_id,
+        )
+        .where(
+            JobApplication.candidate_id.in_(candidate_ids),
+            JobApplication.status == "active",
+            JobApplication.primary_document_id.is_not(None),
+            ResumeDocument.status == "completed",
+        )
+        .order_by(
+            JobApplication.candidate_id,
+            JobApplication.updated_at.desc(),
+            ResumeDocument.updated_at.desc(),
+            JobApplication.id.desc(),
+        )
+    ).all()
+    document_by_candidate: dict[uuid.UUID, ResumeDocument] = {}
+    for candidate_id, document in application_rows:
+        document_by_candidate.setdefault(candidate_id, document)
+
+    document_ids = {document.id for document in document_by_candidate.values()}
+    profile_by_document: dict[uuid.UUID, CandidateProfile] = {}
+    if document_ids:
+        profiles = db.scalars(
+            select(CandidateProfile)
+            .where(CandidateProfile.document_id.in_(document_ids))
+            .order_by(
+                CandidateProfile.document_id,
+                CandidateProfile.version_number.desc(),
+                CandidateProfile.created_at.desc(),
+            )
+        ).all()
+        for profile in profiles:
+            profile_by_document.setdefault(profile.document_id, profile)
+
+    candidates = {
+        candidate.id: candidate
+        for candidate in db.scalars(
+            select(Candidate).where(Candidate.id.in_(candidate_ids))
+        ).all()
+    }
+    snapshots: list[TalentRecommendationRunCandidate] = []
+    for candidate_id in sorted(candidate_ids, key=str):
+        candidate = candidates.get(candidate_id)
+        document = document_by_candidate.get(candidate_id)
+        profile = profile_by_document.get(document.id) if document is not None else None
+        if (
+            candidate is None
+            or document is None
+            or profile is None
+            or not document.sha256
+            or document.updated_at is None
+        ):
+            continue
+        snapshots.append(
+            TalentRecommendationRunCandidate(
+                candidate_id=candidate.id,
+                candidate_code_snapshot=candidate.candidate_code,
+                candidate_name_snapshot=candidate.full_name,
+                document_id=document.id,
+                document_sha256_snapshot=document.sha256,
+                document_updated_at_snapshot=document.updated_at,
+                candidate_profile_id=profile.id,
+                profile_version_snapshot=profile.version_number,
+                embedding_model_snapshot=settings.embedding_model or "unconfigured",
+                embedding_version_snapshot=settings.embedding_version,
+                embedding_dimension_snapshot=settings.embedding_dimension,
+                matched_group_ids=[
+                    str(group_id)
+                    for group_id in sorted(groups_by_candidate[candidate.id], key=str)
+                ],
+            )
+        )
+    return snapshots
 
 
 def _next_event_sequence(db: Session, run_id: uuid.UUID) -> int:
@@ -321,11 +404,8 @@ def create_recommendation_run(
         )
 
     groups = _load_groups(db, group_ids)
-    scope_candidate_count = _eligible_candidate_count(
-        db,
-        group_ids,
-        job_id=job.id,
-    )
+    candidate_snapshots = _candidate_scope_snapshots(db, group_ids, job_id=job.id)
+    scope_candidate_count = len(candidate_snapshots)
     run = TalentRecommendationRun(
         job=job,
         criteria_version=criteria,
@@ -348,6 +428,7 @@ def create_recommendation_run(
             )
             for group in groups
         ],
+        candidate_snapshots=candidate_snapshots,
     )
     db.add(run)
     db.flush()
