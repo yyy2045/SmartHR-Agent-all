@@ -280,6 +280,12 @@ class CandidateProfile(Base):
             "version_number",
             name="uq_candidate_profile_document_version",
         ),
+        UniqueConstraint(
+            "id",
+            "document_id",
+            "version_number",
+            name="uq_candidate_profiles_snapshot_identity",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

@@ -34,6 +34,10 @@ from app.models import (  # noqa: F401
     TalentPoolGroup,
     TalentPoolMembership,
     TalentPoolMembershipEvent,
+    TalentRecommendationResult,
+    TalentRecommendationRun,
+    TalentRecommendationRunEvent,
+    TalentRecommendationRunGroup,
     User,
     UserRole,
 )

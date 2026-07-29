@@ -15,6 +15,7 @@ from app.models import (
     ResumeDocument,
     TalentPoolMembership,
     TalentPoolMembershipEvent,
+    TalentRecommendationResult,
     User,
 )
 from app.services.audit import record_audit
@@ -323,6 +324,19 @@ def merge_duplicate_candidates(
     for document in documents:
         document.candidate_id = target_candidate.id
 
+    recommendation_results = list(
+        db.scalars(
+            select(TalentRecommendationResult)
+            .where(
+                TalentRecommendationResult.resolved_candidate_id == source_candidate.id
+            )
+            .with_for_update()
+        ).all()
+    )
+    for result in recommendation_results:
+        result.resolved_candidate_id = target_candidate.id
+        result.candidate_merged_at = now
+
     moved_membership_ids, conflicted_membership_ids = _merge_talent_pool_memberships(
         db,
         review_id=review.id,
@@ -358,6 +372,7 @@ def merge_duplicate_candidates(
             "merged_application_ids": [str(item) for item in merged_application_ids],
             "moved_document_count": len(documents),
             "linked_document_count": linked_document_count,
+            "resolved_recommendation_result_count": len(recommendation_results),
             "moved_talent_pool_membership_ids": [
                 str(item) for item in moved_membership_ids
             ],

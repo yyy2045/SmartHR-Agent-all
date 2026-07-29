@@ -51,6 +51,12 @@ from app.models.talent_pool import (
     TalentPoolMembership,
     TalentPoolMembershipEvent,
 )
+from app.models.talent_recommendation import (
+    TalentRecommendationResult,
+    TalentRecommendationRun,
+    TalentRecommendationRunEvent,
+    TalentRecommendationRunGroup,
+)
 from app.models.user import Role, User, UserRole
 
 __all__ = [
@@ -102,6 +108,10 @@ __all__ = [
     "TalentPoolGroup",
     "TalentPoolMembership",
     "TalentPoolMembershipEvent",
+    "TalentRecommendationResult",
+    "TalentRecommendationRun",
+    "TalentRecommendationRunEvent",
+    "TalentRecommendationRunGroup",
     "User",
     "UserRole",
 ]

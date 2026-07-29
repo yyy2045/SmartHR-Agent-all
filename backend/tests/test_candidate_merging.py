@@ -324,7 +324,10 @@ def candidate_merge_dependencies() -> Generator[CandidateMergeDependencies, None
     app.dependency_overrides[get_session_store] = lambda: session_store
     yield dependency
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        Base.metadata.drop_all(connection)
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
     engine.dispose()
 
 
