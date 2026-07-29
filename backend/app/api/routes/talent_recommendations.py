@@ -147,6 +147,11 @@ def _detail_response(
                 ai_score=item.ai_score,
                 ai_group=item.ai_group,  # type: ignore[arg-type]
                 ai_dimension_scores=item.ai_dimension_scores,
+                ai_hard_requirement_results=item.ai_hard_requirement_results,
+                ai_strengths=item.ai_strengths,
+                ai_gaps=item.ai_gaps,
+                ai_missing_items=item.ai_missing_items,
+                ai_interview_questions=item.ai_interview_questions,
                 ai_evidence=item.ai_evidence,
                 processing_attempt_count=item.processing_attempt_count,
                 failure_code=item.failure_code,

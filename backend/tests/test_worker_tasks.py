@@ -96,12 +96,18 @@ def test_talent_recommendation_task_dispatches_retrieval_phase(
 ) -> None:
     run_id = uuid.uuid4()
     received: list[tuple[uuid.UUID, str]] = []
+    rescored: list[tuple[uuid.UUID, str, bool]] = []
 
     async def retrieve(value, *, task_id):
         received.append((value, task_id))
         return {"status": "rescoring", "retrieved_count": 3}
 
+    async def rescore(value, *, task_id, retry_failed_only=False):
+        rescored.append((value, task_id, retry_failed_only))
+        return {"status": "completed", "rescored_count": 3}
+
     monkeypatch.setattr(tasks, "retrieve_talent_recommendations", retrieve)
+    monkeypatch.setattr(tasks, "rescore_talent_recommendations", rescore)
 
     result = tasks.run_talent_recommendation_task.run(str(run_id))
     retry = tasks.run_talent_recommendation_task.run(
@@ -109,6 +115,10 @@ def test_talent_recommendation_task_dispatches_retrieval_phase(
         retry_failed_only=True,
     )
 
-    assert result == {"status": "rescoring", "retrieved_count": 3}
+    assert result == {"status": "completed", "rescored_count": 3}
     assert received == [(run_id, "None")]
-    assert retry == {"status": "rescoring_retry_pending", "run_id": str(run_id)}
+    assert rescored == [
+        (run_id, "None", False),
+        (run_id, "None", True),
+    ]
+    assert retry == {"status": "completed", "rescored_count": 3}

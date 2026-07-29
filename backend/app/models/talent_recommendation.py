@@ -383,6 +383,15 @@ class TalentRecommendationResult(Base):
     ai_dimension_scores: Mapped[list[dict[str, object]]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    ai_hard_requirement_results: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    ai_strengths: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    ai_gaps: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    ai_missing_items: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    ai_interview_questions: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     ai_evidence: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
     ai_model_snapshot: Mapped[str | None] = mapped_column(String(200))
     prompt_version_snapshot: Mapped[str | None] = mapped_column(String(100))
@@ -607,6 +616,11 @@ _RESULT_COMPLETED_FIELDS = (
     "ai_score",
     "ai_group",
     "ai_dimension_scores",
+    "ai_hard_requirement_results",
+    "ai_strengths",
+    "ai_gaps",
+    "ai_missing_items",
+    "ai_interview_questions",
     "ai_evidence",
     "ai_model_snapshot",
     "prompt_version_snapshot",

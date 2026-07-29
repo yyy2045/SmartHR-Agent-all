@@ -115,6 +115,11 @@ class TalentRecommendationResultResponse(BaseModel):
     ai_score: Decimal | None
     ai_group: Literal["passed", "low_match", "auto_rejected"] | None
     ai_dimension_scores: list[dict[str, object]]
+    ai_hard_requirement_results: list[dict[str, object]]
+    ai_strengths: list[str]
+    ai_gaps: list[str]
+    ai_missing_items: list[str]
+    ai_interview_questions: list[str]
     ai_evidence: list[dict[str, object]]
     processing_attempt_count: int
     failure_code: str | None

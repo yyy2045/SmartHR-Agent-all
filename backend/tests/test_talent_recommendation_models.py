@@ -336,6 +336,11 @@ def test_input_snapshots_and_completed_ai_output_cannot_be_overwritten(
     dependency.result.ai_score = Decimal("88.00")
     dependency.result.ai_group = "passed"
     dependency.result.ai_dimension_scores = [{"name": "技能", "score": 88}]
+    dependency.result.ai_hard_requirement_results = [{"status": "passed"}]
+    dependency.result.ai_strengths = ["Python"]
+    dependency.result.ai_gaps = []
+    dependency.result.ai_missing_items = []
+    dependency.result.ai_interview_questions = ["请介绍 Python 项目"]
     dependency.result.ai_evidence = [{"quote": "Python"}]
     dependency.result.ai_model_snapshot = "screening-model-test"
     dependency.result.prompt_version_snapshot = "resume-match-v2"
@@ -343,6 +348,11 @@ def test_input_snapshots_and_completed_ai_output_cannot_be_overwritten(
     recommendation_session.commit()
 
     dependency.result.ai_score = Decimal("90.00")
+    with pytest.raises(ValueError, match="已完成推荐结果不可覆盖"):
+        recommendation_session.flush()
+    recommendation_session.rollback()
+
+    dependency.result.ai_strengths = ["Python", "FastAPI"]
     with pytest.raises(ValueError, match="已完成推荐结果不可覆盖"):
         recommendation_session.flush()
     recommendation_session.rollback()

@@ -7,6 +7,7 @@ from app.config import settings
 from app.services.knowledge_index import index_candidate_profile
 from app.services.resume_analysis import analyze_resume_document
 from app.services.resume_processing import process_resume_document
+from app.services.talent_recommendation_rescoring import rescore_talent_recommendations
 from app.services.talent_recommendation_retrieval import retrieve_talent_recommendations
 from app.workers.celery_app import celery_app
 from app.workers.dispatcher import enqueue_knowledge_index, enqueue_resume_analysis
@@ -97,14 +98,24 @@ def run_talent_recommendation_task(
     run_id: str,
     retry_failed_only: bool = False,
 ) -> dict[str, Any]:
-    if retry_failed_only:
-        return {
-            "status": "rescoring_retry_pending",
-            "run_id": run_id,
-        }
-    return asyncio.run(
-        retrieve_talent_recommendations(
-            uuid.UUID(run_id),
-            task_id=str(task.request.id),
+    async def execute() -> dict[str, Any]:
+        resolved_run_id = uuid.UUID(run_id)
+        task_id = str(task.request.id)
+        if retry_failed_only:
+            return await rescore_talent_recommendations(
+                resolved_run_id,
+                task_id=task_id,
+                retry_failed_only=True,
+            )
+        retrieval = await retrieve_talent_recommendations(
+            resolved_run_id,
+            task_id=task_id,
         )
-    )
+        if retrieval.get("status") != "rescoring":
+            return retrieval
+        return await rescore_talent_recommendations(
+            resolved_run_id,
+            task_id=task_id,
+        )
+
+    return asyncio.run(execute())
