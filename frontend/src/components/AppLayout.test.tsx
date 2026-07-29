@@ -158,6 +158,19 @@ describe('招聘业务导航', () => {
     expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
   })
 
+  it('将数据分析归入四角色可访问的全局模块', () => {
+    expect(businessModuleForPath('/analytics')).toBe('analytics')
+    expect(jobIdFromPath('/analytics')).toBeNull()
+    mockApi()
+    renderLayout('/analytics')
+    expect(screen.getByRole('button', { name: '数据分析' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '数据分析' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
+  })
+
   it('无岗位上下文时展示完整导航，并禁用岗位级模块', () => {
     mockApi()
     renderLayout('/jobs')
@@ -173,7 +186,7 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: /录用管理/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /工作台/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /人才库/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /数据分析/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /数据分析/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /系统设置/ })).toBeDisabled()
   })
 

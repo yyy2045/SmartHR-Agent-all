@@ -98,6 +98,9 @@ const OnboardingManagementPage = lazy(() =>
 const WorkbenchPage = lazy(() =>
   import('./pages/WorkbenchPage').then((module) => ({ default: module.WorkbenchPage })),
 )
+const AnalyticsPage = lazy(() =>
+  import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })),
+)
 
 function PageFallback() {
   return <div className="page-fallback">正在加载页面…</div>
@@ -124,6 +127,7 @@ function AppRoutes() {
                   }
                 >
                   <Route path="/workbench" element={<WorkbenchPage />} />
+                  <Route path="/analytics" element={<AnalyticsPage />} />
                 </Route>
                 <Route
                   element={
