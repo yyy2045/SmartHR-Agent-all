@@ -30,6 +30,9 @@ from app.models import (  # noqa: F401
     Role,
     ScoringDimension,
     ScreeningBatch,
+    TalentPoolGroup,
+    TalentPoolMembership,
+    TalentPoolMembershipEvent,
     User,
     UserRole,
 )

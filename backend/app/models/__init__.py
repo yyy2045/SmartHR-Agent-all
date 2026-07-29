@@ -41,6 +41,11 @@ from app.models.resume import (
     ScreeningBatch,
     ScreeningResult,
 )
+from app.models.talent_pool import (
+    TalentPoolGroup,
+    TalentPoolMembership,
+    TalentPoolMembershipEvent,
+)
 from app.models.user import Role, User, UserRole
 
 __all__ = [
@@ -88,6 +93,9 @@ __all__ = [
     "ScoringDimension",
     "ScreeningBatch",
     "ScreeningResult",
+    "TalentPoolGroup",
+    "TalentPoolMembership",
+    "TalentPoolMembershipEvent",
     "User",
     "UserRole",
 ]

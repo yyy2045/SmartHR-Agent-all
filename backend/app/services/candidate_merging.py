@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -12,6 +12,8 @@ from app.models import (
     CandidateDuplicateReview,
     JobApplication,
     ResumeDocument,
+    TalentPoolMembership,
+    TalentPoolMembershipEvent,
     User,
 )
 from app.services.audit import record_audit
@@ -38,6 +40,137 @@ def _copy_missing_identity(target: Candidate, source: Candidate) -> None:
     ):
         if getattr(target, field_name) is None:
             setattr(target, field_name, getattr(source, field_name))
+
+
+def _append_membership_merge_event(
+    db: Session,
+    *,
+    membership: TalentPoolMembership,
+    review_id: uuid.UUID,
+    source_candidate_id: uuid.UUID,
+    target_candidate_id: uuid.UUID,
+    actor: User,
+    reason: str,
+    from_status: str,
+    to_status: str,
+    event_role: str,
+) -> None:
+    next_sequence = db.scalar(
+        select(func.coalesce(func.max(TalentPoolMembershipEvent.sequence_number), 0) + 1).where(
+            TalentPoolMembershipEvent.membership_id == membership.id
+        )
+    )
+    membership.events.append(
+        TalentPoolMembershipEvent(
+            sequence_number=next_sequence or 1,
+            idempotency_key=uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"talent-pool-merge:{review_id}:{membership.id}:{event_role}",
+            ),
+            action="candidate_merged",
+            from_status=from_status,
+            to_status=to_status,
+            reason=reason,
+            candidate_id_snapshot=source_candidate_id,
+            target_candidate_id_snapshot=target_candidate_id,
+            source_application_id_snapshot=membership.source_application_id,
+            actor_user_id=actor.id,
+            actor_username=actor.username,
+            actor_display_name=actor.display_name,
+        )
+    )
+
+
+def _merge_talent_pool_memberships(
+    db: Session,
+    *,
+    review_id: uuid.UUID,
+    target_candidate: Candidate,
+    source_candidate: Candidate,
+    actor: User,
+    reason: str,
+    merged_at: datetime,
+) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    target_memberships = list(
+        db.scalars(
+            select(TalentPoolMembership)
+            .where(TalentPoolMembership.candidate_id == target_candidate.id)
+            .with_for_update()
+        ).all()
+    )
+    source_memberships = list(
+        db.scalars(
+            select(TalentPoolMembership)
+            .where(TalentPoolMembership.candidate_id == source_candidate.id)
+            .with_for_update()
+        ).all()
+    )
+    target_by_group = {membership.group_id: membership for membership in target_memberships}
+    moved_membership_ids: list[uuid.UUID] = []
+    conflicted_membership_ids: list[uuid.UUID] = []
+
+    for source_membership in source_memberships:
+        target_membership = target_by_group.get(source_membership.group_id)
+        source_previous_status = source_membership.status
+        if target_membership is None:
+            source_membership.candidate_id = target_candidate.id
+            source_membership.version += 1
+            source_membership.updated_by_id = actor.id
+            _append_membership_merge_event(
+                db,
+                membership=source_membership,
+                review_id=review_id,
+                source_candidate_id=source_candidate.id,
+                target_candidate_id=target_candidate.id,
+                actor=actor,
+                reason=reason,
+                from_status=source_previous_status,
+                to_status=source_previous_status,
+                event_role="moved",
+            )
+            target_by_group[source_membership.group_id] = source_membership
+            moved_membership_ids.append(source_membership.id)
+            continue
+
+        target_previous_status = target_membership.status
+        if source_membership.status == "active" and target_membership.status == "removed":
+            target_membership.status = "active"
+            target_membership.reason = source_membership.reason
+            target_membership.removed_at = None
+        target_membership.version += 1
+        target_membership.updated_by_id = actor.id
+        _append_membership_merge_event(
+            db,
+            membership=target_membership,
+            review_id=review_id,
+            source_candidate_id=source_candidate.id,
+            target_candidate_id=target_candidate.id,
+            actor=actor,
+            reason=reason,
+            from_status=target_previous_status,
+            to_status=target_membership.status,
+            event_role=f"target:{source_membership.id}",
+        )
+
+        source_membership.status = "removed"
+        source_membership.removed_at = source_membership.removed_at or merged_at
+        source_membership.version += 1
+        source_membership.updated_by_id = actor.id
+        _append_membership_merge_event(
+            db,
+            membership=source_membership,
+            review_id=review_id,
+            source_candidate_id=source_candidate.id,
+            target_candidate_id=target_candidate.id,
+            actor=actor,
+            reason=reason,
+            from_status=source_previous_status,
+            to_status="removed",
+            event_role="conflict",
+        )
+        conflicted_membership_ids.append(source_membership.id)
+
+    return moved_membership_ids, conflicted_membership_ids
 
 
 def dismiss_duplicate_review(
@@ -138,6 +271,16 @@ def merge_duplicate_candidates(
     for document in documents:
         document.candidate_id = target_candidate.id
 
+    moved_membership_ids, conflicted_membership_ids = _merge_talent_pool_memberships(
+        db,
+        review_id=review.id,
+        target_candidate=target_candidate,
+        source_candidate=source_candidate,
+        actor=actor,
+        reason=reason,
+        merged_at=now,
+    )
+
     _copy_missing_identity(target_candidate, source_candidate)
     source_candidate.status = "merged"
     source_candidate.merged_into_candidate_id = target_candidate.id
@@ -162,6 +305,12 @@ def merge_duplicate_candidates(
             "moved_application_ids": [str(item) for item in moved_application_ids],
             "merged_application_ids": [str(item) for item in merged_application_ids],
             "moved_document_count": len(documents),
+            "moved_talent_pool_membership_ids": [
+                str(item) for item in moved_membership_ids
+            ],
+            "conflicted_talent_pool_membership_ids": [
+                str(item) for item in conflicted_membership_ids
+            ],
             "reason": reason,
         },
     )

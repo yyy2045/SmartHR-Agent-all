@@ -27,6 +27,9 @@ from app.models import (
     Role,
     ScreeningBatch,
     ScreeningResult,
+    TalentPoolGroup,
+    TalentPoolMembership,
+    TalentPoolMembershipEvent,
     User,
     UserRole,
 )
@@ -44,6 +47,9 @@ class CandidateMergeDependencies:
     target_application_id: uuid.UUID
     conflicting_application_id: uuid.UUID
     movable_application_id: uuid.UUID
+    target_membership_id: uuid.UUID
+    conflicting_membership_id: uuid.UUID
+    movable_membership_id: uuid.UUID
 
 
 def _screening_result(document: ResumeDocument, criteria_id: uuid.UUID) -> ScreeningResult:
@@ -225,6 +231,42 @@ def candidate_merge_dependencies() -> Generator[CandidateMergeDependencies, None
             details={"source": "before_merge"},
         )
         db.add_all([review, existing_audit])
+        shared_group = TalentPoolGroup(name="共享人才组", created_by=recruiter)
+        movable_group = TalentPoolGroup(name="待迁移人才组", created_by=recruiter)
+        db.add_all([shared_group, movable_group])
+        db.flush()
+
+        def membership(
+            group: TalentPoolGroup,
+            candidate: Candidate,
+            reason: str,
+        ) -> TalentPoolMembership:
+            return TalentPoolMembership(
+                group=group,
+                candidate=candidate,
+                status="active",
+                reason=reason,
+                updated_by=recruiter,
+                events=[
+                    TalentPoolMembershipEvent(
+                        sequence_number=1,
+                        idempotency_key=uuid.uuid4(),
+                        action="added",
+                        from_status=None,
+                        to_status="active",
+                        reason=reason,
+                        candidate_id_snapshot=candidate.id,
+                        actor_user=recruiter,
+                        actor_username=recruiter.username,
+                        actor_display_name=recruiter.display_name,
+                    )
+                ],
+            )
+
+        target_membership = membership(shared_group, target, "目标候选人已在共享组")
+        conflicting_membership = membership(shared_group, source, "来源候选人也在共享组")
+        movable_membership = membership(movable_group, source, "仅来源候选人在此组")
+        db.add_all([target_membership, conflicting_membership, movable_membership])
         db.commit()
         dependency = CandidateMergeDependencies(
             session_factory=testing_session,
@@ -234,6 +276,9 @@ def candidate_merge_dependencies() -> Generator[CandidateMergeDependencies, None
             target_application_id=target_application.id,
             conflicting_application_id=conflicting_application.id,
             movable_application_id=movable_application.id,
+            target_membership_id=target_membership.id,
+            conflicting_membership_id=conflicting_membership.id,
+            movable_membership_id=movable_membership.id,
         )
 
     session_store = SessionStore(
@@ -472,6 +517,31 @@ async def test_merge_preserves_documents_applications_processes_and_interviews(
         assert db.scalar(select(func.count(ScreeningResult.id))) == 3
         assert db.scalar(select(func.count(CandidateProcess.id))) == 2
         assert db.scalar(select(func.count(CandidateInterviewSchedule.id))) == 2
+        target_membership = db.get(TalentPoolMembership, dependency.target_membership_id)
+        conflicting_membership = db.get(
+            TalentPoolMembership,
+            dependency.conflicting_membership_id,
+        )
+        movable_membership = db.get(TalentPoolMembership, dependency.movable_membership_id)
+        assert target_membership is not None and target_membership.status == "active"
+        assert target_membership.candidate_id == dependency.target_candidate_id
+        assert conflicting_membership is not None
+        assert conflicting_membership.status == "removed"
+        assert conflicting_membership.candidate_id == dependency.source_candidate_id
+        assert movable_membership is not None and movable_membership.status == "active"
+        assert movable_membership.candidate_id == dependency.target_candidate_id
+        assert [item.action for item in target_membership.events] == [
+            "added",
+            "candidate_merged",
+        ]
+        assert [item.action for item in conflicting_membership.events] == [
+            "added",
+            "candidate_merged",
+        ]
+        assert [item.action for item in movable_membership.events] == [
+            "added",
+            "candidate_merged",
+        ]
         assert (
             db.scalar(
                 select(func.count(AuditLog.id)).where(

@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from app.models.offer import Offer
     from app.models.onboarding import Onboarding
     from app.models.resume import ResumeDocument
+    from app.models.talent_pool import TalentPoolMembership
     from app.models.user import User
 
 
@@ -75,6 +76,10 @@ class Candidate(Base):
         foreign_keys="JobApplication.candidate_id",
     )
     documents: Mapped[list[ResumeDocument]] = relationship(back_populates="candidate")
+    talent_pool_memberships: Mapped[list[TalentPoolMembership]] = relationship(
+        back_populates="candidate",
+        order_by="TalentPoolMembership.created_at",
+    )
     duplicate_reviews_as_a: Mapped[list[CandidateDuplicateReview]] = relationship(
         back_populates="candidate_a",
         foreign_keys="CandidateDuplicateReview.candidate_a_id",
