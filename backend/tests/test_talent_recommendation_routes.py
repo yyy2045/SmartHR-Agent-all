@@ -394,6 +394,7 @@ async def test_create_run_is_idempotent_and_reuses_active_run(
     assert body["reused_active_run"] is False
     assert body["run"]["status"] == "queued"
     assert body["run"]["scope_candidate_count"] == 1
+    assert body["run"]["excluded_count"] == 1
     assert body["run"]["resource_version"] == 2
     assert body["run"]["allowed_actions"] == ["cancel"]
     assert repeated.status_code == 202

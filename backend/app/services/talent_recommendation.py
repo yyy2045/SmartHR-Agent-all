@@ -140,7 +140,7 @@ def _candidate_scope_snapshots(
     group_ids: list[uuid.UUID],
     *,
     job_id: uuid.UUID,
-) -> list[TalentRecommendationRunCandidate]:
+) -> tuple[list[TalentRecommendationRunCandidate], int]:
     membership_rows = db.execute(
         select(TalentPoolMembership.candidate_id, TalentPoolMembership.group_id)
         .join(Candidate, Candidate.id == TalentPoolMembership.candidate_id)
@@ -154,7 +154,7 @@ def _candidate_scope_snapshots(
     for candidate_id, group_id in membership_rows:
         groups_by_candidate[candidate_id].add(group_id)
     if not groups_by_candidate:
-        return []
+        return [], 0
 
     target_application_exists = exists(
         select(JobApplication.id).where(
@@ -173,7 +173,7 @@ def _candidate_scope_snapshots(
         ).all()
     )
     if not candidate_ids:
-        return []
+        return [], len(groups_by_candidate)
 
     application_rows = db.execute(
         select(JobApplication.candidate_id, ResumeDocument)
@@ -251,7 +251,8 @@ def _candidate_scope_snapshots(
                 ],
             )
         )
-    return snapshots
+    excluded_count = len(groups_by_candidate) - len(snapshots)
+    return snapshots, excluded_count
 
 
 def _next_event_sequence(db: Session, run_id: uuid.UUID) -> int:
@@ -404,7 +405,11 @@ def create_recommendation_run(
         )
 
     groups = _load_groups(db, group_ids)
-    candidate_snapshots = _candidate_scope_snapshots(db, group_ids, job_id=job.id)
+    candidate_snapshots, excluded_count = _candidate_scope_snapshots(
+        db,
+        group_ids,
+        job_id=job.id,
+    )
     scope_candidate_count = len(candidate_snapshots)
     run = TalentRecommendationRun(
         job=job,
@@ -420,6 +425,7 @@ def create_recommendation_run(
         ai_model_snapshot=settings.ai_model or "unconfigured",
         prompt_version_snapshot=RESUME_MATCH_PROMPT_VERSION,
         scope_candidate_count=scope_candidate_count,
+        excluded_count=excluded_count,
         group_snapshots=[
             TalentRecommendationRunGroup(
                 group=group,
@@ -443,6 +449,7 @@ def create_recommendation_run(
             "group_ids": [str(group.id) for group in groups],
             "ai_input_mode": ai_input_mode,
             "scope_candidate_count": scope_candidate_count,
+            "excluded_count": excluded_count,
         },
         actor=actor,
     )
@@ -460,6 +467,7 @@ def create_recommendation_run(
             "group_ids": [str(group.id) for group in groups],
             "ai_input_mode": ai_input_mode,
             "scope_candidate_count": scope_candidate_count,
+            "excluded_count": excluded_count,
         },
     )
     return CreateRunOutcome(

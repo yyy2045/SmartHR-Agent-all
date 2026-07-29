@@ -89,3 +89,26 @@ def test_knowledge_index_task_passes_task_context(monkeypatch: pytest.MonkeyPatc
 
     assert result == {"status": "completed", "chunk_count": 2}
     assert received == [(profile_id, "None", True)]
+
+
+def test_talent_recommendation_task_dispatches_retrieval_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = uuid.uuid4()
+    received: list[tuple[uuid.UUID, str]] = []
+
+    async def retrieve(value, *, task_id):
+        received.append((value, task_id))
+        return {"status": "rescoring", "retrieved_count": 3}
+
+    monkeypatch.setattr(tasks, "retrieve_talent_recommendations", retrieve)
+
+    result = tasks.run_talent_recommendation_task.run(str(run_id))
+    retry = tasks.run_talent_recommendation_task.run(
+        str(run_id),
+        retry_failed_only=True,
+    )
+
+    assert result == {"status": "rescoring", "retrieved_count": 3}
+    assert received == [(run_id, "None")]
+    assert retry == {"status": "rescoring_retry_pending", "run_id": str(run_id)}
