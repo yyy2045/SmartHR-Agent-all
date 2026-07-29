@@ -46,6 +46,7 @@ OfferStatusKey = Literal[
     "accepted",
     "declined",
 ]
+JobStatusKey = Literal["active", "archived"]
 OnboardingStatusKey = Literal[
     "pending_confirmation",
     "candidate_proposed_date",
@@ -147,6 +148,12 @@ class AnalyticsMeta(AnalyticsModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("分析统计时间必须包含时区")
         return value
+
+
+class AnalyticsJobOption(AnalyticsModel):
+    id: uuid.UUID
+    title: str = Field(min_length=1, max_length=200)
+    status: JobStatusKey
 
 
 class AnalyticsQuality(AnalyticsModel):
@@ -471,4 +478,38 @@ class AnalyticsDecisionDifferenceResponse(AnalyticsModel):
                 item.percentage, expected, abs_tol=0.05
             ):
                 raise ValueError("AI 与人工差异比例不一致")
+        return self
+
+
+class AnalyticsDashboardResponse(AnalyticsModel):
+    meta: AnalyticsMeta
+    jobs: list[AnalyticsJobOption]
+    overview: AnalyticsOverviewResponse
+    funnel: AnalyticsFunnelResponse
+    current_distribution: AnalyticsCurrentDistributionResponse
+    trend: AnalyticsTrendResponse
+    stage_duration: AnalyticsStageDurationResponse
+    interviews: AnalyticsInterviewResponse
+    offers: AnalyticsOfferResponse
+    onboardings: AnalyticsOnboardingResponse
+    decision_difference: AnalyticsDecisionDifferenceResponse
+
+    @model_validator(mode="after")
+    def validate_shared_snapshot(self) -> Self:
+        job_ids = [item.id for item in self.jobs]
+        if len(job_ids) != len(set(job_ids)):
+            raise ValueError("分析岗位选项不能重复")
+        sections = (
+            self.overview,
+            self.funnel,
+            self.current_distribution,
+            self.trend,
+            self.stage_duration,
+            self.interviews,
+            self.offers,
+            self.onboardings,
+            self.decision_difference,
+        )
+        if any(section.meta != self.meta for section in sections):
+            raise ValueError("分析各区块必须共享同一统计快照")
         return self

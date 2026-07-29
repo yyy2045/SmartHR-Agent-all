@@ -40,9 +40,11 @@ from app.schemas.analytics import (
     OFFER_STATUS_ORDER,
     ONBOARDING_STATUS_ORDER,
     AnalyticsCurrentDistributionResponse,
+    AnalyticsDashboardResponse,
     AnalyticsDecisionDifferenceResponse,
     AnalyticsFunnelResponse,
     AnalyticsInterviewResponse,
+    AnalyticsJobOption,
     AnalyticsMeta,
     AnalyticsOfferResponse,
     AnalyticsOnboardingResponse,
@@ -1037,4 +1039,40 @@ def collect_decision_differences(
             )
             for key in DECISION_DIFFERENCE_ORDER
         ],
+    )
+
+
+def collect_job_options(db: Session, user: User) -> list[AnalyticsJobOption]:
+    rows = db.execute(
+        select(Job.id, Job.title, Job.status)
+        .where(visible_job_clause(user))
+        .order_by(Job.status, Job.title, Job.id)
+    ).all()
+    return [
+        AnalyticsJobOption(id=row.id, title=row.title, status=row.status)
+        for row in rows
+    ]
+
+
+def collect_dashboard(
+    db: Session,
+    user: User,
+    query: AnalyticsQuery,
+    *,
+    as_of: datetime,
+    interval: str,
+) -> AnalyticsDashboardResponse:
+    context = build_analytics_context(db, user, query, as_of=as_of)
+    return AnalyticsDashboardResponse(
+        meta=context.meta,
+        jobs=collect_job_options(db, user),
+        overview=collect_overview(db, context),
+        funnel=collect_funnel(db, context),
+        current_distribution=collect_current_distribution(db, context),
+        trend=collect_trend(db, context, interval=interval),
+        stage_duration=collect_stage_durations(db, context),
+        interviews=collect_interviews(db, context),
+        offers=collect_offers(db, context),
+        onboardings=collect_onboardings(db, context),
+        decision_difference=collect_decision_differences(db, context),
     )

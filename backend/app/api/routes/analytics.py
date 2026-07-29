@@ -12,6 +12,7 @@ from app.database import get_db
 from app.schemas.analytics import (
     ANALYTICS_TIMEZONE,
     AnalyticsCurrentDistributionResponse,
+    AnalyticsDashboardResponse,
     AnalyticsDecisionDifferenceResponse,
     AnalyticsFunnelResponse,
     AnalyticsInterviewResponse,
@@ -25,6 +26,7 @@ from app.schemas.analytics import (
 from app.services.analytics import (
     build_analytics_context,
     collect_current_distribution,
+    collect_dashboard,
     collect_decision_differences,
     collect_funnel,
     collect_interviews,
@@ -75,6 +77,17 @@ def _context(
         query,
         as_of=datetime.now(UTC),
     )
+
+
+def _resolved_interval(query: AnalyticsQuery, interval: str | None) -> str:
+    inclusive_days = (query.end_date - query.start_date).days + 1
+    resolved = interval or ("day" if inclusive_days <= 30 else "week")
+    if resolved == "day" and inclusive_days > 30:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="超过 30 天的趋势必须按周聚合",
+        )
+    return resolved
 
 
 @router.get("/overview", response_model=AnalyticsOverviewResponse)
@@ -132,14 +145,30 @@ def get_analytics_trend(
     interval: Annotated[str | None, Query(pattern="^(day|week)$")] = None,
 ) -> AnalyticsTrendResponse:
     context = _context(db, current_user, start_date, end_date, job_id)
-    inclusive_days = (context.query.end_date - context.query.start_date).days + 1
-    resolved_interval = interval or ("day" if inclusive_days <= 30 else "week")
-    if resolved_interval == "day" and inclusive_days > 30:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="超过 30 天的趋势必须按周聚合",
-        )
-    return collect_trend(db, context, interval=resolved_interval)
+    return collect_trend(
+        db,
+        context,
+        interval=_resolved_interval(context.query, interval),
+    )
+
+
+@router.get("/dashboard", response_model=AnalyticsDashboardResponse)
+def get_analytics_dashboard(
+    current_user: CurrentUser,
+    db: DbSession,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    job_id: uuid.UUID | None = None,
+    interval: Annotated[str | None, Query(pattern="^(day|week)$")] = None,
+) -> AnalyticsDashboardResponse:
+    query = _analytics_query(start_date, end_date, job_id)
+    return collect_dashboard(
+        db,
+        current_user,
+        query,
+        as_of=datetime.now(UTC),
+        interval=_resolved_interval(query, interval),
+    )
 
 
 @router.get("/stage-duration", response_model=AnalyticsStageDurationResponse)

@@ -717,6 +717,37 @@ async def test_zero_denominator_metrics_return_null_instead_of_zero_percent(
 
 
 @pytest.mark.asyncio
+async def test_dashboard_uses_one_snapshot_and_returns_role_scoped_job_options(
+    analytics_dependencies: AnalyticsDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        response = await client.get("/analytics/dashboard", params=_range())
+        assert response.status_code == 200
+        body = response.json()
+        assert {item["id"] for item in body["jobs"]} == {
+            str(analytics_dependencies.active_job_id),
+            str(analytics_dependencies.archived_job_id),
+        }
+        assert body["overview"]["application_count"] == 3
+        assert body["funnel"]["cohort_size"] == 3
+        snapshot = body["meta"]["as_of"]
+        for key in (
+            "overview",
+            "funnel",
+            "current_distribution",
+            "trend",
+            "stage_duration",
+            "interviews",
+            "offers",
+            "onboardings",
+            "decision_difference",
+        ):
+            assert body[key]["meta"]["as_of"] == snapshot
+
+
+@pytest.mark.asyncio
 async def test_analytics_rejects_invalid_ranges_and_requires_authentication(
     analytics_dependencies: AnalyticsDependencies,
 ) -> None:
