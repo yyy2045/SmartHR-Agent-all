@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    ApplicationResumeDocument,
     Candidate,
     CandidateDuplicateReview,
     JobApplication,
@@ -26,6 +27,7 @@ class CandidateMergeOutcome:
     moved_application_ids: tuple[uuid.UUID, ...]
     merged_application_ids: tuple[uuid.UUID, ...]
     moved_document_count: int
+    linked_document_count: int
 
 
 def _copy_missing_identity(target: Candidate, source: Candidate) -> None:
@@ -173,6 +175,49 @@ def _merge_talent_pool_memberships(
     return moved_membership_ids, conflicted_membership_ids
 
 
+def _copy_application_resume_links(
+    db: Session,
+    *,
+    target_application: JobApplication,
+    source_application: JobApplication,
+) -> int:
+    target_document_ids = set(
+        db.scalars(
+            select(ApplicationResumeDocument.document_id).where(
+                ApplicationResumeDocument.application_id == target_application.id
+            )
+        ).all()
+    )
+    source_links = list(
+        db.scalars(
+            select(ApplicationResumeDocument)
+            .where(ApplicationResumeDocument.application_id == source_application.id)
+            .order_by(
+                ApplicationResumeDocument.created_at.desc(),
+                ApplicationResumeDocument.document_id.desc(),
+            )
+            .with_for_update()
+        ).all()
+    )
+    copied_count = 0
+    for source_link in source_links:
+        if source_link.document_id in target_document_ids:
+            continue
+        target_application.document_links.append(
+            ApplicationResumeDocument(document_id=source_link.document_id)
+        )
+        target_document_ids.add(source_link.document_id)
+        copied_count += 1
+
+    if target_application.primary_document_id is None:
+        source_primary_id = source_application.primary_document_id
+        if source_primary_id in target_document_ids:
+            target_application.primary_document_id = source_primary_id
+        elif source_links:
+            target_application.primary_document_id = source_links[0].document_id
+    return copied_count
+
+
 def dismiss_duplicate_review(
     db: Session,
     *,
@@ -227,6 +272,7 @@ def merge_duplicate_candidates(
             moved_application_ids=(),
             merged_application_ids=(),
             moved_document_count=0,
+            linked_document_count=0,
         )
     if review.status != "pending":
         raise ValueError("只有待确认的重复提示可以执行合并")
@@ -251,12 +297,18 @@ def merge_duplicate_candidates(
     now = datetime.now(UTC)
     moved_application_ids: list[uuid.UUID] = []
     merged_application_ids: list[uuid.UUID] = []
+    linked_document_count = 0
     for application in source_applications:
         target_application = active_target_by_job.get(application.job_id)
         if application.status == "active" and target_application is not None:
             application.status = "merged"
             application.merged_into_application_id = target_application.id
             application.merged_at = now
+            linked_document_count += _copy_application_resume_links(
+                db,
+                target_application=target_application,
+                source_application=application,
+            )
             merged_application_ids.append(application.id)
         application.candidate_id = target_candidate.id
         moved_application_ids.append(application.id)
@@ -305,6 +357,7 @@ def merge_duplicate_candidates(
             "moved_application_ids": [str(item) for item in moved_application_ids],
             "merged_application_ids": [str(item) for item in merged_application_ids],
             "moved_document_count": len(documents),
+            "linked_document_count": linked_document_count,
             "moved_talent_pool_membership_ids": [
                 str(item) for item in moved_membership_ids
             ],
@@ -320,4 +373,5 @@ def merge_duplicate_candidates(
         moved_application_ids=tuple(moved_application_ids),
         merged_application_ids=tuple(merged_application_ids),
         moved_document_count=len(documents),
+        linked_document_count=linked_document_count,
     )

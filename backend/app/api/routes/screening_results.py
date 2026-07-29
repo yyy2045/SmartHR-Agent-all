@@ -190,7 +190,11 @@ def list_screening_results(
             id=item.id,
             application_id=item.application_id,
             batch_id=item.document.batch_id,
-            batch_name=item.document.batch.name,
+            batch_name=(
+                item.document.batch.name
+                if item.document.batch is not None
+                else "来源批次已删除"
+            ),
             document_id=item.document_id,
             candidate_code=item.document.candidate_code,
             criteria_version_id=item.criteria_version_id,

@@ -97,5 +97,6 @@ class BatchDeletionResponse(BaseModel):
     status: Literal["deleted", "cleanup_pending"]
     batch_id: uuid.UUID
     deleted_document_count: int
+    retained_document_count: int
     deleted_file_count: int
     message: str | None = None

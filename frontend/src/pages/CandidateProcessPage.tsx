@@ -479,17 +479,24 @@ export function CandidateProcessPage() {
                       </div>
                     )}
                     <div className="candidate-flow-actions">
-                      <Button
-                        size="small"
-                        icon={<EyeOutlined />}
-                        onClick={() =>
-                          navigate(
-                            `/jobs/${jobId}/batches/${candidate.batch_id}/documents/${candidate.document_id}/history`,
-                          )
-                        }
-                      >
-                        查看档案
-                      </Button>
+                        <Button
+                          size="small"
+                          icon={<EyeOutlined />}
+                          disabled={!candidate.batch_id}
+                          title={
+                            candidate.batch_id
+                              ? undefined
+                              : '来源批次已删除，简历资产仍保留'
+                          }
+                          onClick={() =>
+                            candidate.batch_id &&
+                            navigate(
+                              `/jobs/${jobId}/batches/${candidate.batch_id}/documents/${candidate.document_id}/history`,
+                            )
+                          }
+                        >
+                          {candidate.batch_id ? '查看档案' : '来源已删除'}
+                        </Button>
                       <Button
                         size="small"
                         icon={<CalendarOutlined />}

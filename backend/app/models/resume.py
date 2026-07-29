@@ -82,7 +82,6 @@ class ScreeningBatch(Base):
     )
     documents: Mapped[list[ResumeDocument]] = relationship(
         back_populates="batch",
-        cascade="all, delete-orphan",
         order_by="ResumeDocument.created_at",
     )
 

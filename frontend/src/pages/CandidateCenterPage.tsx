@@ -460,13 +460,16 @@ export function CandidateCenterPage() {
         <Button
           type="link"
           icon={<EyeOutlined />}
+          disabled={!record.batch_id}
+          title={record.batch_id ? undefined : '来源批次已删除，简历资产仍保留'}
           onClick={() =>
+            record.batch_id &&
             navigate(
               `/jobs/${record.job_id}/batches/${record.batch_id}/documents/${record.id}/history`,
             )
           }
         >
-          资料
+          {record.batch_id ? '资料' : '来源已删除'}
         </Button>
       ),
     },

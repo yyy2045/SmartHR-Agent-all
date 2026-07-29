@@ -1104,6 +1104,7 @@ export interface BatchDeletionRecord {
   status: 'deleted' | 'cleanup_pending'
   batch_id: string
   deleted_document_count: number
+  retained_document_count: number
   deleted_file_count: number
   message: string | null
 }
@@ -1232,7 +1233,7 @@ export interface RecruiterDecisionRecord {
 
 export interface ScreeningResultSummary {
   id: string
-  batch_id: string
+  batch_id: string | null
   batch_name: string
   document_id: string
   candidate_code: string
@@ -1252,7 +1253,7 @@ export interface CandidateProcessCardRecord {
   process_id: string | null
   application_id: string
   screening_result_id: string
-  batch_id: string
+  batch_id: string | null
   batch_name: string
   document_id: string
   candidate_code: string
@@ -1366,7 +1367,7 @@ export interface CandidateResumeSummaryRecord {
   application_id: string | null
   job_id: string
   job_title: string
-  batch_id: string
+  batch_id: string | null
   batch_name: string
   original_filename: string
   status: ResumeDocumentStatus

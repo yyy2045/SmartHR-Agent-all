@@ -52,7 +52,7 @@ class CandidateResumeSummaryResponse(BaseModel):
     application_id: uuid.UUID | None
     job_id: uuid.UUID
     job_title: str
-    batch_id: uuid.UUID
+    batch_id: uuid.UUID | None
     batch_name: str
     original_filename: str
     status: Literal["uploaded", "queued", "processing", "completed", "failed"]
