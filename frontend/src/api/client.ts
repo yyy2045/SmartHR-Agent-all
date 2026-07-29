@@ -125,6 +125,168 @@ export interface WorkbenchFilters {
   pageSize?: number
 }
 
+export type AnalyticsInterval = 'day' | 'week'
+export type AnalyticsFunnelStage =
+  | 'application_created'
+  | 'ai_screening_completed'
+  | 'recruiter_shortlisted'
+  | 'interview_started'
+  | 'interview_passed'
+  | 'offer_approved'
+  | 'offer_accepted'
+  | 'onboarding_completed'
+export type AnalyticsCurrentStage =
+  | 'unprocessed'
+  | 'pending'
+  | 'shortlisted'
+  | 'to_contact'
+  | 'contacted'
+  | 'to_interview'
+  | 'completed'
+  | 'rejected'
+  | 'offer_pending_response'
+  | 'offer_rejected'
+  | 'onboarding_pending_confirmation'
+  | 'onboarding_pending_start'
+  | 'onboarding_completed'
+  | 'onboarding_abandoned'
+export type AnalyticsOfferStatus = OfferStatus
+export type AnalyticsOnboardingStatus = OnboardingStatus
+export type AnalyticsDecisionDifference =
+  | 'consistent'
+  | 'human_upgraded'
+  | 'human_downgraded'
+  | 'missing_human_decision'
+
+export interface AnalyticsQueryRecord {
+  start_date: string
+  end_date: string
+  job_id: string | null
+}
+
+export interface AnalyticsMetaRecord {
+  as_of: string
+  timezone: 'Asia/Shanghai'
+  query: AnalyticsQueryRecord
+  visible_job_count: number
+}
+
+export interface AnalyticsQualityRecord {
+  complete: boolean
+  excluded_count: number
+  reasons: string[]
+}
+
+export interface AnalyticsRatioMetricRecord {
+  key: string
+  label: string
+  numerator: number
+  denominator: number
+  percentage: number | null
+  small_sample: boolean
+}
+
+export interface AnalyticsDashboardRecord {
+  meta: AnalyticsMetaRecord
+  jobs: Array<{ id: string; title: string; status: JobStatus }>
+  overview: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    active_job_count: number
+    selected_job_count: number
+    application_count: number
+    unique_candidate_count: number
+    approved_headcount: number
+    hired_count: number
+    linked_hired_count: number
+    hiring_completion_rate: AnalyticsRatioMetricRecord
+  }
+  funnel: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    cohort_size: number
+    stages: Array<{
+      key: AnalyticsFunnelStage
+      label: string
+      count: number
+      cohort_percentage: number | null
+    }>
+  }
+  current_distribution: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    total: number
+    stages: Array<{ key: AnalyticsCurrentStage; label: string; count: number }>
+  }
+  trend: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    interval: AnalyticsInterval
+    points: Array<{
+      bucket_start: string
+      bucket_end: string
+      applications_created: number
+      offers_accepted: number
+      onboardings_completed: number
+    }>
+  }
+  stage_duration: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    stages: Array<{
+      stage: AnalyticsFunnelStage
+      label: string
+      sample_size: number
+      p50_seconds: number | null
+      p90_seconds: number | null
+      excluded_count: number
+      current_open_count: number
+    }>
+  }
+  interviews: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    round_pass_rate: AnalyticsRatioMetricRecord
+    candidate_pass_rate: AnalyticsRatioMetricRecord
+  }
+  offers: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    total_offers: number
+    statuses: Array<{ key: AnalyticsOfferStatus; label: string; count: number }>
+    acceptance_rate: AnalyticsRatioMetricRecord
+  }
+  onboardings: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    total_records: number
+    statuses: Array<{ key: AnalyticsOnboardingStatus; label: string; count: number }>
+    completion_rate: AnalyticsRatioMetricRecord
+    abandonment_sources: Array<{
+      key: OnboardingAbandonmentSource
+      label: string
+      count: number
+    }>
+  }
+  decision_difference: {
+    meta: AnalyticsMetaRecord
+    quality: AnalyticsQualityRecord
+    ai_screened_count: number
+    categories: Array<{
+      key: AnalyticsDecisionDifference
+      label: string
+      count: number
+      percentage: number | null
+    }>
+  }
+}
+
+export interface AnalyticsFilters {
+  startDate?: string
+  endDate?: string
+  jobId?: string
+}
+
 export type RecruitmentRequestStatus =
   | 'draft'
   | 'pending_approval'
@@ -1502,6 +1664,17 @@ export function fetchWorkbenchItems(
   if (filters.pageSize !== undefined) query.set('page_size', String(filters.pageSize))
   const suffix = query.size ? `?${query.toString()}` : ''
   return apiRequest(`/api/workbench/items${suffix}`, {}, '无法读取工作台待办')
+}
+
+export function fetchAnalyticsDashboard(
+  filters: AnalyticsFilters = {},
+): Promise<AnalyticsDashboardRecord> {
+  const query = new URLSearchParams()
+  if (filters.startDate) query.set('start_date', filters.startDate)
+  if (filters.endDate) query.set('end_date', filters.endDate)
+  if (filters.jobId) query.set('job_id', filters.jobId)
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/analytics/dashboard${suffix}`, {}, '无法读取招聘分析数据')
 }
 
 export function fetchJob(jobId: string): Promise<JobDetail> {

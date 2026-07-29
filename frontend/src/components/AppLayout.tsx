@@ -61,6 +61,9 @@ function pageMeta(pathname: string) {
   if (pathname.startsWith('/onboardings')) {
     return { title: '入职跟踪', subtitle: '确认入职日期并跟进入职结果' }
   }
+  if (pathname.startsWith('/analytics')) {
+    return { title: '数据分析', subtitle: '追踪招聘转化、效率与决策质量' }
+  }
   if (pathname === '/jobs/new') {
     return { title: '新建职位', subtitle: '录入职位信息并建立筛选标准' }
   }
@@ -116,6 +119,9 @@ export function AppLayout() {
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
   )
   const canAccessRequests = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager', 'approver'].includes(role),
+  )
+  const canAccessAnalytics = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter', 'hiring_manager', 'approver'].includes(role),
   )
   const canCreateJobs = auth.user?.roles.some((role) =>
@@ -190,11 +196,15 @@ export function AppLayout() {
             badge: jobId ? undefined : '先选岗位',
           },
           { key: 'talent' as const, label: '人才库', icon: <DatabaseOutlined />, badge: '待开发' },
+        ]
+      : []),
+    ...(canAccessAnalytics
+      ? [
           {
             key: 'analytics' as const,
             label: '数据分析',
             icon: <BarChartOutlined />,
-            badge: '待开发',
+            path: '/analytics',
           },
         ]
       : []),
