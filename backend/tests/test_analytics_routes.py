@@ -120,6 +120,7 @@ def _screened_application(
         updated_at=completed_at,
     )
     result = ScreeningResult(
+        application_id=application.id,
         document=document,
         criteria_version=criteria,
         analysis_version=1,

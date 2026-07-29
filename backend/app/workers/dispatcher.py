@@ -11,11 +11,13 @@ def enqueue_resume_parsing(document_id: uuid.UUID) -> str:
 def enqueue_resume_analysis(
     document_id: uuid.UUID,
     *,
+    application_id: uuid.UUID | None = None,
     criteria_version_id: uuid.UUID | None = None,
     candidate_profile_id: uuid.UUID | None = None,
     analysis_version: int | None = None,
 ) -> str:
     kwargs = {
+        "application_id": str(application_id) if application_id else None,
         "criteria_version_id": str(criteria_version_id) if criteria_version_id else None,
         "candidate_profile_id": str(candidate_profile_id) if candidate_profile_id else None,
         "analysis_version": analysis_version,

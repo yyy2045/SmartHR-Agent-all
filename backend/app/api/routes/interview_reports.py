@@ -20,7 +20,6 @@ from app.models import (
     InterviewReportVersion,
     Job,
     JobApplication,
-    ResumeDocument,
     ScreeningResult,
     User,
 )
@@ -108,9 +107,8 @@ def _latest_screening_result(
 ) -> ScreeningResult | None:
     return db.scalar(
         select(ScreeningResult)
-        .join(ResumeDocument, ScreeningResult.document_id == ResumeDocument.id)
         .where(
-            ResumeDocument.application_id == application_id,
+            ScreeningResult.application_id == application_id,
             ScreeningResult.status == "completed",
         )
         .options(

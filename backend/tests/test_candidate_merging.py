@@ -53,7 +53,10 @@ class CandidateMergeDependencies:
 
 
 def _screening_result(document: ResumeDocument, criteria_id: uuid.UUID) -> ScreeningResult:
+    if document.application_id is None:
+        raise AssertionError("测试简历必须先绑定应聘记录")
     return ScreeningResult(
+        application_id=document.application_id,
         document=document,
         criteria_version_id=criteria_id,
         analysis_version=1,

@@ -680,6 +680,7 @@ async def test_batch_permanent_delete_cascades_database_and_private_file(
                 languages=[],
             )
             result = ScreeningResult(
+                application_id=application_id,
                 document=document,
                 candidate_profile=profile,
                 criteria_version_id=uuid.UUID(batch_dependencies.criteria_version_id),

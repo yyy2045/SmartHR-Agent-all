@@ -7,7 +7,8 @@ from app.workers import tasks
 
 def test_parse_task_enqueues_analysis_only_after_completed_parse(monkeypatch) -> None:
     document_id = uuid.uuid4()
-    enqueued: list[uuid.UUID] = []
+    application_id = uuid.uuid4()
+    enqueued: list[tuple[uuid.UUID, uuid.UUID | None]] = []
 
     monkeypatch.setattr(
         tasks,
@@ -15,19 +16,21 @@ def test_parse_task_enqueues_analysis_only_after_completed_parse(monkeypatch) ->
         lambda *_args, **_kwargs: {
             "status": "completed",
             "document_id": str(document_id),
+            "application_id": str(application_id),
             "segments": 2,
         },
     )
     monkeypatch.setattr(
         tasks,
         "enqueue_resume_analysis",
-        lambda value: enqueued.append(value) or "analysis-task-1",
+        lambda value, application_id=None: enqueued.append((value, application_id))
+        or "analysis-task-1",
     )
 
     completed = tasks.parse_resume_task.run(str(document_id))
     assert completed["analysis_enqueued"] is True
     assert completed["analysis_task_id"] == "analysis-task-1"
-    assert enqueued == [document_id]
+    assert enqueued == [(document_id, application_id)]
 
     monkeypatch.setattr(
         tasks,
@@ -40,7 +43,7 @@ def test_parse_task_enqueues_analysis_only_after_completed_parse(monkeypatch) ->
     )
     failed = tasks.parse_resume_task.run(str(document_id))
     assert "analysis_enqueued" not in failed
-    assert enqueued == [document_id]
+    assert enqueued == [(document_id, application_id)]
 
 
 def test_analysis_task_enqueues_knowledge_index_only_when_enabled(

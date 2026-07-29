@@ -12,9 +12,11 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.database import SessionLocal
 from app.models import (
+    ApplicationResumeDocument,
     CandidateProfile,
     DimensionScore,
     EvidenceCitation,
+    JobApplication,
     JobCriteriaVersion,
     ResumeDocument,
     ResumeTextSegment,
@@ -165,12 +167,12 @@ def _load_profile(
 def _latest_analysis_version(
     db: Session,
     *,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     criteria_version_id: uuid.UUID,
 ) -> int:
     latest = db.scalar(
         select(func.max(ScreeningResult.analysis_version)).where(
-            ScreeningResult.document_id == document_id,
+            ScreeningResult.application_id == application_id,
             ScreeningResult.criteria_version_id == criteria_version_id,
         )
     )
@@ -338,6 +340,7 @@ def _mark_result_failed(
 async def analyze_resume_document(
     document_id: uuid.UUID,
     *,
+    application_id: uuid.UUID | None = None,
     criteria_version_id: uuid.UUID | None = None,
     candidate_profile_id: uuid.UUID | None = None,
     analysis_version: int | None = None,
@@ -354,14 +357,30 @@ async def analyze_resume_document(
                 "status": "not_ready",
                 "document_id": str(document_id),
             }
+        resolved_application_id = application_id or document.application_id
+        if resolved_application_id is None:
+            return {"status": "not_ready", "document_id": str(document_id)}
+        application = db.scalar(
+            select(JobApplication)
+            .join(
+                ApplicationResumeDocument,
+                ApplicationResumeDocument.application_id == JobApplication.id,
+            )
+            .where(
+                JobApplication.id == resolved_application_id,
+                ApplicationResumeDocument.document_id == document.id,
+            )
+        )
+        if application is None:
+            return {"status": "not_ready", "document_id": str(document_id)}
         criteria = (
             _load_criteria(db, criteria_version_id)
             if criteria_version_id is not None
-            else document.batch.criteria_version
+            else document.batch.criteria_version if document.batch is not None else None
         )
         if (
             criteria is None
-            or criteria.job_id != document.batch.job_id
+            or criteria.job_id != application.job_id
             or criteria.status != "confirmed"
         ):
             return {
@@ -380,12 +399,12 @@ async def analyze_resume_document(
             }
         resolved_analysis_version = analysis_version or _latest_analysis_version(
             db,
-            document_id=document.id,
+            application_id=application.id,
             criteria_version_id=criteria.id,
         )
         result = db.scalar(
             select(ScreeningResult).where(
-                ScreeningResult.document_id == document.id,
+                ScreeningResult.application_id == application.id,
                 ScreeningResult.criteria_version_id == criteria.id,
                 ScreeningResult.analysis_version == resolved_analysis_version,
             )
@@ -412,6 +431,7 @@ async def analyze_resume_document(
             }
         if result is None:
             result = ScreeningResult(
+                application_id=application.id,
                 document_id=document.id,
                 candidate_profile_id=profile.id if profile is not None else None,
                 criteria_version_id=criteria.id,

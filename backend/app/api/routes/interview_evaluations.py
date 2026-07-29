@@ -8,9 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
+from app.api.routes.candidate_processes import _get_legacy_application_by_document
 from app.api.routes.jobs import ensure_job_active
 from app.database import get_db
 from app.models import (
+    ApplicationResumeDocument,
     CandidateInterviewRound,
     CandidateInterviewSchedule,
     InterviewDimensionRating,
@@ -19,8 +21,6 @@ from app.models import (
     InterviewRound,
     InterviewScoreDimension,
     JobApplication,
-    ResumeDocument,
-    ScreeningBatch,
     User,
 )
 from app.schemas.interview_evaluation import (
@@ -38,7 +38,14 @@ def evaluation_load_options() -> tuple[object, ...]:
     return (
         selectinload(CandidateInterviewRound.schedule).selectinload(
             CandidateInterviewSchedule.application
-        ).selectinload(JobApplication.documents),
+        ).selectinload(JobApplication.primary_document),
+        selectinload(CandidateInterviewRound.schedule)
+        .selectinload(CandidateInterviewSchedule.application)
+        .selectinload(JobApplication.document_links)
+        .selectinload(ApplicationResumeDocument.document),
+        selectinload(CandidateInterviewRound.schedule)
+        .selectinload(CandidateInterviewSchedule.application)
+        .selectinload(JobApplication.documents),
         selectinload(CandidateInterviewRound.plan_round).selectinload(
             InterviewRound.questions
         ),
@@ -58,7 +65,7 @@ def get_owned_candidate_round(
     db: Session,
     *,
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     round_id: uuid.UUID,
     user: User,
     for_update: bool = False,
@@ -76,12 +83,10 @@ def get_owned_candidate_round(
             JobApplication,
             CandidateInterviewSchedule.application_id == JobApplication.id,
         )
-        .join(ResumeDocument, ResumeDocument.application_id == JobApplication.id)
-        .join(ScreeningBatch, ResumeDocument.batch_id == ScreeningBatch.id)
         .where(
             CandidateInterviewRound.id == round_id,
-            ResumeDocument.id == document_id,
-            ScreeningBatch.job_id == job_id,
+            JobApplication.id == application_id,
+            JobApplication.job_id == job_id,
         )
         .options(*evaluation_load_options())
     )
@@ -216,13 +221,13 @@ def validate_submittable(round_item: CandidateInterviewRound) -> InterviewEvalua
 
 
 @router.get(
-    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/"
+    "/{job_id}/applications/{application_id}/interview-schedule/rounds/"
     "{round_id}/evaluation",
     response_model=InterviewEvaluationContextResponse,
 )
 def get_interview_evaluation(
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     round_id: uuid.UUID,
     current_user: CurrentUser,
     db: DbSession,
@@ -231,7 +236,7 @@ def get_interview_evaluation(
     round_item = get_owned_candidate_round(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         round_id=round_id,
         user=current_user,
     )
@@ -239,13 +244,13 @@ def get_interview_evaluation(
 
 
 @router.put(
-    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/"
+    "/{job_id}/applications/{application_id}/interview-schedule/rounds/"
     "{round_id}/evaluation",
     response_model=InterviewEvaluationContextResponse,
 )
 def save_interview_evaluation_draft(
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     round_id: uuid.UUID,
     payload: InterviewEvaluationDraftUpdate,
     current_user: CurrentUser,
@@ -257,7 +262,7 @@ def save_interview_evaluation_draft(
     round_item = get_owned_candidate_round(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         round_id=round_id,
         user=current_user,
         for_update=True,
@@ -277,6 +282,7 @@ def save_interview_evaluation_draft(
     replace_question_responses(evaluation, payload)
     replace_dimension_ratings(evaluation, payload)
     db.flush()
+    document = round_item.schedule.document
     record_audit(
         db,
         actor=current_user,
@@ -287,7 +293,8 @@ def save_interview_evaluation_draft(
         batch_id=round_item.schedule.document.batch_id,
         result="success",
         details={
-            "document_id": str(document_id),
+            "document_id": str(document.id),
+            "application_id": str(application_id),
             "candidate_round_id": str(round_item.id),
             "question_response_count": len(payload.question_responses),
             "dimension_rating_count": len(payload.dimension_ratings),
@@ -297,7 +304,7 @@ def save_interview_evaluation_draft(
     refreshed = get_owned_candidate_round(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         round_id=round_id,
         user=current_user,
     )
@@ -305,13 +312,13 @@ def save_interview_evaluation_draft(
 
 
 @router.post(
-    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/"
+    "/{job_id}/applications/{application_id}/interview-schedule/rounds/"
     "{round_id}/evaluation/submit",
     response_model=InterviewEvaluationContextResponse,
 )
 def submit_interview_evaluation(
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     round_id: uuid.UUID,
     current_user: CurrentUser,
     db: DbSession,
@@ -322,7 +329,7 @@ def submit_interview_evaluation(
     round_item = get_owned_candidate_round(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         round_id=round_id,
         user=current_user,
         for_update=True,
@@ -344,6 +351,7 @@ def submit_interview_evaluation(
     evaluation.submitted_by_id = current_user.id
     evaluation.submitted_at = submitted_at
     evaluation.updated_at = submitted_at
+    document = round_item.schedule.document
     record_audit(
         db,
         actor=current_user,
@@ -354,7 +362,8 @@ def submit_interview_evaluation(
         batch_id=round_item.schedule.document.batch_id,
         result="success",
         details={
-            "document_id": str(document_id),
+            "document_id": str(document.id),
+            "application_id": str(application_id),
             "candidate_round_id": str(round_item.id),
             "total_score": float(total_score),
             "pass_threshold": round_item.plan_round.pass_threshold,
@@ -366,8 +375,96 @@ def submit_interview_evaluation(
     refreshed = get_owned_candidate_round(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         round_id=round_id,
         user=current_user,
     )
     return serialize_context(refreshed)
+
+
+@router.get(
+    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/"
+    "{round_id}/evaluation",
+    response_model=InterviewEvaluationContextResponse,
+    deprecated=True,
+)
+def get_interview_evaluation_compatibility(
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    round_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> InterviewEvaluationContextResponse:
+    application = _get_legacy_application_by_document(
+        db,
+        job_id=job_id,
+        document_id=document_id,
+        user=current_user,
+    )
+    return get_interview_evaluation(
+        job_id=job_id,
+        application_id=application.id,
+        round_id=round_id,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.put(
+    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/"
+    "{round_id}/evaluation",
+    response_model=InterviewEvaluationContextResponse,
+    deprecated=True,
+)
+def save_interview_evaluation_draft_compatibility(
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    round_id: uuid.UUID,
+    payload: InterviewEvaluationDraftUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> InterviewEvaluationContextResponse:
+    application = _get_legacy_application_by_document(
+        db,
+        job_id=job_id,
+        document_id=document_id,
+        user=current_user,
+        for_update=True,
+    )
+    return save_interview_evaluation_draft(
+        job_id=job_id,
+        application_id=application.id,
+        round_id=round_id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.post(
+    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/"
+    "{round_id}/evaluation/submit",
+    response_model=InterviewEvaluationContextResponse,
+    deprecated=True,
+)
+def submit_interview_evaluation_compatibility(
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    round_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> InterviewEvaluationContextResponse:
+    application = _get_legacy_application_by_document(
+        db,
+        job_id=job_id,
+        document_id=document_id,
+        user=current_user,
+        for_update=True,
+    )
+    return submit_interview_evaluation(
+        job_id=job_id,
+        application_id=application.id,
+        round_id=round_id,
+        current_user=current_user,
+        db=db,
+    )

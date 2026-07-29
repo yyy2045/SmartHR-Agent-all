@@ -128,14 +128,15 @@ def test_processing_saves_stable_segments_and_completes_batch(
         parser=parser,
     )
 
-    assert result == {
-        "status": "completed",
-        "document_id": str(document_id),
-        "segments": 2,
-    }
     with testing_session() as db:
         document = db.scalar(select(ResumeDocument).where(ResumeDocument.id == document_id))
         assert document is not None
+        assert result == {
+            "status": "completed",
+            "document_id": str(document_id),
+            "application_id": str(document.application_id),
+            "segments": 2,
+        }
         assert document.status == "completed"
         assert document.extraction_method == "pdf_text"
         assert document.segment_count == 2

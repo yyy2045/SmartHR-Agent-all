@@ -57,7 +57,7 @@ class CandidateProcessCardResponse(BaseModel):
     process_id: uuid.UUID | None
     application_id: uuid.UUID
     screening_result_id: uuid.UUID
-    batch_id: uuid.UUID
+    batch_id: uuid.UUID | None
     batch_name: str
     document_id: uuid.UUID
     candidate_code: str

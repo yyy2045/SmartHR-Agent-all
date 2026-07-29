@@ -14,11 +14,14 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    ApplicationResumeDocument,
     AuditLog,
+    Candidate,
     CandidateProfile,
     DimensionScore,
     EvidenceCitation,
     Job,
+    JobApplication,
     JobCriteriaVersion,
     ResumeDocument,
     ResumeTextSegment,
@@ -38,11 +41,35 @@ from app.services.session_store import SessionStore
 class ScreeningRouteDependencies:
     job_id: uuid.UUID
     batch_id: uuid.UUID
+    application_id: uuid.UUID
     document_id: uuid.UUID
     result_id: uuid.UUID
     citation_id: uuid.UUID
     session_factory: sessionmaker[Session]
     enqueued_document_ids: list[uuid.UUID]
+
+
+def link_document_to_application(
+    db: Session,
+    *,
+    job_id: uuid.UUID,
+    document: ResumeDocument,
+) -> JobApplication:
+    candidate = Candidate()
+    application = JobApplication(candidate=candidate, job_id=job_id)
+    document.candidate = candidate
+    document.application = application
+    db.add(document)
+    db.flush()
+    db.add(
+        ApplicationResumeDocument(
+            application_id=application.id,
+            document_id=document.id,
+        )
+    )
+    application.primary_document_id = document.id
+    db.flush()
+    return application
 
 
 @pytest.fixture
@@ -133,8 +160,11 @@ def screening_route_dependencies(
             sort_order=0,
         )
         document.text_segments = [segment]
-        db.add(document)
-        db.flush()
+        application = link_document_to_application(
+            db,
+            job_id=job.id,
+            document=document,
+        )
         profile = CandidateProfile(
             document_id=document.id,
             version_number=1,
@@ -157,6 +187,7 @@ def screening_route_dependencies(
             languages=[],
         )
         result = ScreeningResult(
+            application_id=application.id,
             document_id=document.id,
             candidate_profile=profile,
             criteria_version_id=criteria.id,
@@ -226,6 +257,7 @@ def screening_route_dependencies(
     yield ScreeningRouteDependencies(
         job_id=job.id,
         batch_id=batch.id,
+        application_id=application.id,
         document_id=document.id,
         result_id=result.id,
         citation_id=result.evidence_citations[0].id,
@@ -316,6 +348,7 @@ async def test_analysis_retry_queues_completed_document_and_blocks_processing_re
             assert batch is not None
             db.add(
                 ScreeningResult(
+                    application_id=dependency.application_id,
                     document_id=dependency.document_id,
                     criteria_version_id=batch.criteria_version_id,
                     analysis_version=2,
@@ -364,10 +397,14 @@ async def test_screening_result_list_filters_and_sorts_by_ai_group(
                 parsed_at=datetime.now(UTC),
                 redacted_at=datetime.now(UTC),
             )
-            db.add(document)
-            db.flush()
+            application = link_document_to_application(
+                db,
+                job_id=dependency.job_id,
+                document=document,
+            )
             db.add(
                 ScreeningResult(
+                    application_id=application.id,
                     document_id=document.id,
                     criteria_version_id=batch.criteria_version_id,
                     analysis_version=1,
@@ -588,9 +625,13 @@ async def test_candidate_comparison_enforces_count_job_and_analysis_version(
             parsed_at=datetime.now(UTC),
             redacted_at=datetime.now(UTC),
         )
-        db.add(second_document)
-        db.flush()
+        second_application = link_document_to_application(
+            db,
+            job_id=dependency.job_id,
+            document=second_document,
+        )
         second_result = ScreeningResult(
+            application_id=second_application.id,
             document_id=second_document.id,
             criteria_version_id=batch.criteria_version_id,
             analysis_version=1,
@@ -633,9 +674,13 @@ async def test_candidate_comparison_enforces_count_job_and_analysis_version(
             parsed_at=datetime.now(UTC),
             redacted_at=datetime.now(UTC),
         )
-        db.add(version_mismatch_document)
-        db.flush()
+        version_mismatch_application = link_document_to_application(
+            db,
+            job_id=dependency.job_id,
+            document=version_mismatch_document,
+        )
         version_mismatch_result = ScreeningResult(
+            application_id=version_mismatch_application.id,
             document_id=version_mismatch_document.id,
             criteria_version_id=batch.criteria_version_id,
             analysis_version=2,
@@ -693,9 +738,13 @@ async def test_candidate_comparison_enforces_count_job_and_analysis_version(
             parsed_at=datetime.now(UTC),
             redacted_at=datetime.now(UTC),
         )
-        db.add(foreign_document)
-        db.flush()
+        foreign_application = link_document_to_application(
+            db,
+            job_id=foreign_job.id,
+            document=foreign_document,
+        )
         foreign_result = ScreeningResult(
+            application_id=foreign_application.id,
             document_id=foreign_document.id,
             criteria_version_id=foreign_criteria.id,
             analysis_version=1,
@@ -767,8 +816,7 @@ async def test_candidate_comparison_enforces_count_job_and_analysis_version(
     assert duplicate.status_code == 422
     assert mismatch.status_code == 422
     assert "同一职位标准和同一分析版本" in mismatch.text
-    assert cross_job.status_code == 422
-    assert "同一职位" in cross_job.text
+    assert cross_job.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -834,9 +882,10 @@ async def test_profile_correction_creates_version_and_queues_only_target_candida
     assert body["reanalysis"]["analysis_version"] == 2
     assert enqueued == [
         (
-            dependency.document_id,
-            {
-                "criteria_version_id": criteria_id,
+                dependency.document_id,
+                {
+                    "application_id": dependency.application_id,
+                    "criteria_version_id": criteria_id,
                 "candidate_profile_id": uuid.UUID(body["profile"]["id"]),
                 "analysis_version": 2,
             },
@@ -933,6 +982,11 @@ async def test_batch_reanalysis_uses_shared_version_and_latest_profiles(
             parsed_at=datetime.now(UTC),
             redacted_at=datetime.now(UTC),
         )
+        second_application = link_document_to_application(
+            db,
+            job_id=dependency.job_id,
+            document=second_document,
+        )
         second_profile = CandidateProfile(
             document=second_document,
             version_number=1,
@@ -947,6 +1001,7 @@ async def test_batch_reanalysis_uses_shared_version_and_latest_profiles(
             languages=[],
         )
         second_result = ScreeningResult(
+            application_id=second_application.id,
             document=second_document,
             candidate_profile=second_profile,
             criteria_version_id=batch.criteria_version_id,

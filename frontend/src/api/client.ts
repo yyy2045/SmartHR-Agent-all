@@ -1932,11 +1932,11 @@ export function confirmInterviewPlanVersion(
 
 export async function fetchCandidateInterviewSchedule(
   jobId: string,
-  documentId: string,
+  applicationId: string,
 ): Promise<InterviewScheduleRecord | null> {
   try {
     return await apiRequest(
-      `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule`,
+      `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule`,
       {},
       '无法读取候选人面试安排',
     )
@@ -1948,11 +1948,11 @@ export async function fetchCandidateInterviewSchedule(
 
 export function createCandidateInterviewSchedule(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   payload: InterviewScheduleCreateInput,
 ): Promise<InterviewScheduleRecord> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule`,
     { method: 'POST', body: JSON.stringify(payload) },
     '创建候选人面试安排失败',
   )
@@ -1960,12 +1960,12 @@ export function createCandidateInterviewSchedule(
 
 export function rescheduleCandidateInterviewRound(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
   payload: InterviewRoundRescheduleInput,
 ): Promise<InterviewScheduleRecord> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}`,
     { method: 'PATCH', body: JSON.stringify(payload) },
     '修改候选人面试时间失败',
   )
@@ -1973,12 +1973,12 @@ export function rescheduleCandidateInterviewRound(
 
 export function cancelCandidateInterviewRound(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
   reason: string,
 ): Promise<InterviewScheduleRecord> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/cancel`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}/cancel`,
     { method: 'POST', body: JSON.stringify({ reason }) },
     '取消候选人面试轮次失败',
   )
@@ -1986,11 +1986,11 @@ export function cancelCandidateInterviewRound(
 
 export function fetchInterviewEvaluation(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
 ): Promise<InterviewEvaluationContext> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}/evaluation`,
     {},
     '无法读取面试评价',
   )
@@ -1998,12 +1998,12 @@ export function fetchInterviewEvaluation(
 
 export function saveInterviewEvaluationDraft(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
   payload: InterviewEvaluationDraftInput,
 ): Promise<InterviewEvaluationContext> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}/evaluation`,
     { method: 'PUT', body: JSON.stringify(payload) },
     '保存面试评价草稿失败',
   )
@@ -2011,11 +2011,11 @@ export function saveInterviewEvaluationDraft(
 
 export function submitInterviewEvaluation(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
 ): Promise<InterviewEvaluationContext> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation/submit`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}/evaluation/submit`,
     { method: 'POST' },
     '提交面试评价失败',
   )
@@ -2965,13 +2965,13 @@ export function mergeCandidateDuplicateReview(
 
 export function updateCandidateStage(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   expectedStage: CandidateStage,
   targetStage: CandidateStage,
   reason?: string,
 ): Promise<CandidateStageUpdateRecord> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/stage`,
+    `/api/jobs/${jobId}/applications/${applicationId}/stage`,
     {
       method: 'POST',
       body: JSON.stringify({
@@ -2986,10 +2986,10 @@ export function updateCandidateStage(
 
 export function fetchCandidateProcessTimeline(
   jobId: string,
-  documentId: string,
+  applicationId: string,
 ): Promise<CandidateProcessTimelineEventRecord[]> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/timeline`,
+    `/api/jobs/${jobId}/applications/${applicationId}/timeline`,
     {},
     '无法读取候选人流程记录',
   )

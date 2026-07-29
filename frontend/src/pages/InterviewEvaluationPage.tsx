@@ -164,7 +164,7 @@ function validateForSubmit(
 }
 
 export function InterviewEvaluationPage() {
-  const { jobId, documentId, roundId } = useParams()
+  const { jobId, applicationId, roundId } = useParams()
   const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -183,16 +183,16 @@ export function InterviewEvaluationPage() {
     enabled: Boolean(jobId),
   })
   const evaluation = useQuery({
-    queryKey: ['interview-evaluation', jobId, documentId, roundId],
-    queryFn: () => fetchInterviewEvaluation(jobId!, documentId!, roundId!),
-    enabled: Boolean(jobId && documentId && roundId),
+    queryKey: ['interview-evaluation', jobId, applicationId, roundId],
+    queryFn: () => fetchInterviewEvaluation(jobId!, applicationId!, roundId!),
+    enabled: Boolean(jobId && applicationId && roundId),
   })
 
   useEffect(() => {
     if (evaluation.data) setDraft(draftFromContext(evaluation.data))
   }, [evaluation.data])
 
-  const candidate = candidates.data?.find((item) => item.document_id === documentId)
+  const candidate = candidates.data?.find((item) => item.application_id === applicationId)
   const archived = job.data?.status === 'archived'
   const submitted = evaluation.data?.evaluation?.status === 'submitted'
   const cancelled = evaluation.data?.round_status === 'cancelled'
@@ -220,19 +220,19 @@ export function InterviewEvaluationPage() {
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      if (!jobId || !documentId || !roundId || !evaluation.data) {
+      if (!jobId || !applicationId || !roundId || !evaluation.data) {
         throw new Error('缺少面试评价上下文')
       }
       return saveInterviewEvaluationDraft(
         jobId,
-        documentId,
+        applicationId,
         roundId,
         payloadFromDraft(evaluation.data, draft),
       )
     },
     onSuccess: (result) => {
       queryClient.setQueryData(
-        ['interview-evaluation', jobId, documentId, roundId],
+        ['interview-evaluation', jobId, applicationId, roundId],
         result,
       )
       void messageApi.success('面试评价草稿已保存')
@@ -244,22 +244,22 @@ export function InterviewEvaluationPage() {
 
   const submitMutation = useMutation({
     mutationFn: async () => {
-      if (!jobId || !documentId || !roundId || !evaluation.data) {
+      if (!jobId || !applicationId || !roundId || !evaluation.data) {
         throw new Error('缺少面试评价上下文')
       }
       const validationError = validateForSubmit(evaluation.data, draft)
       if (validationError) throw new Error(validationError)
       await saveInterviewEvaluationDraft(
         jobId,
-        documentId,
+        applicationId,
         roundId,
         payloadFromDraft(evaluation.data, draft),
       )
-      return submitInterviewEvaluation(jobId, documentId, roundId)
+      return submitInterviewEvaluation(jobId, applicationId, roundId)
     },
     onSuccess: (result) => {
       queryClient.setQueryData(
-        ['interview-evaluation', jobId, documentId, roundId],
+        ['interview-evaluation', jobId, applicationId, roundId],
         result,
       )
       setSubmitConfirmOpen(false)
@@ -299,7 +299,7 @@ export function InterviewEvaluationPage() {
           <Button
             icon={<ArrowLeftOutlined />}
             onClick={() =>
-              navigate(`/jobs/${jobId}/candidates/${documentId}/interview-schedule`)
+              navigate(`/jobs/${jobId}/applications/${applicationId}/interview-schedule`)
             }
           >
             返回面试安排

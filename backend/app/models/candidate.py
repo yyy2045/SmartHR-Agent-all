@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from app.models.job import Job
     from app.models.offer import Offer
     from app.models.onboarding import Onboarding
-    from app.models.resume import ResumeDocument
+    from app.models.resume import ResumeDocument, ScreeningResult
     from app.models.talent_pool import TalentPoolMembership
     from app.models.user import User
 
@@ -221,6 +221,13 @@ class JobApplication(Base):
         uselist=False,
         foreign_keys="Onboarding.application_id",
         overlaps="offer,onboarding",
+    )
+    screening_results: Mapped[list[ScreeningResult]] = relationship(
+        back_populates="application",
+        cascade="all, delete-orphan",
+        foreign_keys="ScreeningResult.application_id",
+        order_by="ScreeningResult.created_at",
+        passive_deletes=True,
     )
 
 

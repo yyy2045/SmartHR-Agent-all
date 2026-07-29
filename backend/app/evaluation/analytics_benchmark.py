@@ -306,14 +306,48 @@ def _seed_screening_data(db: Session, common: dict[str, object]) -> None:
     _execute(
         db,
         """
+        INSERT INTO application_resume_documents (
+            application_id, document_id, created_at
+        )
+        SELECT
+            CAST(md5('benchmark-application-' || value::text) AS uuid),
+            CAST(md5('benchmark-document-' || value::text) AS uuid),
+            CURRENT_TIMESTAMP - ((value % 28)::text || ' days')::interval
+                - interval '8 hours'
+        FROM generate_series(2, :application_count, 2) AS value
+        """,
+        **common,
+    )
+    _execute(
+        db,
+        """
+        UPDATE job_applications AS application
+        SET primary_document_id = source.document_id
+        FROM (
+            SELECT
+                CAST(md5('benchmark-application-' || value::text) AS uuid)
+                    AS application_id,
+                CAST(md5('benchmark-document-' || value::text) AS uuid)
+                    AS document_id
+            FROM generate_series(2, :application_count, 2) AS value
+        ) AS source
+        WHERE application.id = source.application_id
+        """,
+        **common,
+    )
+    _execute(
+        db,
+        """
         INSERT INTO screening_results (
-            id, document_id, criteria_version_id, analysis_version, status,
-            ai_group, total_score, pass_threshold, hard_requirement_results,
-            strengths, gaps, missing_items, interview_questions, model_name,
-            prompt_version, started_at, completed_at, created_at
+            id, application_id, document_id, criteria_version_id,
+            analysis_version, status, ai_group, total_score, pass_threshold,
+            hard_requirement_results, strengths, gaps, missing_items,
+            interview_questions, model_name, prompt_version, started_at,
+            completed_at, created_at
         )
         SELECT
             CAST(md5('benchmark-screening-' || value::text) AS uuid),
+            CAST(md5('benchmark-application-' || value::text) AS uuid),
             CAST(md5('benchmark-document-' || value::text) AS uuid),
             CAST(md5(
                 'benchmark-criteria-' || (((value - 1) % :job_count) + 1)::text

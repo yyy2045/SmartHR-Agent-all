@@ -159,7 +159,7 @@ describe('candidate process board', () => {
         return jsonResponse([candidate])
       }
       if (
-        path === '/api/jobs/job-1/candidate-processes/document-1/stage' &&
+        path === '/api/jobs/job-1/applications/application-1/stage' &&
         method === 'POST'
       ) {
         stageRequest = JSON.parse(init?.body as string) as Record<string, unknown>
@@ -190,7 +190,7 @@ describe('candidate process board', () => {
         })
       }
       if (
-        path === '/api/jobs/job-1/candidate-processes/document-1/timeline' &&
+        path === '/api/jobs/job-1/applications/application-1/timeline' &&
         method === 'GET'
       ) {
         return jsonResponse(timeline)
@@ -237,7 +237,7 @@ describe('candidate process board', () => {
     fireEvent.click(screen.getByRole('button', { name: /继续评价 · HR 面/ }))
     await waitFor(() => {
       expect(window.location.pathname).toBe(
-        '/jobs/job-1/candidates/document-1/interview-evaluations/round-2',
+        '/jobs/job-1/applications/application-1/interview-evaluations/round-2',
       )
     })
   })

@@ -182,15 +182,15 @@ export function CandidateProcessPage() {
     enabled: Boolean(jobId),
   })
   const timeline = useQuery({
-    queryKey: ['candidate-process-timeline', jobId, timelineTarget?.document_id],
-    queryFn: () => fetchCandidateProcessTimeline(jobId!, timelineTarget!.document_id),
+    queryKey: ['candidate-process-timeline', jobId, timelineTarget?.application_id],
+    queryFn: () => fetchCandidateProcessTimeline(jobId!, timelineTarget!.application_id),
     enabled: Boolean(jobId && timelineTarget),
   })
   const changeMutation = useMutation({
     mutationFn: () =>
       updateCandidateStage(
         jobId!,
-        changeTarget!.document_id,
+        changeTarget!.application_id,
         changeTarget!.current_stage,
         targetStage!,
         reason,
@@ -452,7 +452,7 @@ export function CandidateProcessPage() {
                             icon={<FileDoneOutlined />}
                             onClick={() =>
                               navigate(
-                                `/jobs/${jobId}/candidates/${candidate.document_id}/interview-evaluations/${candidate.interview_evaluation?.action_round_id}`,
+                                `/jobs/${jobId}/applications/${candidate.application_id}/interview-evaluations/${candidate.interview_evaluation?.action_round_id}`,
                               )
                             }
                           >
@@ -495,7 +495,7 @@ export function CandidateProcessPage() {
                         icon={<CalendarOutlined />}
                         onClick={() =>
                           navigate(
-                            `/jobs/${jobId}/candidates/${candidate.document_id}/interview-schedule`,
+                            `/jobs/${jobId}/applications/${candidate.application_id}/interview-schedule`,
                           )
                         }
                       >

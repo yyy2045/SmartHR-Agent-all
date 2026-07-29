@@ -21,7 +21,11 @@ def parse_resume_task(task, document_id: str) -> dict[str, str | int | bool]:
     )
     if result.get("status") == "completed":
         try:
-            result["analysis_task_id"] = enqueue_resume_analysis(uuid.UUID(document_id))
+            application_id = result.get("application_id")
+            result["analysis_task_id"] = enqueue_resume_analysis(
+                uuid.UUID(document_id),
+                application_id=(uuid.UUID(str(application_id)) if application_id else None),
+            )
             result["analysis_enqueued"] = True
         except Exception:
             logger.exception("AI 分析任务创建失败，document_id=%s", document_id)
@@ -33,6 +37,7 @@ def parse_resume_task(task, document_id: str) -> dict[str, str | int | bool]:
 def analyze_resume_task(
     task,
     document_id: str,
+    application_id: str | None = None,
     criteria_version_id: str | None = None,
     candidate_profile_id: str | None = None,
     analysis_version: int | None = None,
@@ -41,6 +46,7 @@ def analyze_resume_task(
     result = asyncio.run(
         analyze_resume_document(
             uuid.UUID(document_id),
+            application_id=uuid.UUID(application_id) if application_id else None,
             criteria_version_id=(
                 uuid.UUID(criteria_version_id) if criteria_version_id else None
             ),

@@ -74,6 +74,9 @@ def process_resume_document(
             return {
                 "status": "completed",
                 "document_id": str(document_id),
+                "application_id": (
+                    str(document.application_id) if document.application_id else ""
+                ),
                 "segments": document.segment_count,
             }
         if not document.storage_key:
@@ -195,9 +198,11 @@ def process_resume_document(
         refresh_batch_status(document.batch)
         db.commit()
         segment_count = document.segment_count
+        application_id = document.application_id
 
     return {
         "status": "completed",
         "document_id": str(document_id),
+        "application_id": str(application_id) if application_id else "",
         "segments": segment_count,
     }

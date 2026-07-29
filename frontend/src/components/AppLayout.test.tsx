@@ -115,12 +115,12 @@ describe('招聘业务导航', () => {
       '面试管理',
     ],
     [
-      '/jobs/job-1/candidates/document-1/interview-schedule',
+      '/jobs/job-1/applications/application-1/interview-schedule',
       'interviews',
       '面试管理',
     ],
     [
-      '/jobs/job-1/candidates/document-1/interview-evaluations/round-1',
+      '/jobs/job-1/applications/application-1/interview-evaluations/round-1',
       'interviews',
       '面试管理',
     ],

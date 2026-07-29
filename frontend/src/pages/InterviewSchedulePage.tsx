@@ -123,7 +123,7 @@ function validateArrangement(draft: RoundDraft): string | undefined {
 }
 
 export function InterviewSchedulePage() {
-  const { jobId, documentId } = useParams()
+  const { jobId, applicationId } = useParams()
   const auth = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -152,12 +152,12 @@ export function InterviewSchedulePage() {
     enabled: Boolean(jobId),
   })
   const schedule = useQuery({
-    queryKey: ['candidate-interview-schedule', jobId, documentId],
-    queryFn: () => fetchCandidateInterviewSchedule(jobId!, documentId!),
-    enabled: Boolean(jobId && documentId),
+    queryKey: ['candidate-interview-schedule', jobId, applicationId],
+    queryFn: () => fetchCandidateInterviewSchedule(jobId!, applicationId!),
+    enabled: Boolean(jobId && applicationId),
   })
 
-  const candidate = candidates.data?.find((item) => item.document_id === documentId)
+  const candidate = candidates.data?.find((item) => item.application_id === applicationId)
   const confirmedPlans = useMemo(
     () => plans.data?.filter((item) => item.status === 'confirmed') ?? [],
     [plans.data],
@@ -179,10 +179,10 @@ export function InterviewSchedulePage() {
 
   const createMutation = useMutation({
     mutationFn: () => {
-      if (!jobId || !documentId || !selectedPlan) throw new Error('缺少面试方案')
+      if (!jobId || !applicationId || !selectedPlan) throw new Error('缺少面试方案')
       const firstError = drafts.map(validateArrangement).find(Boolean)
       if (firstError) throw new Error(firstError)
-      return createCandidateInterviewSchedule(jobId, documentId, {
+      return createCandidateInterviewSchedule(jobId, applicationId, {
         plan_version_id: selectedPlan.id,
         rounds: drafts.map((draft) => ({
           plan_round_id: draft.planRoundId,
@@ -195,7 +195,7 @@ export function InterviewSchedulePage() {
     },
     onSuccess: (result) => {
       queryClient.setQueryData(
-        ['candidate-interview-schedule', jobId, documentId],
+        ['candidate-interview-schedule', jobId, applicationId],
         result,
       )
       void messageApi.success('候选人面试安排已创建')
@@ -207,13 +207,13 @@ export function InterviewSchedulePage() {
 
   const rescheduleMutation = useMutation({
     mutationFn: () => {
-      if (!jobId || !documentId || !editingRound || !editDraft) {
+      if (!jobId || !applicationId || !editingRound || !editDraft) {
         throw new Error('缺少改期信息')
       }
       const arrangementError = validateArrangement(editDraft)
       if (arrangementError) throw new Error(arrangementError)
       if (!editReason.trim()) throw new Error('请填写改期原因')
-      return rescheduleCandidateInterviewRound(jobId, documentId, editingRound.id, {
+      return rescheduleCandidateInterviewRound(jobId, applicationId, editingRound.id, {
         scheduled_start_at: new Date(editDraft.scheduledStartAt).toISOString(),
         interview_method: editDraft.interviewMethod,
         location: editDraft.interviewMethod === 'onsite' ? editDraft.location.trim() : null,
@@ -224,7 +224,7 @@ export function InterviewSchedulePage() {
     },
     onSuccess: (result) => {
       queryClient.setQueryData(
-        ['candidate-interview-schedule', jobId, documentId],
+        ['candidate-interview-schedule', jobId, applicationId],
         result,
       )
       setEditingRound(undefined)
@@ -239,18 +239,18 @@ export function InterviewSchedulePage() {
 
   const cancelMutation = useMutation({
     mutationFn: () => {
-      if (!jobId || !documentId || !cancellingRound) throw new Error('缺少取消信息')
+      if (!jobId || !applicationId || !cancellingRound) throw new Error('缺少取消信息')
       if (!cancelReason.trim()) throw new Error('请填写取消原因')
       return cancelCandidateInterviewRound(
         jobId,
-        documentId,
+        applicationId,
         cancellingRound.id,
         cancelReason.trim(),
       )
     },
     onSuccess: (result) => {
       queryClient.setQueryData(
-        ['candidate-interview-schedule', jobId, documentId],
+        ['candidate-interview-schedule', jobId, applicationId],
         result,
       )
       setCancellingRound(undefined)
@@ -511,7 +511,7 @@ export function InterviewSchedulePage() {
                     icon={<FileDoneOutlined />}
                     onClick={() =>
                       navigate(
-                        `/jobs/${jobId}/candidates/${documentId}/interview-evaluations/${round.id}`,
+                        `/jobs/${jobId}/applications/${applicationId}/interview-evaluations/${round.id}`,
                       )
                     }
                   >

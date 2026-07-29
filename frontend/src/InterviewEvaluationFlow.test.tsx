@@ -12,7 +12,7 @@ import type {
 
 const timestamp = '2026-07-26T12:00:00Z'
 const evaluationPath =
-  '/api/jobs/job-1/candidate-processes/document-1/interview-schedule/rounds/round-1/evaluation'
+  '/api/jobs/job-1/applications/application-1/interview-schedule/rounds/round-1/evaluation'
 
 const user = {
   id: 'user-1',
@@ -179,7 +179,7 @@ describe('interview evaluation flow', () => {
     window.history.replaceState(
       {},
       '',
-      '/jobs/job-1/candidates/document-1/interview-evaluations/round-1',
+      '/jobs/job-1/applications/application-1/interview-evaluations/round-1',
     )
     renderApp()
 
@@ -231,7 +231,7 @@ describe('interview evaluation flow', () => {
     window.history.replaceState(
       {},
       '',
-      '/jobs/job-1/candidates/document-1/interview-evaluations/round-1',
+      '/jobs/job-1/applications/application-1/interview-evaluations/round-1',
     )
     renderApp()
 

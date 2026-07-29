@@ -403,8 +403,7 @@ def _application_query(user: User):
         .options(
             selectinload(JobApplication.job),
             selectinload(JobApplication.process),
-            selectinload(JobApplication.documents)
-            .selectinload(ResumeDocument.screening_results)
+            selectinload(JobApplication.screening_results)
             .selectinload(ScreeningResult.recruiter_decisions),
             selectinload(JobApplication.interview_schedule)
             .selectinload(CandidateInterviewSchedule.rounds)
@@ -473,8 +472,7 @@ def _collect_applications(
         process = application.process
         completed_results = [
             result
-            for document in application.documents
-            for result in document.screening_results
+            for result in application.screening_results
             if result.status == "completed"
         ]
         if completed_results and (

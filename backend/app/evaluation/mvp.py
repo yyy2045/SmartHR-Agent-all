@@ -19,8 +19,11 @@ from starlette.datastructures import Headers
 
 from app.database import Base
 from app.models import (
+    ApplicationResumeDocument,
+    Candidate,
     HardRequirement,
     Job,
+    JobApplication,
     JobCriteriaVersion,
     ResumeDocument,
     ResumeRedaction,
@@ -703,9 +706,22 @@ def _persist_prepared_resume(
             uuid.NAMESPACE_URL,
             f"evaluation-batch:{prepared.spec.job_key}",
         )
+        candidate = Candidate(
+            id=uuid.uuid5(uuid.NAMESPACE_URL, f"evaluation-candidate:{prepared.spec.id}")
+        )
+        application = JobApplication(
+            id=uuid.uuid5(uuid.NAMESPACE_URL, f"evaluation-application:{prepared.spec.id}"),
+            candidate=candidate,
+            job_id=uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"evaluation-job:{prepared.spec.job_key}",
+            ),
+        )
         document = ResumeDocument(
             id=prepared.document_id,
             batch_id=batch_id,
+            candidate=candidate,
+            application=application,
             original_filename=f"{prepared.spec.id}{FORMAT_EXTENSIONS[prepared.spec.format]}",
             file_extension=FORMAT_EXTENSIONS[prepared.spec.format],
             content_type=FORMAT_MIME_TYPES[prepared.spec.format],
@@ -724,6 +740,14 @@ def _persist_prepared_resume(
         )
         document.text_segments = segment_rows
         db.add(document)
+        db.flush()
+        db.add(
+            ApplicationResumeDocument(
+                application_id=application.id,
+                document_id=document.id,
+            )
+        )
+        application.primary_document_id = document.id
         db.commit()
         return document.candidate_code
 

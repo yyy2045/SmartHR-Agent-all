@@ -1,4 +1,6 @@
 from collections.abc import Generator
+from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import ForeignKeyConstraint, create_engine, event, func, select
@@ -11,7 +13,9 @@ from app.models import (
     Candidate,
     Job,
     JobApplication,
+    JobCriteriaVersion,
     ResumeDocument,
+    ScreeningResult,
     User,
 )
 from app.services.security import hash_password
@@ -138,3 +142,91 @@ def test_primary_resume_declares_membership_foreign_key() -> None:
     ]
     assert constraint.deferrable is True
     assert constraint.initially == "DEFERRED"
+
+
+def test_shared_resume_keeps_screening_results_isolated_by_application(
+    shared_resume_session: Session,
+) -> None:
+    owner = User(
+        username="screening-isolation-recruiter",
+        password_hash=hash_password("correct-password"),
+        display_name="招聘专员",
+    )
+    candidate = Candidate(full_name="跨职位候选人")
+    shared_resume_session.add_all([owner, candidate])
+    shared_resume_session.flush()
+    applications = [
+        _create_application(
+            shared_resume_session,
+            candidate=candidate,
+            owner=owner,
+            title=title,
+        )
+        for title in ("后端工程师", "平台工程师")
+    ]
+    criteria = [
+        JobCriteriaVersion(job=application.job, version_number=1, status="confirmed")
+        for application in applications
+    ]
+    document = ResumeDocument(
+        candidate=candidate,
+        application=applications[0],
+        original_filename="shared.pdf",
+        status="completed",
+    )
+    shared_resume_session.add_all([*criteria, document])
+    shared_resume_session.flush()
+    for application in applications:
+        shared_resume_session.add(
+            ApplicationResumeDocument(
+                application_id=application.id,
+                document_id=document.id,
+            )
+        )
+        application.primary_document_id = document.id
+    now = datetime.now(UTC)
+    shared_resume_session.add_all(
+        [
+            ScreeningResult(
+                application_id=application.id,
+                document_id=document.id,
+                criteria_version_id=criteria_item.id,
+                analysis_version=1,
+                status="completed",
+                ai_group=group,
+                total_score=Decimal(score),
+                pass_threshold=60,
+                model_name="test-model",
+                prompt_version="v1",
+                started_at=now,
+                completed_at=now,
+            )
+            for application, criteria_item, group, score in zip(
+                applications,
+                criteria,
+                ("passed", "low_match"),
+                ("88", "52"),
+                strict=True,
+            )
+        ]
+    )
+    shared_resume_session.commit()
+
+    first_results = list(
+        shared_resume_session.scalars(
+            select(ScreeningResult).where(
+                ScreeningResult.application_id == applications[0].id
+            )
+        )
+    )
+    second_results = list(
+        shared_resume_session.scalars(
+            select(ScreeningResult).where(
+                ScreeningResult.application_id == applications[1].id
+            )
+        )
+    )
+
+    assert [item.ai_group for item in first_results] == ["passed"]
+    assert [item.ai_group for item in second_results] == ["low_match"]
+    assert first_results[0].document_id == second_results[0].document_id

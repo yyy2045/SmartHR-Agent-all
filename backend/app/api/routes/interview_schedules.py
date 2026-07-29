@@ -7,15 +7,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
+from app.api.routes.candidate_processes import (
+    _application_document,
+    _get_legacy_application_by_document,
+    _get_owned_application,
+)
 from app.api.routes.interview_plans import get_owned_plan_version
 from app.api.routes.jobs import ensure_job_active
 from app.database import get_db
 from app.models import (
+    ApplicationResumeDocument,
     CandidateInterviewRound,
     CandidateInterviewSchedule,
     JobApplication,
-    ResumeDocument,
-    ScreeningBatch,
     User,
 )
 from app.schemas.interview_schedule import (
@@ -37,6 +41,12 @@ def schedule_load_options() -> tuple[object, ...]:
             JobApplication.candidate
         ),
         selectinload(CandidateInterviewSchedule.application).selectinload(
+            JobApplication.primary_document
+        ),
+        selectinload(CandidateInterviewSchedule.application)
+        .selectinload(JobApplication.document_links)
+        .selectinload(ApplicationResumeDocument.document),
+        selectinload(CandidateInterviewSchedule.application).selectinload(
             JobApplication.documents
         ),
         selectinload(CandidateInterviewSchedule.plan_version),
@@ -46,33 +56,11 @@ def schedule_load_options() -> tuple[object, ...]:
     )
 
 
-def get_owned_document(
-    db: Session,
-    *,
-    job_id: uuid.UUID,
-    document_id: uuid.UUID,
-    user: User,
-) -> ResumeDocument:
-    get_visible_job(db, job_id, user)
-    document = db.scalar(
-        select(ResumeDocument)
-        .join(ScreeningBatch)
-        .where(
-            ResumeDocument.id == document_id,
-            ScreeningBatch.job_id == job_id,
-        )
-        .options(selectinload(ResumeDocument.application))
-    )
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="候选人简历不存在")
-    return document
-
-
 def get_owned_schedule(
     db: Session,
     *,
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     user: User,
     for_update: bool = False,
 ) -> CandidateInterviewSchedule:
@@ -85,11 +73,9 @@ def get_owned_schedule(
             JobApplication,
             CandidateInterviewSchedule.application_id == JobApplication.id,
         )
-        .join(ResumeDocument, ResumeDocument.application_id == JobApplication.id)
-        .join(ScreeningBatch)
         .where(
-            ResumeDocument.id == document_id,
-            ScreeningBatch.job_id == job_id,
+            JobApplication.id == application_id,
+            JobApplication.job_id == job_id,
         )
         .options(*schedule_load_options())
     )
@@ -136,39 +122,36 @@ def update_schedule_status(schedule: CandidateInterviewSchedule) -> None:
 
 
 @router.get(
-    "/{job_id}/candidate-processes/{document_id}/interview-schedule",
+    "/{job_id}/applications/{application_id}/interview-schedule",
     response_model=InterviewScheduleResponse | None,
 )
-def get_candidate_interview_schedule(
+def get_application_interview_schedule(
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     current_user: CurrentUser,
     db: DbSession,
 ) -> CandidateInterviewSchedule | None:
-    get_visible_job(db, job_id, current_user)
-    document = get_owned_document(
+    application = _get_owned_application(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         user=current_user,
     )
-    if document.application_id is None:
-        return None
     return db.scalar(
         select(CandidateInterviewSchedule)
-        .where(CandidateInterviewSchedule.application_id == document.application_id)
+        .where(CandidateInterviewSchedule.application_id == application.id)
         .options(*schedule_load_options())
     )
 
 
 @router.post(
-    "/{job_id}/candidate-processes/{document_id}/interview-schedule",
+    "/{job_id}/applications/{application_id}/interview-schedule",
     response_model=InterviewScheduleResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_candidate_interview_schedule(
+def create_application_interview_schedule(
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     payload: InterviewScheduleCreate,
     current_user: CurrentUser,
     db: DbSession,
@@ -176,20 +159,16 @@ def create_candidate_interview_schedule(
     job = get_visible_job(db, job_id, current_user)
     ensure_job_writable(job, current_user)
     ensure_job_active(job)
-    document = get_owned_document(
+    application = _get_owned_application(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         user=current_user,
     )
-    if document.application_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="候选人简历尚未建立职位应聘记录",
-        )
+    document = _application_document(application)
     existing = db.scalar(
         select(CandidateInterviewSchedule.id).where(
-            CandidateInterviewSchedule.application_id == document.application_id
+            CandidateInterviewSchedule.application_id == application.id
         )
     )
     if existing is not None:
@@ -215,7 +194,7 @@ def create_candidate_interview_schedule(
         )
     arrangement_by_round = {item.plan_round_id: item for item in payload.rounds}
     schedule = CandidateInterviewSchedule(
-        application_id=document.application_id,
+        application_id=application.id,
         plan_version_id=plan_version.id,
         status="scheduled",
         created_by_id=current_user.id,
@@ -245,8 +224,8 @@ def create_candidate_interview_schedule(
         batch_id=document.batch_id,
         result="success",
         details={
-            "document_id": str(document_id),
-            "application_id": str(document.application_id),
+            "document_id": str(document.id),
+            "application_id": str(application.id),
             "plan_version_id": str(plan_version.id),
             "plan_version_number": plan_version.version_number,
             "round_count": len(schedule.rounds),
@@ -258,12 +237,12 @@ def create_candidate_interview_schedule(
 
 
 @router.patch(
-    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/{round_id}",
+    "/{job_id}/applications/{application_id}/interview-schedule/rounds/{round_id}",
     response_model=InterviewScheduleResponse,
 )
-def reschedule_candidate_interview_round(
+def reschedule_application_interview_round(
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     round_id: uuid.UUID,
     payload: InterviewRoundReschedule,
     current_user: CurrentUser,
@@ -275,11 +254,12 @@ def reschedule_candidate_interview_round(
     schedule = get_owned_schedule(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         user=current_user,
         for_update=True,
     )
     round_item = get_schedule_round(schedule, round_id)
+    document = _application_document(schedule.application)
     if round_item.status == "cancelled":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="已取消轮次不能改期")
     previous_start_at = round_item.scheduled_start_at
@@ -304,7 +284,8 @@ def reschedule_candidate_interview_round(
         result="success",
         details={
             "schedule_id": str(schedule.id),
-            "document_id": str(document_id),
+            "document_id": str(document.id),
+            "application_id": str(application_id),
             "plan_round_id": str(round_item.plan_round_id),
             "reason": payload.reason,
             "previous_start_at": previous_start_at.isoformat(),
@@ -319,12 +300,12 @@ def reschedule_candidate_interview_round(
 
 
 @router.post(
-    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/{round_id}/cancel",
+    "/{job_id}/applications/{application_id}/interview-schedule/rounds/{round_id}/cancel",
     response_model=InterviewScheduleResponse,
 )
-def cancel_candidate_interview_round(
+def cancel_application_interview_round(
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     round_id: uuid.UUID,
     payload: InterviewRoundCancel,
     current_user: CurrentUser,
@@ -336,11 +317,12 @@ def cancel_candidate_interview_round(
     schedule = get_owned_schedule(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         user=current_user,
         for_update=True,
     )
     round_item = get_schedule_round(schedule, round_id)
+    document = _application_document(schedule.application)
     if round_item.status == "cancelled":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="面试轮次已取消")
     cancelled_at = datetime.now(UTC)
@@ -361,7 +343,8 @@ def cancel_candidate_interview_round(
         result="success",
         details={
             "schedule_id": str(schedule.id),
-            "document_id": str(document_id),
+            "document_id": str(document.id),
+            "application_id": str(application_id),
             "plan_round_id": str(round_item.plan_round_id),
             "reason": payload.reason,
             "scheduled_start_at": round_item.scheduled_start_at.isoformat(),
@@ -371,3 +354,117 @@ def cancel_candidate_interview_round(
     schedule_id = schedule.id
     db.commit()
     return refresh_schedule(db, schedule_id)
+
+
+@router.get(
+    "/{job_id}/candidate-processes/{document_id}/interview-schedule",
+    response_model=InterviewScheduleResponse | None,
+    deprecated=True,
+)
+def get_candidate_interview_schedule_compatibility(
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> CandidateInterviewSchedule | None:
+    application = _get_legacy_application_by_document(
+        db,
+        job_id=job_id,
+        document_id=document_id,
+        user=current_user,
+    )
+    return get_application_interview_schedule(
+        job_id=job_id,
+        application_id=application.id,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.post(
+    "/{job_id}/candidate-processes/{document_id}/interview-schedule",
+    response_model=InterviewScheduleResponse,
+    status_code=status.HTTP_201_CREATED,
+    deprecated=True,
+)
+def create_candidate_interview_schedule_compatibility(
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    payload: InterviewScheduleCreate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> CandidateInterviewSchedule:
+    application = _get_legacy_application_by_document(
+        db,
+        job_id=job_id,
+        document_id=document_id,
+        user=current_user,
+        for_update=True,
+    )
+    return create_application_interview_schedule(
+        job_id=job_id,
+        application_id=application.id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.patch(
+    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/{round_id}",
+    response_model=InterviewScheduleResponse,
+    deprecated=True,
+)
+def reschedule_candidate_interview_round_compatibility(
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    round_id: uuid.UUID,
+    payload: InterviewRoundReschedule,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> CandidateInterviewSchedule:
+    application = _get_legacy_application_by_document(
+        db,
+        job_id=job_id,
+        document_id=document_id,
+        user=current_user,
+        for_update=True,
+    )
+    return reschedule_application_interview_round(
+        job_id=job_id,
+        application_id=application.id,
+        round_id=round_id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.post(
+    "/{job_id}/candidate-processes/{document_id}/interview-schedule/rounds/{round_id}/cancel",
+    response_model=InterviewScheduleResponse,
+    deprecated=True,
+)
+def cancel_candidate_interview_round_compatibility(
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    round_id: uuid.UUID,
+    payload: InterviewRoundCancel,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> CandidateInterviewSchedule:
+    application = _get_legacy_application_by_document(
+        db,
+        job_id=job_id,
+        document_id=document_id,
+        user=current_user,
+        for_update=True,
+    )
+    return cancel_application_interview_round(
+        job_id=job_id,
+        application_id=application.id,
+        round_id=round_id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
+    )

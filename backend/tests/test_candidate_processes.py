@@ -181,6 +181,7 @@ def candidate_process_dependencies() -> Generator[CandidateProcessDependencies, 
             languages=[],
         )
         result = ScreeningResult(
+            application_id=application.id,
             document_id=document.id,
             candidate_profile=profile,
             criteria_version_id=criteria.id,
@@ -456,7 +457,7 @@ async def test_stage_changes_are_concurrency_safe_and_record_timeline(
     candidate_process_dependencies: CandidateProcessDependencies,
 ) -> None:
     dependency = candidate_process_dependencies
-    path = f"/jobs/{dependency.job_id}/candidate-processes/{dependency.document_id}/stage"
+    path = f"/jobs/{dependency.job_id}/applications/{dependency.application_id}/stage"
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         await login(client)
@@ -477,7 +478,7 @@ async def test_stage_changes_are_concurrency_safe_and_record_timeline(
             json={"decision": "pending"},
         )
         timeline = await client.get(
-            f"/jobs/{dependency.job_id}/candidate-processes/{dependency.document_id}/timeline"
+            f"/jobs/{dependency.job_id}/applications/{dependency.application_id}/timeline"
         )
 
     assert shortlisted.status_code == 200
@@ -510,7 +511,7 @@ async def test_backward_and_rejection_require_reason_and_terminal_stage_is_locke
     candidate_process_dependencies: CandidateProcessDependencies,
 ) -> None:
     dependency = candidate_process_dependencies
-    path = f"/jobs/{dependency.job_id}/candidate-processes/{dependency.document_id}/stage"
+    path = f"/jobs/{dependency.job_id}/applications/{dependency.application_id}/stage"
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         await login(client)

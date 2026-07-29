@@ -257,6 +257,7 @@ def screening_result_response(
     ]
     return ScreeningResultResponse(
         id=result.id,
+        application_id=result.application_id,
         document_id=result.document_id,
         candidate_code=candidate_code,
         criteria_version_id=result.criteria_version_id,
@@ -642,7 +643,7 @@ def retry_document_analysis(
         )
     processing_result = db.scalar(
         select(ScreeningResult.id).where(
-            ScreeningResult.document_id == document.id,
+            ScreeningResult.application_id == document.application_id,
             ScreeningResult.criteria_version_id == document.batch.criteria_version_id,
             ScreeningResult.status == "processing",
         )
@@ -657,13 +658,14 @@ def retry_document_analysis(
     )
     latest_version = db.scalar(
         select(func.max(ScreeningResult.analysis_version)).where(
-            ScreeningResult.document_id == document.id,
+            ScreeningResult.application_id == document.application_id,
             ScreeningResult.criteria_version_id == document.batch.criteria_version_id,
         )
     )
     try:
         task_id = enqueue_resume_analysis(
             document.id,
+            application_id=document.application_id,
             criteria_version_id=document.batch.criteria_version_id,
             candidate_profile_id=profile_id,
             analysis_version=(latest_version or 0) + 1,

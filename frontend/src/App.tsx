@@ -171,11 +171,11 @@ function AppRoutes() {
                     element={<InterviewReportPage />}
                   />
                   <Route
-                    path="/jobs/:jobId/candidates/:documentId/interview-schedule"
+                    path="/jobs/:jobId/applications/:applicationId/interview-schedule"
                     element={<InterviewSchedulePage />}
                   />
                   <Route
-                    path="/jobs/:jobId/candidates/:documentId/interview-evaluations/:roundId"
+                    path="/jobs/:jobId/applications/:applicationId/interview-evaluations/:roundId"
                     element={<InterviewEvaluationPage />}
                   />
                   <Route

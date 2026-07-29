@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Numeric,
     String,
@@ -152,6 +153,7 @@ class ResumeDocument(Base):
     )
     application_links: Mapped[list[ApplicationResumeDocument]] = relationship(
         back_populates="document",
+        cascade="all, delete-orphan",
         foreign_keys="ApplicationResumeDocument.document_id",
     )
     text_segments: Mapped[list[ResumeTextSegment]] = relationship(
@@ -341,16 +343,33 @@ class ScreeningResult(Base):
             name="ck_screening_results_pass_threshold",
         ),
         UniqueConstraint(
-            "document_id",
+            "application_id",
             "criteria_version_id",
             "analysis_version",
             name="uq_screening_result_analysis_version",
+        ),
+        ForeignKeyConstraint(
+            ["application_id", "document_id"],
+            [
+                "application_resume_documents.application_id",
+                "application_resume_documents.document_id",
+            ],
+            name="fk_screening_results_application_document",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     document_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("resume_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_applications.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -390,6 +409,10 @@ class ScreeningResult(Base):
     )
 
     document: Mapped[ResumeDocument] = relationship(back_populates="screening_results")
+    application: Mapped[JobApplication] = relationship(
+        back_populates="screening_results",
+        foreign_keys=[application_id],
+    )
     candidate_profile: Mapped[CandidateProfile | None] = relationship(
         back_populates="screening_results"
     )

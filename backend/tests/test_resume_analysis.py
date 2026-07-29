@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import (
+    ApplicationResumeDocument,
     AuditLog,
     Candidate,
     CandidateDuplicateReview,
@@ -216,6 +217,14 @@ def analysis_dependencies() -> Generator[AnalysisDependencies, None, None]:
             ),
         ]
         db.add(document)
+        db.flush()
+        db.add(
+            ApplicationResumeDocument(
+                application_id=application.id,
+                document_id=document.id,
+            )
+        )
+        application.primary_document_id = document.id
         db.commit()
         requirement_ids = {
             item.requirement_type: item.id for item in criteria.hard_requirements
