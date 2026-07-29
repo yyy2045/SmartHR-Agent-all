@@ -415,3 +415,49 @@ def test_candidate_merge_updates_resolution_but_keeps_original_snapshot(
         select(CandidateDuplicateReview).where(CandidateDuplicateReview.id == review.id)
     )
     assert audit is not None and audit.status == "merged"
+
+
+def test_application_recommendation_source_is_coupled_and_unique(
+    recommendation_session: Session,
+) -> None:
+    dependency = _dependencies(recommendation_session)
+    assert dependency.application.source_type == "resume_upload"
+    assert dependency.application.talent_recommendation_run_id is None
+    assert dependency.application.talent_recommendation_result_id is None
+
+    invalid_candidate = Candidate(full_name="缺少推荐引用")
+    recommendation_session.add(
+        JobApplication(
+            candidate=invalid_candidate,
+            job=dependency.job,
+            source_type="talent_recommendation",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        recommendation_session.commit()
+    recommendation_session.rollback()
+
+    first_candidate = Candidate(full_name="首个推荐应聘")
+    first_application = JobApplication(
+        candidate=first_candidate,
+        job=dependency.job,
+        source_type="talent_recommendation",
+        talent_recommendation_run_id=dependency.run.id,
+        talent_recommendation_result_id=dependency.result.id,
+    )
+    recommendation_session.add(first_application)
+    recommendation_session.commit()
+    assert first_application.talent_recommendation_result_id == dependency.result.id
+
+    duplicate_candidate = Candidate(full_name="重复推荐应聘")
+    recommendation_session.add(
+        JobApplication(
+            candidate=duplicate_candidate,
+            job=dependency.job,
+            source_type="talent_recommendation",
+            talent_recommendation_run_id=dependency.run.id,
+            talent_recommendation_result_id=dependency.result.id,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        recommendation_session.commit()

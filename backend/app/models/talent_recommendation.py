@@ -502,6 +502,11 @@ class TalentRecommendationResult(Base):
             name="uq_talent_recommendation_results_run_candidate",
         ),
         UniqueConstraint(
+            "id",
+            "run_id",
+            name="uq_talent_recommendation_results_id_run",
+        ),
+        UniqueConstraint(
             "run_id",
             "vector_rank",
             name="uq_talent_recommendation_results_run_rank",

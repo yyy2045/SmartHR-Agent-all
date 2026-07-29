@@ -17,22 +17,30 @@ from app.models import (
     ApplicationResumeDocument,
     AuditLog,
     Candidate,
+    CandidateDuplicateReview,
+    CandidateProcess,
     CandidateProfile,
+    DimensionScore,
+    EvidenceCitation,
     Job,
     JobApplication,
     JobCriteriaVersion,
     ResumeDocument,
+    ResumeTextSegment,
     Role,
     ScoringDimension,
     ScreeningBatch,
+    ScreeningResult,
     TalentPoolGroup,
     TalentPoolMembership,
+    TalentRecommendationResult,
     TalentRecommendationRun,
     TalentRecommendationRunEvent,
     User,
     UserRole,
 )
 from app.redis_client import get_session_store
+from app.services.candidate_merging import merge_duplicate_candidates
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
 from app.services.talent_recommendation import attach_task_id
@@ -360,6 +368,322 @@ def create_payload(
         "ai_input_mode": mode,
         "idempotency_key": str(key or uuid.uuid4()),
     }
+
+
+def complete_recommendation_result(
+    dependency: RecommendationRouteDependencies,
+    run_id: uuid.UUID,
+    *,
+    candidate_name: str = "推荐候选人",
+    vector_rank: int = 1,
+    result_status: str = "completed",
+    invalid_snapshot: bool = False,
+) -> uuid.UUID:
+    with dependency.session_factory() as db:
+        run = db.get(TalentRecommendationRun, run_id)
+        assert run is not None
+        candidate = db.scalar(select(Candidate).where(Candidate.full_name == candidate_name))
+        assert candidate is not None
+        document = db.scalar(
+            select(ResumeDocument)
+            .where(ResumeDocument.candidate_id == candidate.id)
+            .order_by(ResumeDocument.created_at.desc())
+            .limit(1)
+        )
+        assert document is not None
+        profile = db.scalar(
+            select(CandidateProfile)
+            .where(CandidateProfile.document_id == document.id)
+            .order_by(CandidateProfile.version_number.desc())
+            .limit(1)
+        )
+        assert profile is not None
+        segment = db.scalar(
+            select(ResumeTextSegment).where(ResumeTextSegment.document_id == document.id)
+        )
+        if segment is None:
+            segment = ResumeTextSegment(
+                document=document,
+                segment_key="seg-001",
+                source_type="pdf_page",
+                source_index=0,
+                page_number=1,
+                raw_text="具备五年 Python 与企业系统开发经验。",
+                normalized_text="具备五年 Python 与企业系统开发经验。",
+                redacted_text="具备五年 Python 与企业系统开发经验。",
+                sort_order=0,
+            )
+            db.add(segment)
+            db.flush()
+        dimension = db.scalar(
+            select(ScoringDimension)
+            .where(ScoringDimension.criteria_version_id == run.criteria_version_id)
+            .order_by(ScoringDimension.sort_order)
+            .limit(1)
+        )
+        assert dimension is not None
+        membership = db.scalar(
+            select(TalentPoolMembership).where(
+                TalentPoolMembership.candidate_id == candidate.id,
+                TalentPoolMembership.group_id == dependency.group_id,
+            )
+        )
+        assert membership is not None
+        now = datetime.now(UTC)
+        recommendation_result = TalentRecommendationResult(
+            run_id=run.id,
+            candidate_id=candidate.id,
+            resolved_candidate_id=candidate.id,
+            candidate_code_snapshot=candidate.candidate_code,
+            candidate_name_snapshot=candidate.full_name,
+            document_id=document.id,
+            document_sha256_snapshot=document.sha256,
+            document_updated_at_snapshot=document.updated_at,
+            candidate_profile_id=profile.id,
+            profile_version_snapshot=profile.version_number,
+            embedding_model_snapshot="embedding-test",
+            embedding_version_snapshot="v1",
+            embedding_dimension_snapshot=3,
+            vector_rank=vector_rank,
+            similarity_score=0.92,
+            matched_group_ids=[str(dependency.group_id)],
+            matched_chunks=[],
+            status=result_status,
+            ai_score=88 if result_status == "completed" else None,
+            ai_group="passed" if result_status == "completed" else None,
+            ai_dimension_scores=(
+                [
+                    {
+                        "dimension_id": (
+                            "invalid-dimension" if invalid_snapshot else str(dimension.id)
+                        ),
+                        "name": "技术能力",
+                        "score": 88,
+                        "weight_percent": 100,
+                        "weighted_score": 88,
+                        "rationale": "具备岗位所需经验",
+                        "missing_items": [],
+                        "sort_order": 0,
+                    }
+                ]
+                if result_status == "completed"
+                else []
+            ),
+            ai_hard_requirement_results=[],
+            ai_strengths=["企业系统开发经验"],
+            ai_gaps=[],
+            ai_missing_items=[],
+            ai_interview_questions=["请说明复杂系统的架构取舍"],
+            ai_evidence=(
+                [
+                    {
+                        "subject_type": "dimension",
+                        "subject_key": str(dimension.id),
+                        "segment_key": segment.segment_key,
+                        "quote": "具备五年 Python 与企业系统开发经验。",
+                        "source_type": segment.source_type,
+                        "page_number": segment.page_number,
+                        "paragraph_index": segment.paragraph_index,
+                        "sort_order": 0,
+                    }
+                ]
+                if result_status == "completed"
+                else []
+            ),
+            ai_model_snapshot=("ai-test" if result_status == "completed" else None),
+            prompt_version_snapshot=("prompt-test" if result_status == "completed" else None),
+            processing_attempt_count=1,
+            failure_code=("ai_timeout" if result_status == "failed" else None),
+            failure_message=("AI 调用超时" if result_status == "failed" else None),
+            completed_at=now,
+        )
+        db.add(recommendation_result)
+        db.flush()
+        run.status = "partial" if result_status == "failed" else "completed"
+        run.retrieved_count = max(run.retrieved_count, vector_rank)
+        run.rescored_count += 1
+        if result_status == "completed":
+            run.completed_count += 1
+        else:
+            run.failed_count += 1
+            run.failure_code = "ai_rescoring_partial"
+            run.failure_summary = "部分候选人 AI 重评失败"
+        run.started_at = run.started_at or now
+        run.completed_at = now
+        run.resource_version += 1
+        db.commit()
+        return recommendation_result.id
+
+
+def selection_payload(
+    result_ids: list[uuid.UUID],
+    *,
+    confirmed_stale_result_ids: list[uuid.UUID] | None = None,
+) -> dict[str, object]:
+    return {
+        "result_ids": [str(item) for item in result_ids],
+        "confirmed_stale_result_ids": [
+            str(item) for item in (confirmed_stale_result_ids or [])
+        ],
+        "idempotency_key": str(uuid.uuid4()),
+    }
+
+
+def add_bulk_completed_results(
+    dependency: RecommendationRouteDependencies,
+    run_id: uuid.UUID,
+    *,
+    count: int,
+) -> list[uuid.UUID]:
+    with dependency.session_factory() as db:
+        run = db.get(TalentRecommendationRun, run_id)
+        source_job = db.scalar(select(Job).where(Job.title == "人才来源职位"))
+        assert run is not None
+        assert source_job is not None
+        batch = db.scalar(select(ScreeningBatch).where(ScreeningBatch.job_id == source_job.id))
+        dimension = db.scalar(
+            select(ScoringDimension).where(
+                ScoringDimension.criteria_version_id == run.criteria_version_id
+            )
+        )
+        group = db.get(TalentPoolGroup, dependency.group_id)
+        actor = db.scalar(select(User).where(User.username == "recommendation-owner"))
+        assert all(item is not None for item in (run, source_job, batch, dimension, group, actor))
+        assert batch is not None
+        assert dimension is not None
+        assert group is not None
+        assert actor is not None
+        result_ids: list[uuid.UUID] = []
+        now = datetime.now(UTC)
+        for index in range(count):
+            candidate = Candidate(full_name=f"批量推荐候选人 {index + 1}")
+            source_application = JobApplication(candidate=candidate, job=source_job)
+            document = ResumeDocument(
+                batch=batch,
+                candidate=candidate,
+                application=source_application,
+                original_filename=f"bulk-{index + 1}.pdf",
+                file_extension=".pdf",
+                content_type="application/pdf",
+                detected_type="pdf",
+                size_bytes=100 + index,
+                sha256=f"{index + 1:064x}",
+                status="completed",
+            )
+            profile = CandidateProfile(
+                document=document,
+                version_number=1,
+                source="ai",
+                model_name="profile-test",
+                prompt_version="profile-v1",
+                education=[],
+                work_experiences=[],
+                projects=[],
+                skills=[],
+                certifications=[],
+                languages=[],
+            )
+            segment = ResumeTextSegment(
+                document=document,
+                segment_key="seg-001",
+                source_type="pdf_page",
+                source_index=0,
+                page_number=1,
+                raw_text="具备企业软件开发经验。",
+                normalized_text="具备企业软件开发经验。",
+                redacted_text="具备企业软件开发经验。",
+                sort_order=0,
+            )
+            membership = TalentPoolMembership(
+                group=group,
+                candidate=candidate,
+                source_application=source_application,
+                reason="批量推荐验收",
+                updated_by=actor,
+            )
+            db.add_all(
+                [
+                    candidate,
+                    source_application,
+                    document,
+                    profile,
+                    segment,
+                    membership,
+                ]
+            )
+            db.flush()
+            source_application.document_links.append(
+                ApplicationResumeDocument(document=document)
+            )
+            source_application.primary_document = document
+            recommendation_result = TalentRecommendationResult(
+                run_id=run.id,
+                candidate_id=candidate.id,
+                resolved_candidate_id=candidate.id,
+                candidate_code_snapshot=candidate.candidate_code,
+                candidate_name_snapshot=candidate.full_name,
+                document_id=document.id,
+                document_sha256_snapshot=document.sha256,
+                document_updated_at_snapshot=document.updated_at,
+                candidate_profile_id=profile.id,
+                profile_version_snapshot=profile.version_number,
+                embedding_model_snapshot="embedding-test",
+                embedding_version_snapshot="v1",
+                embedding_dimension_snapshot=3,
+                vector_rank=index + 1,
+                similarity_score=0.9 - index / 100,
+                matched_group_ids=[str(group.id)],
+                matched_chunks=[],
+                status="completed",
+                ai_score=80 + index / 10,
+                ai_group="passed",
+                ai_dimension_scores=[
+                    {
+                        "dimension_id": str(dimension.id),
+                        "name": dimension.name,
+                        "score": 80,
+                        "weight_percent": 100,
+                        "weighted_score": 80,
+                        "rationale": "满足岗位要求",
+                        "missing_items": [],
+                        "sort_order": 0,
+                    }
+                ],
+                ai_hard_requirement_results=[],
+                ai_strengths=["企业软件经验"],
+                ai_gaps=[],
+                ai_missing_items=[],
+                ai_interview_questions=[],
+                ai_evidence=[
+                    {
+                        "subject_type": "dimension",
+                        "subject_key": str(dimension.id),
+                        "segment_key": segment.segment_key,
+                        "quote": segment.normalized_text,
+                        "source_type": segment.source_type,
+                        "page_number": segment.page_number,
+                        "paragraph_index": segment.paragraph_index,
+                        "sort_order": 0,
+                    }
+                ],
+                ai_model_snapshot="ai-test",
+                prompt_version_snapshot="prompt-test",
+                processing_attempt_count=1,
+                completed_at=now,
+            )
+            db.add(recommendation_result)
+            db.flush()
+            result_ids.append(recommendation_result.id)
+        run.status = "completed"
+        run.retrieved_count = count
+        run.rescored_count = count
+        run.completed_count = count
+        run.failed_count = 0
+        run.started_at = now
+        run.completed_at = now
+        run.resource_version += 1
+        db.commit()
+        return result_ids
 
 
 @pytest.mark.asyncio
@@ -747,3 +1071,476 @@ async def test_dispatch_failure_is_persisted_and_reported(
         assert run.status == "failed"
         assert run.failure_code == "recommendation_dispatch_failed"
         assert run.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_select_completed_recommendation_creates_full_application_and_replays(
+    recommendation_route_dependencies: RecommendationRouteDependencies,
+) -> None:
+    dependency = recommendation_route_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recommendation-owner")
+        created_run = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations",
+            json=create_payload(dependency),
+        )
+        run_id = uuid.UUID(created_run.json()["run"]["id"])
+        result_id = complete_recommendation_result(dependency, run_id)
+        detail = await client.get(f"/jobs/{dependency.job_id}/recommendations/{run_id}")
+        selected = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+        replayed = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+
+    assert detail.status_code == 200
+    assert detail.json()["allowed_actions"] == ["select_candidates"]
+    assert selected.status_code == 200, selected.text
+    body = selected.json()
+    assert body["created_count"] == 1
+    assert body["existing_count"] == 0
+    assert body["failed_count"] == 0
+    item = body["items"][0]
+    assert item["status"] == "created"
+    assert replayed.status_code == 200
+    assert replayed.json()["created_count"] == 0
+    assert replayed.json()["existing_count"] == 1
+    assert replayed.json()["items"][0]["application_id"] == item["application_id"]
+
+    application_id = uuid.UUID(item["application_id"])
+    screening_result_id = uuid.UUID(item["screening_result_id"])
+    with dependency.session_factory() as db:
+        application = db.get(JobApplication, application_id)
+        assert application is not None
+        assert application.source_type == "talent_recommendation"
+        assert application.talent_recommendation_run_id == run_id
+        assert application.talent_recommendation_result_id == result_id
+        assert application.primary_document_id is not None
+        assert len(application.document_links) == 1
+        process = db.scalar(
+            select(CandidateProcess).where(CandidateProcess.application_id == application.id)
+        )
+        assert process is not None
+        assert process.current_stage == "unprocessed"
+        assert len(process.events) == 1
+        assert process.events[0].reason == "由人才推荐转为应聘"
+        screening = db.get(ScreeningResult, screening_result_id)
+        assert screening is not None
+        assert screening.application_id == application.id
+        assert screening.analysis_version == 1
+        assert screening.status == "completed"
+        assert screening.ai_group == "passed"
+        assert screening.total_score == 88
+        assert db.scalar(
+            select(func.count(DimensionScore.id)).where(
+                DimensionScore.screening_result_id == screening.id
+            )
+        ) == 1
+        assert db.scalar(
+            select(func.count(EvidenceCitation.id)).where(
+                EvidenceCitation.screening_result_id == screening.id
+            )
+        ) == 1
+        assert db.scalar(
+            select(func.count(AuditLog.id)).where(
+                AuditLog.action == "talent_recommendation.application_created",
+                AuditLog.target_id == application.id,
+            )
+        ) == 1
+
+
+@pytest.mark.asyncio
+async def test_select_accepts_twenty_completed_candidates_in_one_request(
+    recommendation_route_dependencies: RecommendationRouteDependencies,
+) -> None:
+    dependency = recommendation_route_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recommendation-owner")
+        created_run = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations",
+            json=create_payload(dependency),
+        )
+        run_id = uuid.UUID(created_run.json()["run"]["id"])
+        result_ids = add_bulk_completed_results(dependency, run_id, count=20)
+        selected = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload(result_ids),
+        )
+
+    assert selected.status_code == 200, selected.text
+    assert selected.json()["created_count"] == 20
+    assert selected.json()["existing_count"] == 0
+    assert selected.json()["failed_count"] == 0
+    assert len(selected.json()["items"]) == 20
+    with dependency.session_factory() as db:
+        assert db.scalar(
+            select(func.count(JobApplication.id)).where(
+                JobApplication.job_id == dependency.job_id,
+                JobApplication.source_type == "talent_recommendation",
+            )
+        ) == 20
+        assert db.scalar(
+            select(func.count(ScreeningResult.id))
+            .join(JobApplication, JobApplication.id == ScreeningResult.application_id)
+            .where(
+                JobApplication.job_id == dependency.job_id,
+                JobApplication.source_type == "talent_recommendation",
+            )
+        ) == 20
+@pytest.mark.asyncio
+async def test_select_requires_confirmation_when_primary_document_changed(
+    recommendation_route_dependencies: RecommendationRouteDependencies,
+) -> None:
+    dependency = recommendation_route_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recommendation-owner")
+        created_run = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations",
+            json=create_payload(dependency),
+        )
+        run_id = uuid.UUID(created_run.json()["run"]["id"])
+        result_id = complete_recommendation_result(dependency, run_id)
+        with dependency.session_factory() as db:
+            candidate = db.scalar(
+                select(Candidate).where(Candidate.full_name == "推荐候选人")
+            )
+            assert candidate is not None
+            application = db.scalar(
+                select(JobApplication).where(
+                    JobApplication.candidate_id == candidate.id,
+                    JobApplication.job_id != dependency.job_id,
+                )
+            )
+            assert application is not None
+            old_document = db.get(ResumeDocument, application.primary_document_id)
+            assert old_document is not None and old_document.batch is not None
+            new_document = ResumeDocument(
+                batch=old_document.batch,
+                candidate=candidate,
+                application=application,
+                original_filename="talent-latest.pdf",
+                file_extension=".pdf",
+                content_type="application/pdf",
+                detected_type="pdf",
+                size_bytes=120,
+                sha256="e" * 64,
+                status="completed",
+            )
+            db.add(new_document)
+            db.flush()
+            application.document_links.append(
+                ApplicationResumeDocument(document=new_document)
+            )
+            application.primary_document = new_document
+            db.commit()
+
+        blocked = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+        confirmed = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload(
+                [result_id],
+                confirmed_stale_result_ids=[result_id],
+            ),
+        )
+
+    assert blocked.status_code == 200
+    assert blocked.json()["items"][0]["failure_code"] == "primary_document_changed"
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["items"][0]["status"] == "created"
+    with dependency.session_factory() as db:
+        audit = db.scalar(
+            select(AuditLog)
+            .where(AuditLog.action == "talent_recommendation.application_created")
+            .order_by(AuditLog.created_at.desc())
+        )
+        assert audit is not None
+        assert audit.details["used_locked_stale_document"] is True
+
+
+@pytest.mark.asyncio
+async def test_partial_selection_isolated_and_invalid_snapshot_rolls_back_item(
+    recommendation_route_dependencies: RecommendationRouteDependencies,
+) -> None:
+    dependency = recommendation_route_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recommendation-owner")
+        created_run = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations",
+            json=create_payload(dependency),
+        )
+        run_id = uuid.UUID(created_run.json()["run"]["id"])
+        valid_result_id = complete_recommendation_result(dependency, run_id)
+        failed_result_id = complete_recommendation_result(
+            dependency,
+            run_id,
+            candidate_name="已经应聘目标职位的人才",
+            vector_rank=2,
+            result_status="failed",
+        )
+        selected = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([failed_result_id, valid_result_id]),
+        )
+
+    assert selected.status_code == 200, selected.text
+    assert selected.json()["created_count"] == 1
+    assert selected.json()["failed_count"] == 1
+    assert selected.json()["items"][0]["failure_code"] == "result_not_completed"
+    assert selected.json()["items"][1]["status"] == "created"
+
+    with dependency.session_factory() as db:
+        created_candidate = db.scalar(
+            select(Candidate).where(Candidate.full_name == "推荐候选人")
+        )
+        assert created_candidate is not None
+        assert db.scalar(
+            select(func.count(JobApplication.id)).where(
+                JobApplication.job_id == dependency.job_id,
+                JobApplication.candidate_id == created_candidate.id,
+                JobApplication.status == "active",
+            )
+        ) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_screening_snapshot_does_not_leave_partial_application(
+    recommendation_route_dependencies: RecommendationRouteDependencies,
+) -> None:
+    dependency = recommendation_route_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recommendation-owner")
+        created_run = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations",
+            json=create_payload(dependency),
+        )
+        run_id = uuid.UUID(created_run.json()["run"]["id"])
+        result_id = complete_recommendation_result(
+            dependency,
+            run_id,
+            invalid_snapshot=True,
+        )
+        selected = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+
+    assert selected.status_code == 200
+    assert selected.json()["created_count"] == 0
+    assert selected.json()["failed_count"] == 1
+    assert selected.json()["items"][0]["failure_code"] == "screening_snapshot_invalid"
+    with dependency.session_factory() as db:
+        candidate = db.scalar(
+            select(Candidate).where(Candidate.full_name == "推荐候选人")
+        )
+        assert candidate is not None
+        assert db.scalar(
+            select(func.count(JobApplication.id)).where(
+                JobApplication.job_id == dependency.job_id,
+                JobApplication.candidate_id == candidate.id,
+            )
+        ) == 0
+        assert db.scalar(
+            select(func.count(ScreeningResult.id)).where(
+                ScreeningResult.application_id.in_(
+                    select(JobApplication.id).where(
+                        JobApplication.job_id == dependency.job_id,
+                        JobApplication.candidate_id == candidate.id,
+                    )
+                )
+            )
+        ) == 0
+
+
+@pytest.mark.asyncio
+async def test_selection_rejects_inactive_membership_stale_criteria_and_archived_job(
+    recommendation_route_dependencies: RecommendationRouteDependencies,
+) -> None:
+    dependency = recommendation_route_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recommendation-owner")
+        created_run = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations",
+            json=create_payload(dependency),
+        )
+        run_id = uuid.UUID(created_run.json()["run"]["id"])
+        result_id = complete_recommendation_result(dependency, run_id)
+        with dependency.session_factory() as db:
+            candidate = db.scalar(
+                select(Candidate).where(Candidate.full_name == "推荐候选人")
+            )
+            assert candidate is not None
+            membership = db.scalar(
+                select(TalentPoolMembership).where(
+                    TalentPoolMembership.candidate_id == candidate.id,
+                    TalentPoolMembership.group_id == dependency.group_id,
+                )
+            )
+            assert membership is not None
+            membership.status = "removed"
+            membership.removed_at = datetime.now(UTC)
+            db.commit()
+        inactive = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+        with dependency.session_factory() as db:
+            membership = db.scalar(
+                select(TalentPoolMembership).where(
+                    TalentPoolMembership.group_id == dependency.group_id,
+                    TalentPoolMembership.candidate.has(full_name="推荐候选人"),
+                )
+            )
+            assert membership is not None
+            membership.status = "active"
+            membership.removed_at = None
+            run = db.get(TalentRecommendationRun, run_id)
+            assert run is not None
+            run.criteria_stale = True
+            run.criteria_stale_at = datetime.now(UTC)
+            db.commit()
+        stale = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+        with dependency.session_factory() as db:
+            run = db.get(TalentRecommendationRun, run_id)
+            job = db.get(Job, dependency.job_id)
+            assert run is not None and job is not None
+            run.criteria_stale = False
+            run.criteria_stale_at = None
+            job.status = "archived"
+            job.archived_at = datetime.now(UTC)
+            db.commit()
+        archived = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+
+    assert inactive.status_code == 200
+    assert inactive.json()["items"][0]["failure_code"] == "talent_pool_membership_inactive"
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "职位筛选标准已变化，请重新创建推荐任务"
+    assert archived.status_code == 409
+    assert archived.json()["detail"] == "已归档职位不能接收推荐候选人"
+
+
+@pytest.mark.asyncio
+async def test_selection_validates_payload_and_role_permissions(
+    recommendation_route_dependencies: RecommendationRouteDependencies,
+) -> None:
+    dependency = recommendation_route_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recommendation-owner")
+        created_run = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations",
+            json=create_payload(dependency),
+        )
+        run_id = uuid.UUID(created_run.json()["run"]["id"])
+        result_id = complete_recommendation_result(dependency, run_id)
+        duplicate = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id, result_id]),
+        )
+        unrelated_confirmation = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload(
+                [result_id],
+                confirmed_stale_result_ids=[uuid.uuid4()],
+            ),
+        )
+        await login(client, "recommendation-manager")
+        manager = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+        await login(client, "recommendation-other")
+        other_recruiter = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+        await login(client, "recommendation-admin")
+        administrator = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+
+    assert duplicate.status_code == 422
+    assert unrelated_confirmation.status_code == 422
+    assert manager.status_code == 403
+    assert other_recruiter.status_code == 404
+    assert administrator.status_code == 200
+    assert administrator.json()["created_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_selection_resolves_merged_candidate_before_duplicate_check(
+    recommendation_route_dependencies: RecommendationRouteDependencies,
+) -> None:
+    dependency = recommendation_route_dependencies
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recommendation-owner")
+        created_run = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations",
+            json=create_payload(dependency),
+        )
+        run_id = uuid.UUID(created_run.json()["run"]["id"])
+        result_id = complete_recommendation_result(dependency, run_id)
+        with dependency.session_factory() as db:
+            source = db.scalar(
+                select(Candidate).where(Candidate.full_name == "推荐候选人")
+            )
+            actor = db.scalar(select(User).where(User.username == "recommendation-owner"))
+            assert source is not None and actor is not None
+            target = Candidate(full_name="合并后保留候选人")
+            review = CandidateDuplicateReview(
+                candidate_a=target,
+                candidate_b=source,
+                source_document_id=source.documents[0].id,
+                confidence="strong",
+                signals=["same_person"],
+                status="pending",
+            )
+            db.add_all([target, review])
+            db.commit()
+            merge_duplicate_candidates(
+                db,
+                review=review,
+                target_candidate=target,
+                source_candidate=source,
+                actor=actor,
+                reason="验证推荐转应聘前解析候选人合并",
+            )
+            db.commit()
+            target_id = target.id
+
+        selected = await client.post(
+            f"/jobs/{dependency.job_id}/recommendations/{run_id}/select",
+            json=selection_payload([result_id]),
+        )
+
+    assert selected.status_code == 200, selected.text
+    assert selected.json()["items"][0]["status"] == "created"
+    with dependency.session_factory() as db:
+        application = db.get(
+            JobApplication,
+            uuid.UUID(selected.json()["items"][0]["application_id"]),
+        )
+        result = db.get(TalentRecommendationResult, result_id)
+        assert application is not None and result is not None
+        assert application.candidate_id == target_id
+        assert result.resolved_candidate_id == target_id
+        assert result.candidate_id != target_id

@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TalentRecommendationRunStatus = Literal[
     "queued",
@@ -21,7 +21,12 @@ TalentRecommendationResultStatus = Literal[
     "failed",
     "excluded",
 ]
-TalentRecommendationAction = Literal["cancel", "retry_failed_items"]
+TalentRecommendationAction = Literal[
+    "cancel",
+    "retry_failed_items",
+    "select_candidates",
+]
+TalentRecommendationSelectionStatus = Literal["created", "existing", "failed"]
 
 
 class TalentRecommendationCreateRequest(BaseModel):
@@ -44,6 +49,34 @@ class TalentRecommendationActionRequest(BaseModel):
 
     expected_version: int = Field(ge=1)
     idempotency_key: uuid.UUID
+
+
+class TalentRecommendationSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    result_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+    confirmed_stale_result_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+    idempotency_key: uuid.UUID
+
+    @field_validator("result_ids")
+    @classmethod
+    def unique_result_ids(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("同一批选择不能重复提交推荐结果")
+        return value
+
+    @field_validator("confirmed_stale_result_ids")
+    @classmethod
+    def unique_confirmed_ids(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("旧简历确认列表不能包含重复结果")
+        return value
+
+    @model_validator(mode="after")
+    def validate_confirmed_ids(self) -> Self:
+        if not set(self.confirmed_stale_result_ids).issubset(self.result_ids):
+            raise ValueError("旧简历确认项必须包含在本次选择结果中")
+        return self
 
 
 class TalentRecommendationGroupSnapshotResponse(BaseModel):
@@ -135,3 +168,19 @@ class TalentRecommendationResultResponse(BaseModel):
 
 class TalentRecommendationRunDetailResponse(TalentRecommendationRunResponse):
     results: list[TalentRecommendationResultResponse]
+
+
+class TalentRecommendationSelectionItemResponse(BaseModel):
+    result_id: uuid.UUID
+    status: TalentRecommendationSelectionStatus
+    application_id: uuid.UUID | None = None
+    screening_result_id: uuid.UUID | None = None
+    failure_code: str | None = None
+    failure_message: str | None = None
+
+
+class TalentRecommendationSelectionResponse(BaseModel):
+    created_count: int
+    existing_count: int
+    failed_count: int
+    items: list[TalentRecommendationSelectionItemResponse]

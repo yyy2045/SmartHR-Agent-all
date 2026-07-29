@@ -21,6 +21,9 @@ from app.schemas.talent_recommendation import (
     TalentRecommendationRunListResponse,
     TalentRecommendationRunResponse,
     TalentRecommendationRunStatus,
+    TalentRecommendationSelectionItemResponse,
+    TalentRecommendationSelectionRequest,
+    TalentRecommendationSelectionResponse,
 )
 from app.services.authorization import get_visible_job
 from app.services.talent_recommendation import (
@@ -31,6 +34,10 @@ from app.services.talent_recommendation import (
     mark_dispatch_failed,
     recommendation_run_options,
     retry_failed_recommendation_results,
+)
+from app.services.talent_recommendation_selection import (
+    TalentRecommendationSelectionError,
+    select_recommended_candidates,
 )
 from app.workers.dispatcher import enqueue_talent_recommendation, revoke_task
 
@@ -69,6 +76,12 @@ def _allowed_actions(
         actions.append("cancel")
     if run.status == "partial" and run.failed_count > 0 and not run.criteria_stale:
         actions.append("retry_failed_items")
+    if (
+        run.status in ("completed", "partial")
+        and run.completed_count > 0
+        and not run.criteria_stale
+    ):
+        actions.append("select_candidates")
     return actions
 
 
@@ -453,3 +466,58 @@ def retry_talent_recommendation_failures(
         )
     run = _load_run(db, job_id=job_id, run_id=run_id)
     return _run_response(run, can_write=True)
+
+
+@router.post(
+    "/{job_id:uuid}/recommendations/{run_id:uuid}/select",
+    response_model=TalentRecommendationSelectionResponse,
+)
+def select_talent_recommendation_candidates(
+    job_id: uuid.UUID,
+    run_id: uuid.UUID,
+    payload: TalentRecommendationSelectionRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> TalentRecommendationSelectionResponse:
+    job = get_visible_job(db, job_id, current_user)
+    _ensure_read_role(current_user)
+    if not _can_write(job, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="当前角色只能查看该职位的推荐任务",
+        )
+    try:
+        outcomes = select_recommended_candidates(
+            db,
+            job_id=job_id,
+            run_id=run_id,
+            result_ids=payload.result_ids,
+            confirmed_stale_result_ids=set(payload.confirmed_stale_result_ids),
+            idempotency_key=payload.idempotency_key,
+            actor=current_user,
+        )
+        db.commit()
+    except TalentRecommendationSelectionError as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
+
+    items = [
+        TalentRecommendationSelectionItemResponse(
+            result_id=item.result_id,
+            status=item.status,  # type: ignore[arg-type]
+            application_id=item.application_id,
+            screening_result_id=item.screening_result_id,
+            failure_code=item.failure_code,
+            failure_message=item.failure_message,
+        )
+        for item in outcomes
+    ]
+    return TalentRecommendationSelectionResponse(
+        created_count=sum(item.status == "created" for item in outcomes),
+        existing_count=sum(item.status == "existing" for item in outcomes),
+        failed_count=sum(item.status == "failed" for item in outcomes),
+        items=items,
+    )

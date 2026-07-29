@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
     text,
@@ -104,6 +105,19 @@ class JobApplication(Base):
             "status IN ('active', 'merged')",
             name="ck_job_applications_status",
         ),
+        CheckConstraint(
+            "source_type IN ('resume_upload', 'talent_recommendation')",
+            name="ck_job_applications_source_type",
+        ),
+        CheckConstraint(
+            "(source_type = 'resume_upload' "
+            "AND talent_recommendation_run_id IS NULL "
+            "AND talent_recommendation_result_id IS NULL) OR "
+            "(source_type = 'talent_recommendation' "
+            "AND talent_recommendation_run_id IS NOT NULL "
+            "AND talent_recommendation_result_id IS NOT NULL)",
+            name="ck_job_applications_recommendation_source",
+        ),
         Index(
             "uq_job_applications_active_candidate_job",
             "candidate_id",
@@ -124,6 +138,20 @@ class JobApplication(Base):
             initially="DEFERRED",
             use_alter=True,
         ),
+        ForeignKeyConstraint(
+            ["talent_recommendation_result_id", "talent_recommendation_run_id"],
+            [
+                "talent_recommendation_results.id",
+                "talent_recommendation_results.run_id",
+            ],
+            name="fk_job_applications_recommendation_result",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        UniqueConstraint(
+            "talent_recommendation_result_id",
+            name="uq_job_applications_recommendation_result",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -139,6 +167,21 @@ class JobApplication(Base):
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active", index=True
+    )
+    source_type: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="resume_upload",
+        server_default="resume_upload",
+        index=True,
+    )
+    talent_recommendation_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        index=True,
+    )
+    talent_recommendation_result_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        index=True,
     )
     merged_into_application_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("job_applications.id", ondelete="SET NULL"),
