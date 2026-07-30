@@ -15,6 +15,8 @@ from app.models import (  # noqa: F401
     Job,
     JobApplication,
     JobCriteriaVersion,
+    MessageTemplate,
+    MessageTemplateVersion,
     Offer,
     OfferApproval,
     OfferManagerConfirmation,
