@@ -6,6 +6,7 @@ from app.api.routes.batches import router as batches_router
 from app.api.routes.candidate_processes import router as candidate_processes_router
 from app.api.routes.candidate_versions import router as candidate_versions_router
 from app.api.routes.candidates import router as candidates_router
+from app.api.routes.communications import router as communications_router
 from app.api.routes.health import router as health_router
 from app.api.routes.interview_evaluations import router as interview_evaluations_router
 from app.api.routes.interview_plans import router as interview_plans_router
@@ -31,6 +32,11 @@ api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(workbench_router, prefix="/workbench", tags=["workbench"])
 api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(candidates_router, prefix="/candidates", tags=["candidates"])
+api_router.include_router(
+    communications_router,
+    prefix="/communications",
+    tags=["communications"],
+)
 api_router.include_router(talent_pool_router, prefix="/talent-pool", tags=["talent-pool"])
 api_router.include_router(
     talent_recommendations_router,

@@ -16,6 +16,7 @@ MessageTemplateType = Literal[
 ]
 MessageTemplateStatus = Literal["active", "inactive"]
 MessageTemplateAction = Literal["create_version", "activate", "deactivate"]
+CommunicationContextType = Literal["interview_round", "offer", "onboarding"]
 
 _VARIABLE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
@@ -119,3 +120,33 @@ class MessageTemplateListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class CommunicationPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    template_version_id: uuid.UUID
+    context_type: CommunicationContextType
+    context_id: uuid.UUID
+    subject_override: str | None = Field(default=None, min_length=1, max_length=100)
+    body_override: str | None = Field(default=None, min_length=1, max_length=5_000)
+
+    @field_validator("subject_override", "body_override")
+    @classmethod
+    def normalize_optional_content(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalized_text(value, detail="人工修改后的文案不能为空")
+
+
+class CommunicationPreviewResponse(BaseModel):
+    template_id: uuid.UUID
+    template_version_id: uuid.UUID
+    template_type: MessageTemplateType
+    context_type: CommunicationContextType
+    context_id: uuid.UUID
+    subject: str
+    body: str
+    variables_used: list[str]
+    resolved_variables: dict[str, str]
+    missing_optional_variables: list[str]
