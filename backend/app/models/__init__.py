@@ -1,5 +1,10 @@
 from app.models.audit import AuditLog
-from app.models.candidate import Candidate, CandidateDuplicateReview, JobApplication
+from app.models.candidate import (
+    ApplicationResumeDocument,
+    Candidate,
+    CandidateDuplicateReview,
+    JobApplication,
+)
 from app.models.candidate_process import CandidateProcess, CandidateProcessEvent
 from app.models.interview import (
     CandidateInterviewRound,
@@ -41,10 +46,23 @@ from app.models.resume import (
     ScreeningBatch,
     ScreeningResult,
 )
+from app.models.talent_pool import (
+    TalentPoolGroup,
+    TalentPoolMembership,
+    TalentPoolMembershipEvent,
+)
+from app.models.talent_recommendation import (
+    TalentRecommendationResult,
+    TalentRecommendationRun,
+    TalentRecommendationRunCandidate,
+    TalentRecommendationRunEvent,
+    TalentRecommendationRunGroup,
+)
 from app.models.user import Role, User, UserRole
 
 __all__ = [
     "AuditLog",
+    "ApplicationResumeDocument",
     "Candidate",
     "CandidateDuplicateReview",
     "CandidateProfile",
@@ -88,6 +106,14 @@ __all__ = [
     "ScoringDimension",
     "ScreeningBatch",
     "ScreeningResult",
+    "TalentPoolGroup",
+    "TalentPoolMembership",
+    "TalentPoolMembershipEvent",
+    "TalentRecommendationResult",
+    "TalentRecommendationRun",
+    "TalentRecommendationRunCandidate",
+    "TalentRecommendationRunEvent",
+    "TalentRecommendationRunGroup",
     "User",
     "UserRole",
 ]

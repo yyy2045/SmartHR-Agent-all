@@ -262,11 +262,17 @@ class CandidateInterviewSchedule(Base):
 
     @property
     def document_id(self) -> uuid.UUID:
-        return self.application.documents[0].id
+        return self.document.id
 
     @property
     def document(self) -> ResumeDocument:
-        return self.application.documents[0]
+        if self.application.primary_document is not None:
+            return self.application.primary_document
+        linked_documents = [link.document for link in self.application.document_links]
+        documents = linked_documents or self.application.documents
+        if not documents:
+            raise RuntimeError("候选人面试安排缺少关联简历")
+        return max(documents, key=lambda item: item.created_at)
 
     @property
     def plan_version_number(self) -> int:

@@ -55,6 +55,9 @@ function pageMeta(pathname: string) {
   if (pathname.startsWith('/candidates')) {
     return { title: '候选人中心', subtitle: '统一查看主档案、应聘历史与重复确认' }
   }
+  if (pathname.startsWith('/talent')) {
+    return { title: '人才库', subtitle: '沉淀候选人资产并按分组持续运营' }
+  }
   if (pathname.startsWith('/offers')) {
     return { title: '录用管理', subtitle: '处理薪酬方案、Offer 审批与入职跟踪' }
   }
@@ -130,6 +133,9 @@ export function AppLayout() {
   const canAccessCandidateCenter = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
   )
+  const canAccessTalentPool = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
+  )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
   const showJobContext = ['jobs', 'screening', 'candidate-process', 'interviews'].includes(
     activeModule,
@@ -195,7 +201,16 @@ export function AppLayout() {
             path: jobId ? `/jobs/${jobId}/interview-plan` : undefined,
             badge: jobId ? undefined : '先选岗位',
           },
-          { key: 'talent' as const, label: '人才库', icon: <DatabaseOutlined />, badge: '待开发' },
+          ...(canAccessTalentPool
+            ? [
+                {
+                  key: 'talent' as const,
+                  label: '人才库',
+                  icon: <DatabaseOutlined />,
+                  path: '/talent',
+                },
+              ]
+            : []),
         ]
       : []),
     ...(canAccessAnalytics

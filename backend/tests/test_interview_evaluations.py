@@ -43,6 +43,7 @@ from app.services.session_store import SessionStore
 class EvaluationDependencies:
     session_factory: sessionmaker[Session]
     job_id: uuid.UUID
+    application_id: uuid.UUID
     document_id: uuid.UUID
     round_id: uuid.UUID
     cancelled_round_id: uuid.UUID
@@ -226,6 +227,7 @@ def evaluation_dependencies() -> Generator[EvaluationDependencies, None, None]:
         dependency = EvaluationDependencies(
             session_factory=testing_session,
             job_id=job.id,
+            application_id=application.id,
             document_id=document.id,
             round_id=schedule.rounds[0].id,
             cancelled_round_id=schedule.rounds[1].id,
@@ -263,7 +265,7 @@ async def login(client: httpx.AsyncClient, username: str = "recruiter") -> None:
 
 def evaluation_path(dependency: EvaluationDependencies, round_id: uuid.UUID | None = None) -> str:
     return (
-        f"/jobs/{dependency.job_id}/candidate-processes/{dependency.document_id}/"
+        f"/jobs/{dependency.job_id}/applications/{dependency.application_id}/"
         f"interview-schedule/rounds/{round_id or dependency.round_id}/evaluation"
     )
 

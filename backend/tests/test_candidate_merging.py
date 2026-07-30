@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    ApplicationResumeDocument,
     AuditLog,
     Candidate,
     CandidateDuplicateReview,
@@ -27,6 +28,9 @@ from app.models import (
     Role,
     ScreeningBatch,
     ScreeningResult,
+    TalentPoolGroup,
+    TalentPoolMembership,
+    TalentPoolMembershipEvent,
     User,
     UserRole,
 )
@@ -44,10 +48,19 @@ class CandidateMergeDependencies:
     target_application_id: uuid.UUID
     conflicting_application_id: uuid.UUID
     movable_application_id: uuid.UUID
+    target_membership_id: uuid.UUID
+    conflicting_membership_id: uuid.UUID
+    movable_membership_id: uuid.UUID
+    target_document_id: uuid.UUID
+    source_document_id: uuid.UUID
+    movable_document_id: uuid.UUID
 
 
 def _screening_result(document: ResumeDocument, criteria_id: uuid.UUID) -> ScreeningResult:
+    if document.application_id is None:
+        raise AssertionError("测试简历必须先绑定应聘记录")
     return ScreeningResult(
+        application_id=document.application_id,
         document=document,
         criteria_version_id=criteria_id,
         analysis_version=1,
@@ -178,6 +191,26 @@ def candidate_merge_dependencies() -> Generator[CandidateMergeDependencies, None
         )
         db.add_all([target_document, source_document, second_source_document])
         db.flush()
+        db.add_all(
+            [
+                ApplicationResumeDocument(
+                    application_id=target_application.id,
+                    document_id=target_document.id,
+                ),
+                ApplicationResumeDocument(
+                    application_id=conflicting_application.id,
+                    document_id=source_document.id,
+                ),
+                ApplicationResumeDocument(
+                    application_id=movable_application.id,
+                    document_id=second_source_document.id,
+                ),
+            ]
+        )
+        db.flush()
+        target_application.primary_document_id = target_document.id
+        conflicting_application.primary_document_id = source_document.id
+        movable_application.primary_document_id = second_source_document.id
         target_application.process = CandidateProcess(current_stage="to_interview")
         conflicting_application.process = CandidateProcess(current_stage="contacted")
         plan = InterviewPlanVersion(
@@ -225,6 +258,42 @@ def candidate_merge_dependencies() -> Generator[CandidateMergeDependencies, None
             details={"source": "before_merge"},
         )
         db.add_all([review, existing_audit])
+        shared_group = TalentPoolGroup(name="共享人才组", created_by=recruiter)
+        movable_group = TalentPoolGroup(name="待迁移人才组", created_by=recruiter)
+        db.add_all([shared_group, movable_group])
+        db.flush()
+
+        def membership(
+            group: TalentPoolGroup,
+            candidate: Candidate,
+            reason: str,
+        ) -> TalentPoolMembership:
+            return TalentPoolMembership(
+                group=group,
+                candidate=candidate,
+                status="active",
+                reason=reason,
+                updated_by=recruiter,
+                events=[
+                    TalentPoolMembershipEvent(
+                        sequence_number=1,
+                        idempotency_key=uuid.uuid4(),
+                        action="added",
+                        from_status=None,
+                        to_status="active",
+                        reason=reason,
+                        candidate_id_snapshot=candidate.id,
+                        actor_user=recruiter,
+                        actor_username=recruiter.username,
+                        actor_display_name=recruiter.display_name,
+                    )
+                ],
+            )
+
+        target_membership = membership(shared_group, target, "目标候选人已在共享组")
+        conflicting_membership = membership(shared_group, source, "来源候选人也在共享组")
+        movable_membership = membership(movable_group, source, "仅来源候选人在此组")
+        db.add_all([target_membership, conflicting_membership, movable_membership])
         db.commit()
         dependency = CandidateMergeDependencies(
             session_factory=testing_session,
@@ -234,6 +303,12 @@ def candidate_merge_dependencies() -> Generator[CandidateMergeDependencies, None
             target_application_id=target_application.id,
             conflicting_application_id=conflicting_application.id,
             movable_application_id=movable_application.id,
+            target_membership_id=target_membership.id,
+            conflicting_membership_id=conflicting_membership.id,
+            movable_membership_id=movable_membership.id,
+            target_document_id=target_document.id,
+            source_document_id=source_document.id,
+            movable_document_id=second_source_document.id,
         )
 
     session_store = SessionStore(
@@ -249,7 +324,10 @@ def candidate_merge_dependencies() -> Generator[CandidateMergeDependencies, None
     app.dependency_overrides[get_session_store] = lambda: session_store
     yield dependency
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        Base.metadata.drop_all(connection)
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
     engine.dispose()
 
 
@@ -472,6 +550,49 @@ async def test_merge_preserves_documents_applications_processes_and_interviews(
         assert db.scalar(select(func.count(ScreeningResult.id))) == 3
         assert db.scalar(select(func.count(CandidateProcess.id))) == 2
         assert db.scalar(select(func.count(CandidateInterviewSchedule.id))) == 2
+        target_application = db.get(JobApplication, dependency.target_application_id)
+        assert target_application is not None
+        assert target_application.primary_document_id == dependency.target_document_id
+        assert {
+            item.document_id for item in target_application.document_links
+        } == {
+            dependency.target_document_id,
+            dependency.source_document_id,
+        }
+        assert conflict.primary_document_id == dependency.source_document_id
+        assert {item.document_id for item in conflict.document_links} == {
+            dependency.source_document_id
+        }
+        assert movable.primary_document_id == dependency.movable_document_id
+        assert {item.document_id for item in movable.document_links} == {
+            dependency.movable_document_id
+        }
+        assert db.scalar(select(func.count(ApplicationResumeDocument.document_id))) == 4
+        target_membership = db.get(TalentPoolMembership, dependency.target_membership_id)
+        conflicting_membership = db.get(
+            TalentPoolMembership,
+            dependency.conflicting_membership_id,
+        )
+        movable_membership = db.get(TalentPoolMembership, dependency.movable_membership_id)
+        assert target_membership is not None and target_membership.status == "active"
+        assert target_membership.candidate_id == dependency.target_candidate_id
+        assert conflicting_membership is not None
+        assert conflicting_membership.status == "removed"
+        assert conflicting_membership.candidate_id == dependency.source_candidate_id
+        assert movable_membership is not None and movable_membership.status == "active"
+        assert movable_membership.candidate_id == dependency.target_candidate_id
+        assert [item.action for item in target_membership.events] == [
+            "added",
+            "candidate_merged",
+        ]
+        assert [item.action for item in conflicting_membership.events] == [
+            "added",
+            "candidate_merged",
+        ]
+        assert [item.action for item in movable_membership.events] == [
+            "added",
+            "candidate_merged",
+        ]
         assert (
             db.scalar(
                 select(func.count(AuditLog.id)).where(
@@ -486,3 +607,41 @@ async def test_merge_preserves_documents_applications_processes_and_interviews(
             )
             == 1
         )
+        merge_audit = db.scalar(
+            select(AuditLog).where(AuditLog.action == "candidate.merged")
+        )
+        assert merge_audit is not None
+        assert merge_audit.details["linked_document_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_merge_uses_source_primary_when_target_has_no_primary_document(
+    candidate_merge_dependencies: CandidateMergeDependencies,
+) -> None:
+    dependency = candidate_merge_dependencies
+    with dependency.session_factory() as db:
+        target_application = db.get(JobApplication, dependency.target_application_id)
+        assert target_application is not None
+        target_application.primary_document_id = None
+        db.commit()
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client, "recruiter", "correct-password")
+        merged = await client.post(
+            f"/candidates/duplicate-reviews/{dependency.review_id}/merge",
+            json={
+                "target_candidate_id": str(dependency.target_candidate_id),
+                "reason": "验证缺失主简历时采用来源主简历",
+            },
+        )
+
+    assert merged.status_code == 200, merged.text
+    with dependency.session_factory() as db:
+        target_application = db.get(JobApplication, dependency.target_application_id)
+        assert target_application is not None
+        assert target_application.primary_document_id == dependency.source_document_id
+        assert {item.document_id for item in target_application.document_links} == {
+            dependency.target_document_id,
+            dependency.source_document_id,
+        }

@@ -196,6 +196,7 @@ def workbench_dependencies() -> Generator[WorkbenchDependencies, None, None]:
         )
         manual_document.screening_results.append(
             ScreeningResult(
+                application_id=manual_application.id,
                 criteria_version=criteria,
                 analysis_version=1,
                 status="completed",
@@ -209,6 +210,7 @@ def workbench_dependencies() -> Generator[WorkbenchDependencies, None, None]:
             )
         )
         db.add(manual_document)
+        db.flush()
 
         schedule_application = _new_application(db, job, "待安排候选人")
         schedule_application.process = CandidateProcess(
@@ -381,13 +383,19 @@ def workbench_dependencies() -> Generator[WorkbenchDependencies, None, None]:
             failure_code="parse_failed",
             failure_message="解析失败",
         )
+        db.add(failed_document)
+        db.flush()
+        ai_failed_application = _new_application(db, job, "AI 分析失败候选人")
         ai_failed_document = ResumeDocument(
             batch=batch,
+            application=ai_failed_application,
+            candidate=ai_failed_application.candidate,
             original_filename="ai-failed.pdf",
             status="completed",
         )
         ai_failed_document.screening_results.append(
             ScreeningResult(
+                application_id=ai_failed_application.id,
                 criteria_version=criteria,
                 analysis_version=1,
                 status="failed",
@@ -428,7 +436,7 @@ def workbench_dependencies() -> Generator[WorkbenchDependencies, None, None]:
                 failure_message="向量失败",
             )
         )
-        db.add_all([failed_document, ai_failed_document, embedding_document])
+        db.add_all([ai_failed_document, embedding_document])
         db.commit()
         dependencies = WorkbenchDependencies(
             session_factory=testing_session,

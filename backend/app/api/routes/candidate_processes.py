@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.dependencies.auth import CurrentUser
 from app.database import get_db
 from app.models import (
+    ApplicationResumeDocument,
     CandidateInterviewRound,
     CandidateInterviewSchedule,
     CandidateProcess,
@@ -77,20 +78,16 @@ ALLOWED_TRANSITIONS: dict[CandidateStage, set[CandidateStage]] = {
 def _result_options() -> tuple[object, ...]:
     return (
         selectinload(ScreeningResult.document).selectinload(ResumeDocument.batch),
-        selectinload(ScreeningResult.document)
-        .selectinload(ResumeDocument.application)
+        selectinload(ScreeningResult.application)
         .selectinload(JobApplication.process)
         .selectinload(CandidateProcess.events),
-        selectinload(ScreeningResult.document)
-        .selectinload(ResumeDocument.application)
+        selectinload(ScreeningResult.application)
         .selectinload(JobApplication.onboarding),
-        selectinload(ScreeningResult.document)
-        .selectinload(ResumeDocument.application)
+        selectinload(ScreeningResult.application)
         .selectinload(JobApplication.interview_schedule)
         .selectinload(CandidateInterviewSchedule.rounds)
         .selectinload(CandidateInterviewRound.plan_round),
-        selectinload(ScreeningResult.document)
-        .selectinload(ResumeDocument.application)
+        selectinload(ScreeningResult.application)
         .selectinload(JobApplication.interview_schedule)
         .selectinload(CandidateInterviewSchedule.rounds)
         .selectinload(CandidateInterviewRound.evaluation),
@@ -258,12 +255,12 @@ def _valid_display_phone(value: str) -> str | None:
     return None
 
 
-def _latest_results_by_document(
+def _latest_results_by_application(
     results: list[ScreeningResult],
 ) -> list[tuple[ScreeningResult, list[ScreeningResult]]]:
     grouped: dict[uuid.UUID, list[ScreeningResult]] = {}
     for item in results:
-        grouped.setdefault(item.document_id, []).append(item)
+        grouped.setdefault(item.application_id, []).append(item)
     latest: list[tuple[ScreeningResult, list[ScreeningResult]]] = []
     for document_results in grouped.values():
         selected = max(
@@ -278,46 +275,117 @@ def _latest_results_by_document(
     return latest
 
 
-def _get_owned_document(
+def _get_owned_application(
     db: Session,
     *,
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     user: User,
     for_update: bool = False,
-) -> ResumeDocument:
+) -> JobApplication:
     job = get_visible_job(db, job_id, user)
     if for_update:
         ensure_job_writable(job, user)
     statement = (
-        select(ResumeDocument)
-        .join(ScreeningBatch)
+        select(JobApplication)
         .where(
-            ResumeDocument.id == document_id,
-            ScreeningBatch.job_id == job_id,
+            JobApplication.id == application_id,
+            JobApplication.job_id == job_id,
         )
         .options(
-            selectinload(ResumeDocument.batch),
-            selectinload(ResumeDocument.application)
-            .selectinload(JobApplication.process)
+            selectinload(JobApplication.primary_document).selectinload(
+                ResumeDocument.batch
+            ),
+            selectinload(JobApplication.document_links)
+            .selectinload(ApplicationResumeDocument.document)
+            .selectinload(ResumeDocument.batch),
+            selectinload(JobApplication.documents).selectinload(ResumeDocument.batch),
+            selectinload(JobApplication.process)
             .selectinload(CandidateProcess.events)
             .selectinload(CandidateProcessEvent.operator),
         )
     )
     if for_update:
         statement = statement.with_for_update()
-    document = db.scalar(statement)
-    if document is None:
+    application = db.scalar(statement)
+    if application is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="职位应聘记录不存在")
+    return application
+
+
+def _get_legacy_application_by_document(
+    db: Session,
+    *,
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    user: User,
+    for_update: bool = False,
+) -> JobApplication:
+    get_visible_job(db, job_id, user)
+    application_ids = list(
+        db.scalars(
+            select(ApplicationResumeDocument.application_id)
+            .join(
+                JobApplication,
+                JobApplication.id == ApplicationResumeDocument.application_id,
+            )
+            .where(
+                ApplicationResumeDocument.document_id == document_id,
+                JobApplication.job_id == job_id,
+                JobApplication.status == "active",
+            )
+        ).all()
+    )
+    if not application_ids:
+        legacy_application_id = db.scalar(
+            select(ResumeDocument.application_id)
+            .join(ScreeningBatch)
+            .where(
+                ResumeDocument.id == document_id,
+                ScreeningBatch.job_id == job_id,
+            )
+        )
+        if legacy_application_id is not None:
+            application_ids = [legacy_application_id]
+    unique_ids = list(dict.fromkeys(application_ids))
+    if not unique_ids:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="候选人简历不存在")
-    return document
+    if len(unique_ids) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该简历关联多个应聘记录，请使用 application_id 接口",
+        )
+    return _get_owned_application(
+        db,
+        job_id=job_id,
+        application_id=unique_ids[0],
+        user=user,
+        for_update=for_update,
+    )
 
 
-def _completed_document_results(db: Session, document_id: uuid.UUID) -> list[ScreeningResult]:
+def _application_document(application: JobApplication) -> ResumeDocument:
+    if application.primary_document is not None:
+        return application.primary_document
+    linked_documents = [link.document for link in application.document_links]
+    documents = linked_documents or application.documents
+    if not documents:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="职位应聘记录尚未关联可用简历",
+        )
+    return max(documents, key=lambda item: item.created_at)
+
+
+def _completed_application_results(
+    db: Session,
+    application_id: uuid.UUID,
+) -> list[ScreeningResult]:
     return list(
         db.scalars(
             select(ScreeningResult)
             .where(
-                ScreeningResult.document_id == document_id,
+                ScreeningResult.application_id == application_id,
                 ScreeningResult.status == "completed",
             )
             .options(*_result_options())
@@ -352,10 +420,9 @@ def list_candidate_processes(
     results = list(
         db.scalars(
             select(ScreeningResult)
-            .join(ResumeDocument)
-            .join(ScreeningBatch)
+            .join(JobApplication, ScreeningResult.application_id == JobApplication.id)
             .where(
-                ScreeningBatch.job_id == job_id,
+                JobApplication.job_id == job_id,
                 ScreeningResult.status == "completed",
             )
             .options(*_result_options())
@@ -363,7 +430,7 @@ def list_candidate_processes(
         .unique()
         .all()
     )
-    latest_results = _latest_results_by_document(results)
+    latest_results = _latest_results_by_application(results)
     phones_by_document = (
         _phones_by_document(
             db,
@@ -377,9 +444,7 @@ def list_candidate_processes(
     for result, document_results in latest_results:
         if result.ai_group is None or result.total_score is None:
             continue
-        application = result.document.application
-        if application is None:
-            continue
+        application = result.application
         process = application.process
         current_stage = _current_stage(document_results, process)
         score = float(result.total_score)
@@ -399,7 +464,7 @@ def list_candidate_processes(
                 [
                     result.document.candidate_code,
                     result.document.original_filename,
-                    result.document.batch.name,
+                    result.document.batch.name if result.document.batch is not None else "共享简历",
                     *skills,
                 ]
             ).lower()
@@ -411,7 +476,11 @@ def list_candidate_processes(
                 application_id=application.id,
                 screening_result_id=result.id,
                 batch_id=result.document.batch_id,
-                batch_name=result.document.batch.name,
+                batch_name=(
+                    result.document.batch.name
+                    if result.document.batch is not None
+                    else "共享简历"
+                ),
                 document_id=result.document_id,
                 candidate_code=result.document.candidate_code,
                 original_filename=result.document.original_filename,
@@ -445,24 +514,25 @@ def list_candidate_processes(
 
 
 @router.post(
-    "/{job_id}/candidate-processes/{document_id}/stage",
+    "/{job_id}/applications/{application_id}/stage",
     response_model=CandidateStageUpdateResponse,
 )
-def update_candidate_stage(
+def update_application_stage(
     job_id: uuid.UUID,
-    document_id: uuid.UUID,
+    application_id: uuid.UUID,
     payload: CandidateStageUpdate,
     current_user: CurrentUser,
     db: DbSession,
 ) -> CandidateStageUpdateResponse:
-    document = _get_owned_document(
+    application = _get_owned_application(
         db,
         job_id=job_id,
-        document_id=document_id,
+        application_id=application_id,
         user=current_user,
         for_update=True,
     )
-    document_results = _completed_document_results(db, document_id)
+    document = _application_document(application)
+    document_results = _completed_application_results(db, application.id)
     if not document_results:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -476,12 +546,6 @@ def update_candidate_stage(
             item.analysis_version,
         ),
     )
-    application = document.application
-    if application is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="候选人简历尚未建立职位应聘记录",
-        )
     process = application.process
     previous_stage = _current_stage(document_results, process)
     if previous_stage != payload.expected_stage:
@@ -582,33 +646,60 @@ def update_candidate_stage(
     )
 
 
-@router.get(
-    "/{job_id}/candidate-processes/{document_id}/timeline",
-    response_model=list[CandidateProcessTimelineEventResponse],
+@router.post(
+    "/{job_id}/candidate-processes/{document_id}/stage",
+    response_model=CandidateStageUpdateResponse,
+    deprecated=True,
 )
-def get_candidate_process_timeline(
+def update_candidate_stage_compatibility(
     job_id: uuid.UUID,
     document_id: uuid.UUID,
+    payload: CandidateStageUpdate,
     current_user: CurrentUser,
     db: DbSession,
-) -> list[CandidateProcessTimelineEventResponse]:
-    document = _get_owned_document(
+) -> CandidateStageUpdateResponse:
+    application = _get_legacy_application_by_document(
         db,
         job_id=job_id,
         document_id=document_id,
+        user=current_user,
+        for_update=True,
+    )
+    return update_application_stage(
+        job_id=job_id,
+        application_id=application.id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.get(
+    "/{job_id}/applications/{application_id}/timeline",
+    response_model=list[CandidateProcessTimelineEventResponse],
+)
+def get_application_process_timeline(
+    job_id: uuid.UUID,
+    application_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[CandidateProcessTimelineEventResponse]:
+    application = _get_owned_application(
+        db,
+        job_id=job_id,
+        application_id=application_id,
         user=current_user,
     )
     decisions = list(
         db.scalars(
             select(RecruiterDecision)
             .join(ScreeningResult)
-            .where(ScreeningResult.document_id == document.id)
+            .where(ScreeningResult.application_id == application.id)
             .options(selectinload(RecruiterDecision.operator))
             .order_by(RecruiterDecision.created_at, RecruiterDecision.sequence_number)
         ).all()
     )
-    application = document.application
-    process = application.process if application is not None else None
+    process = application.process
     if process is not None:
         decisions = [decision for decision in decisions if decision.created_at < process.created_at]
     timeline = [
@@ -642,3 +733,28 @@ def get_candidate_process_timeline(
         )
     timeline.sort(key=lambda item: item.created_at)
     return timeline
+
+
+@router.get(
+    "/{job_id}/candidate-processes/{document_id}/timeline",
+    response_model=list[CandidateProcessTimelineEventResponse],
+    deprecated=True,
+)
+def get_candidate_process_timeline_compatibility(
+    job_id: uuid.UUID,
+    document_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[CandidateProcessTimelineEventResponse]:
+    application = _get_legacy_application_by_document(
+        db,
+        job_id=job_id,
+        document_id=document_id,
+        user=current_user,
+    )
+    return get_application_process_timeline(
+        job_id=job_id,
+        application_id=application.id,
+        current_user=current_user,
+        db=db,
+    )

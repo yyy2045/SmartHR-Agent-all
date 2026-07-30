@@ -252,7 +252,11 @@ def get_candidate(
                 job_id=application.job_id,
                 job_title=application.job.title,
                 batch_id=document.batch_id,
-                batch_name=document.batch.name,
+                batch_name=(
+                    document.batch.name
+                    if document.batch is not None
+                    else "来源批次已删除"
+                ),
                 original_filename=document.original_filename,
                 status=document.status,
                 created_at=document.created_at,

@@ -7,7 +7,8 @@ from app.workers import tasks
 
 def test_parse_task_enqueues_analysis_only_after_completed_parse(monkeypatch) -> None:
     document_id = uuid.uuid4()
-    enqueued: list[uuid.UUID] = []
+    application_id = uuid.uuid4()
+    enqueued: list[tuple[uuid.UUID, uuid.UUID | None]] = []
 
     monkeypatch.setattr(
         tasks,
@@ -15,19 +16,21 @@ def test_parse_task_enqueues_analysis_only_after_completed_parse(monkeypatch) ->
         lambda *_args, **_kwargs: {
             "status": "completed",
             "document_id": str(document_id),
+            "application_id": str(application_id),
             "segments": 2,
         },
     )
     monkeypatch.setattr(
         tasks,
         "enqueue_resume_analysis",
-        lambda value: enqueued.append(value) or "analysis-task-1",
+        lambda value, application_id=None: enqueued.append((value, application_id))
+        or "analysis-task-1",
     )
 
     completed = tasks.parse_resume_task.run(str(document_id))
     assert completed["analysis_enqueued"] is True
     assert completed["analysis_task_id"] == "analysis-task-1"
-    assert enqueued == [document_id]
+    assert enqueued == [(document_id, application_id)]
 
     monkeypatch.setattr(
         tasks,
@@ -40,7 +43,7 @@ def test_parse_task_enqueues_analysis_only_after_completed_parse(monkeypatch) ->
     )
     failed = tasks.parse_resume_task.run(str(document_id))
     assert "analysis_enqueued" not in failed
-    assert enqueued == [document_id]
+    assert enqueued == [(document_id, application_id)]
 
 
 def test_analysis_task_enqueues_knowledge_index_only_when_enabled(
@@ -86,3 +89,36 @@ def test_knowledge_index_task_passes_task_context(monkeypatch: pytest.MonkeyPatc
 
     assert result == {"status": "completed", "chunk_count": 2}
     assert received == [(profile_id, "None", True)]
+
+
+def test_talent_recommendation_task_dispatches_retrieval_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = uuid.uuid4()
+    received: list[tuple[uuid.UUID, str]] = []
+    rescored: list[tuple[uuid.UUID, str, bool]] = []
+
+    async def retrieve(value, *, task_id):
+        received.append((value, task_id))
+        return {"status": "rescoring", "retrieved_count": 3}
+
+    async def rescore(value, *, task_id, retry_failed_only=False):
+        rescored.append((value, task_id, retry_failed_only))
+        return {"status": "completed", "rescored_count": 3}
+
+    monkeypatch.setattr(tasks, "retrieve_talent_recommendations", retrieve)
+    monkeypatch.setattr(tasks, "rescore_talent_recommendations", rescore)
+
+    result = tasks.run_talent_recommendation_task.run(str(run_id))
+    retry = tasks.run_talent_recommendation_task.run(
+        str(run_id),
+        retry_failed_only=True,
+    )
+
+    assert result == {"status": "completed", "rescored_count": 3}
+    assert received == [(run_id, "None")]
+    assert rescored == [
+        (run_id, "None", False),
+        (run_id, "None", True),
+    ]
+    assert retry == {"status": "completed", "rescored_count": 3}

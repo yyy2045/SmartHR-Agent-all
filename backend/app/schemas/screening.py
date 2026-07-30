@@ -289,7 +289,8 @@ class RecruiterDecisionResponse(BaseModel):
 
 class ScreeningResultSummaryResponse(BaseModel):
     id: uuid.UUID
-    batch_id: uuid.UUID
+    application_id: uuid.UUID
+    batch_id: uuid.UUID | None
     batch_name: str
     document_id: uuid.UUID
     candidate_code: str
@@ -329,6 +330,7 @@ class CandidateComparisonRequest(BaseModel):
 
 class ScreeningResultResponse(BaseModel):
     id: uuid.UUID
+    application_id: uuid.UUID
     document_id: uuid.UUID
     candidate_code: str
     criteria_version_id: uuid.UUID

@@ -40,13 +40,20 @@ def validate_candidate_profile_payload(
         raise ModelPayloadSecurityError("修正后的候选人资料包含可识别的敏感信息")
 
 
-def build_resume_model_payload(document: ResumeDocument) -> dict[str, Any]:
+def build_resume_model_payload_for_mode(
+    document: ResumeDocument,
+    *,
+    ai_input_mode: str,
+    candidate_code: str | None = None,
+) -> dict[str, Any]:
     if document.status != "completed":
         raise ModelPayloadSecurityError("简历尚未完成解析")
+    if ai_input_mode not in {"raw", "redacted"}:
+        raise ModelPayloadSecurityError("AI 输入策略不合法")
 
     segments = []
     original_values: set[str] = set()
-    use_redacted_text = document.batch.ai_input_mode == "redacted"
+    use_redacted_text = ai_input_mode == "redacted"
     if use_redacted_text and document.redacted_at is None:
         raise ModelPayloadSecurityError("简历尚未完成本地脱敏")
     for segment in sorted(document.text_segments, key=lambda item: item.sort_order):
@@ -70,7 +77,7 @@ def build_resume_model_payload(document: ResumeDocument) -> dict[str, Any]:
             )
 
     payload: dict[str, Any] = {
-        "candidate_code": document.candidate_code,
+        "candidate_code": candidate_code or document.candidate_code,
         "segments": segments,
     }
     if use_redacted_text:
@@ -80,6 +87,15 @@ def build_resume_model_payload(document: ResumeDocument) -> dict[str, Any]:
         if contains_detectable_sensitive_data("\n".join(item["text"] for item in segments)):
             raise ModelPayloadSecurityError("模型载荷通过发送前检查时发现敏感信息")
     return payload
+
+
+def build_resume_model_payload(document: ResumeDocument) -> dict[str, Any]:
+    if document.batch is None:
+        raise ModelPayloadSecurityError("简历已脱离原始批次，必须明确指定 AI 输入策略")
+    return build_resume_model_payload_for_mode(
+        document,
+        ai_input_mode=document.batch.ai_input_mode,
+    )
 
 
 def send_resume_model_payload(
@@ -132,4 +148,42 @@ def build_resume_analysis_payload(
         if document.batch.ai_input_mode == "redacted":
             validate_candidate_profile_payload(document, profile_payload)
         payload["candidate_profile_override"] = profile_payload
+    return payload
+
+
+def build_resume_analysis_payload_from_snapshot(
+    document: ResumeDocument,
+    criteria_snapshot: dict[str, object],
+    candidate_profile: CandidateProfile,
+    *,
+    ai_input_mode: str,
+    candidate_code: str,
+) -> dict[str, Any]:
+    resume_payload = build_resume_model_payload_for_mode(
+        document,
+        ai_input_mode=ai_input_mode,
+        candidate_code=candidate_code,
+    )
+    hard_requirements = criteria_snapshot.get("hard_requirements")
+    scoring_dimensions = criteria_snapshot.get("scoring_dimensions")
+    if not isinstance(hard_requirements, list) or not isinstance(
+        scoring_dimensions,
+        list,
+    ):
+        raise ModelPayloadSecurityError("推荐运行的筛选标准快照不完整")
+    payload = {
+        **resume_payload,
+        "criteria": {
+            "criteria_version_id": str(
+                criteria_snapshot.get("criteria_version_id") or ""
+            ),
+            "pass_threshold": criteria_snapshot.get("pass_threshold"),
+            "hard_requirements": hard_requirements,
+            "scoring_dimensions": scoring_dimensions,
+        },
+    }
+    profile_payload = _candidate_profile_payload(candidate_profile)
+    if ai_input_mode == "redacted":
+        validate_candidate_profile_payload(document, profile_payload)
+    payload["candidate_profile_override"] = profile_payload
     return payload

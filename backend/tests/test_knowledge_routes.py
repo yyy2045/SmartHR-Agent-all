@@ -299,7 +299,7 @@ async def test_rebuild_requires_embedding_and_records_successful_request(
     }
 
 
-def test_deleting_batch_cascades_resume_embedding_chunks(
+def test_deleting_batch_detaches_source_and_preserves_resume_embedding_chunks(
     knowledge_route_dependencies: KnowledgeRouteDependencies,
 ) -> None:
     dependency = knowledge_route_dependencies
@@ -310,4 +310,7 @@ def test_deleting_batch_cascades_resume_embedding_chunks(
         assert batch is not None
         db.delete(batch)
         db.commit()
-        assert db.scalar(select(func.count(ResumeEmbeddingChunk.id))) == 0
+        document = db.get(ResumeDocument, dependency.document_id)
+        assert document is not None and document.batch_id is None
+        assert db.get(CandidateProfile, dependency.profile_id) is not None
+        assert db.scalar(select(func.count(ResumeEmbeddingChunk.id))) == 1

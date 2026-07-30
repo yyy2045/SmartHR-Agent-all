@@ -1104,6 +1104,7 @@ export interface BatchDeletionRecord {
   status: 'deleted' | 'cleanup_pending'
   batch_id: string
   deleted_document_count: number
+  retained_document_count: number
   deleted_file_count: number
   message: string | null
 }
@@ -1232,7 +1233,7 @@ export interface RecruiterDecisionRecord {
 
 export interface ScreeningResultSummary {
   id: string
-  batch_id: string
+  batch_id: string | null
   batch_name: string
   document_id: string
   candidate_code: string
@@ -1252,7 +1253,7 @@ export interface CandidateProcessCardRecord {
   process_id: string | null
   application_id: string
   screening_result_id: string
-  batch_id: string
+  batch_id: string | null
   batch_name: string
   document_id: string
   candidate_code: string
@@ -1366,7 +1367,7 @@ export interface CandidateResumeSummaryRecord {
   application_id: string | null
   job_id: string
   job_title: string
-  batch_id: string
+  batch_id: string | null
   batch_name: string
   original_filename: string
   status: ResumeDocumentStatus
@@ -1411,6 +1412,203 @@ export interface CandidateMergeRecord {
 export interface CandidateListFilters {
   status?: CandidateListStatus
   query?: string
+  limit?: number
+  offset?: number
+}
+
+export type TalentPoolGroupStatus = 'active' | 'archived' | 'all'
+export type TalentPoolMembershipStatus = 'active' | 'removed' | 'all'
+
+export interface TalentPoolGroupRecord {
+  id: string
+  name: string
+  description: string | null
+  version: number
+  is_archived: boolean
+  member_count: number
+  created_by_id: string | null
+  created_by_display_name: string | null
+  archived_at: string | null
+  archived_by_id: string | null
+  archived_by_display_name: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TalentPoolGroupListRecord {
+  items: TalentPoolGroupRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface TalentPoolMembershipRecord {
+  id: string
+  group_id: string
+  group_name: string
+  group_archived: boolean
+  candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  phone: string | null
+  email: string | null
+  status: 'active' | 'removed'
+  reason: string
+  source_application_id: string | null
+  version: number
+  joined_at: string
+  removed_at: string | null
+  updated_at: string
+}
+
+export interface TalentPoolMembershipListRecord {
+  items: TalentPoolMembershipRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface TalentPoolMembershipOperationRecord {
+  group_id: string
+  group_version: number
+  items: Array<{
+    requested_candidate_id: string
+    candidate_id: string
+    membership_id: string | null
+    status:
+      | 'added'
+      | 'reactivated'
+      | 'already_active'
+      | 'removed'
+      | 'already_removed'
+      | 'not_member'
+  }>
+}
+
+export type TalentRecommendationRunStatus =
+  | 'queued'
+  | 'retrieving'
+  | 'rescoring'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'cancelled'
+export type TalentRecommendationResultStatus =
+  | 'retrieved'
+  | 'rescoring'
+  | 'completed'
+  | 'failed'
+  | 'excluded'
+export type TalentRecommendationAction =
+  | 'cancel'
+  | 'retry_failed_items'
+  | 'select_candidates'
+
+export interface TalentRecommendationRunRecord {
+  id: string
+  job_id: string
+  job_title: string
+  criteria_version_id: string
+  criteria_version_number: number
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  status: TalentRecommendationRunStatus
+  ai_input_mode: 'raw' | 'redacted'
+  recall_limit: number
+  rescore_limit: number
+  scope_candidate_count: number
+  retrieved_count: number
+  rescored_count: number
+  completed_count: number
+  failed_count: number
+  excluded_count: number
+  criteria_stale: boolean
+  criteria_stale_at: string | null
+  failure_code: string | null
+  failure_summary: string | null
+  resource_version: number
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+  groups: Array<{ group_id: string; group_name: string; group_version: number }>
+  allowed_actions: TalentRecommendationAction[]
+}
+
+export interface TalentRecommendationResultRecord {
+  id: string
+  candidate_id: string
+  resolved_candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  candidate_merged_at: string | null
+  document_id: string
+  candidate_profile_id: string
+  profile_version: number
+  vector_rank: number
+  similarity_score: number
+  matched_group_ids: string[]
+  matched_chunks: Array<Record<string, unknown>>
+  status: TalentRecommendationResultStatus
+  ai_score: number | null
+  ai_group: 'passed' | 'low_match' | 'auto_rejected' | null
+  ai_dimension_scores: Array<Record<string, unknown>>
+  ai_hard_requirement_results: Array<Record<string, unknown>>
+  ai_strengths: string[]
+  ai_gaps: string[]
+  ai_missing_items: string[]
+  ai_interview_questions: string[]
+  ai_evidence: Array<Record<string, unknown>>
+  processing_attempt_count: number
+  failure_code: string | null
+  failure_message: string | null
+  exclusion_code: string | null
+  exclusion_reason: string | null
+  document_stale: boolean
+  profile_stale: boolean
+  embedding_stale: boolean
+  stale_at: string | null
+  completed_at: string | null
+}
+
+export interface TalentRecommendationRunDetailRecord
+  extends TalentRecommendationRunRecord {
+  results: TalentRecommendationResultRecord[]
+}
+
+export interface TalentRecommendationRunListRecord {
+  items: TalentRecommendationRunRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface TalentRecommendationSelectionRecord {
+  created_count: number
+  existing_count: number
+  failed_count: number
+  items: Array<{
+    result_id: string
+    status: 'created' | 'existing' | 'failed'
+    application_id: string | null
+    screening_result_id: string | null
+    failure_code: string | null
+    failure_message: string | null
+  }>
+}
+
+export interface TalentRecommendationCreateRecord {
+  run: TalentRecommendationRunRecord
+  replayed: boolean
+  reused_active_run: boolean
+}
+
+export interface TalentRecommendationFilters {
+  status?: TalentRecommendationRunStatus
+  createdById?: string
+  createdFrom?: string
+  createdTo?: string
   limit?: number
   offset?: number
 }
@@ -1863,11 +2061,11 @@ export function confirmInterviewPlanVersion(
 
 export async function fetchCandidateInterviewSchedule(
   jobId: string,
-  documentId: string,
+  applicationId: string,
 ): Promise<InterviewScheduleRecord | null> {
   try {
     return await apiRequest(
-      `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule`,
+      `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule`,
       {},
       '无法读取候选人面试安排',
     )
@@ -1879,11 +2077,11 @@ export async function fetchCandidateInterviewSchedule(
 
 export function createCandidateInterviewSchedule(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   payload: InterviewScheduleCreateInput,
 ): Promise<InterviewScheduleRecord> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule`,
     { method: 'POST', body: JSON.stringify(payload) },
     '创建候选人面试安排失败',
   )
@@ -1891,12 +2089,12 @@ export function createCandidateInterviewSchedule(
 
 export function rescheduleCandidateInterviewRound(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
   payload: InterviewRoundRescheduleInput,
 ): Promise<InterviewScheduleRecord> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}`,
     { method: 'PATCH', body: JSON.stringify(payload) },
     '修改候选人面试时间失败',
   )
@@ -1904,12 +2102,12 @@ export function rescheduleCandidateInterviewRound(
 
 export function cancelCandidateInterviewRound(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
   reason: string,
 ): Promise<InterviewScheduleRecord> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/cancel`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}/cancel`,
     { method: 'POST', body: JSON.stringify({ reason }) },
     '取消候选人面试轮次失败',
   )
@@ -1917,11 +2115,11 @@ export function cancelCandidateInterviewRound(
 
 export function fetchInterviewEvaluation(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
 ): Promise<InterviewEvaluationContext> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}/evaluation`,
     {},
     '无法读取面试评价',
   )
@@ -1929,12 +2127,12 @@ export function fetchInterviewEvaluation(
 
 export function saveInterviewEvaluationDraft(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
   payload: InterviewEvaluationDraftInput,
 ): Promise<InterviewEvaluationContext> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}/evaluation`,
     { method: 'PUT', body: JSON.stringify(payload) },
     '保存面试评价草稿失败',
   )
@@ -1942,11 +2140,11 @@ export function saveInterviewEvaluationDraft(
 
 export function submitInterviewEvaluation(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   roundId: string,
 ): Promise<InterviewEvaluationContext> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/interview-schedule/rounds/${roundId}/evaluation/submit`,
+    `/api/jobs/${jobId}/applications/${applicationId}/interview-schedule/rounds/${roundId}/evaluation/submit`,
     { method: 'POST' },
     '提交面试评价失败',
   )
@@ -2715,6 +2913,255 @@ export function fetchCandidate(candidateId: string): Promise<CandidateDetailReco
   )
 }
 
+export function fetchTalentPoolGroups(filters: {
+  status?: TalentPoolGroupStatus
+  query?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<TalentPoolGroupListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.query?.trim()) query.set('query', filters.query.trim())
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/talent-pool/groups${suffix}`, {}, '无法读取人才分组')
+}
+
+export function createTalentPoolGroup(
+  name: string,
+  description: string | null,
+): Promise<TalentPoolGroupRecord> {
+  return apiRequest(
+    '/api/talent-pool/groups',
+    {
+      method: 'POST',
+      body: JSON.stringify({ name, description, idempotency_key: crypto.randomUUID() }),
+    },
+    '创建人才分组失败',
+  )
+}
+
+export function updateTalentPoolGroup(
+  groupId: string,
+  expectedVersion: number,
+  values: { name?: string; description?: string | null },
+): Promise<TalentPoolGroupRecord> {
+  return apiRequest(
+    `/api/talent-pool/groups/${encodeURIComponent(groupId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        ...values,
+        expected_version: expectedVersion,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    },
+    '更新人才分组失败',
+  )
+}
+
+export function archiveTalentPoolGroup(
+  groupId: string,
+  expectedVersion: number,
+  reason: string,
+): Promise<TalentPoolGroupRecord> {
+  return apiRequest(
+    `/api/talent-pool/groups/${encodeURIComponent(groupId)}/archive`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+        reason,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    },
+    '归档人才分组失败',
+  )
+}
+
+export function fetchTalentPoolMemberships(filters: {
+  status?: TalentPoolMembershipStatus
+  groupStatus?: TalentPoolGroupStatus
+  groupId?: string
+  query?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<TalentPoolMembershipListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.groupStatus) query.set('group_status', filters.groupStatus)
+  if (filters.groupId) query.set('group_id', filters.groupId)
+  if (filters.query?.trim()) query.set('query', filters.query.trim())
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/talent-pool/memberships${suffix}`, {}, '无法读取人才成员')
+}
+
+export function addTalentPoolMemberships(
+  groupId: string,
+  expectedGroupVersion: number,
+  candidateIds: string[],
+  reason: string,
+): Promise<TalentPoolMembershipOperationRecord> {
+  return apiRequest(
+    `/api/talent-pool/groups/${encodeURIComponent(groupId)}/memberships`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        members: candidateIds.map((candidateId) => ({ candidate_id: candidateId })),
+        reason,
+        expected_group_version: expectedGroupVersion,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    },
+    '加入人才库失败',
+  )
+}
+
+export function removeTalentPoolMemberships(
+  groupId: string,
+  expectedGroupVersion: number,
+  candidateIds: string[],
+  reason: string,
+): Promise<TalentPoolMembershipOperationRecord> {
+  return apiRequest(
+    `/api/talent-pool/groups/${encodeURIComponent(groupId)}/memberships/remove`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        candidate_ids: candidateIds,
+        reason,
+        expected_group_version: expectedGroupVersion,
+        idempotency_key: crypto.randomUUID(),
+      }),
+    },
+    '移出人才库失败',
+  )
+}
+
+export function fetchTalentRecommendations(
+  jobId: string,
+  filters: TalentRecommendationFilters = {},
+): Promise<TalentRecommendationRunListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.createdById) query.set('created_by_id', filters.createdById)
+  if (filters.createdFrom) query.set('created_from', filters.createdFrom)
+  if (filters.createdTo) query.set('created_to', filters.createdTo)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations${suffix}`,
+    {},
+    '无法读取人才推荐任务',
+  )
+}
+
+export function fetchTalentRecommendation(
+  jobId: string,
+  runId: string,
+): Promise<TalentRecommendationRunDetailRecord> {
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations/${encodeURIComponent(runId)}`,
+    {},
+    '无法读取人才推荐详情',
+  )
+}
+
+export function createTalentRecommendation(
+  jobId: string,
+  groupIds: string[],
+  aiInputMode: 'raw' | 'redacted',
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TalentRecommendationCreateRecord> {
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        group_ids: groupIds,
+        ai_input_mode: aiInputMode,
+        idempotency_key: idempotencyKey,
+      }),
+    },
+    '创建人才推荐任务失败',
+  )
+}
+
+function talentRecommendationAction(
+  jobId: string,
+  runId: string,
+  action: 'cancel' | 'retry-failures',
+  expectedVersion: number,
+  idempotencyKey: string,
+): Promise<TalentRecommendationRunRecord> {
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations/${encodeURIComponent(runId)}/${action}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+        idempotency_key: idempotencyKey,
+      }),
+    },
+    action === 'cancel' ? '取消人才推荐任务失败' : '重试人才推荐任务失败',
+  )
+}
+
+export function cancelTalentRecommendation(
+  jobId: string,
+  runId: string,
+  expectedVersion: number,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TalentRecommendationRunRecord> {
+  return talentRecommendationAction(
+    jobId,
+    runId,
+    'cancel',
+    expectedVersion,
+    idempotencyKey,
+  )
+}
+
+export function retryTalentRecommendationFailures(
+  jobId: string,
+  runId: string,
+  expectedVersion: number,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TalentRecommendationRunRecord> {
+  return talentRecommendationAction(
+    jobId,
+    runId,
+    'retry-failures',
+    expectedVersion,
+    idempotencyKey,
+  )
+}
+
+export function selectTalentRecommendationCandidates(
+  jobId: string,
+  runId: string,
+  resultIds: string[],
+  confirmedStaleResultIds: string[] = [],
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TalentRecommendationSelectionRecord> {
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations/${encodeURIComponent(runId)}/select`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        result_ids: resultIds,
+        confirmed_stale_result_ids: confirmedStaleResultIds,
+        idempotency_key: idempotencyKey,
+      }),
+    },
+    '推荐候选人转应聘失败',
+  )
+}
+
 export function updateCandidatePhone(
   candidateId: string,
   phone: string,
@@ -2768,13 +3215,13 @@ export function mergeCandidateDuplicateReview(
 
 export function updateCandidateStage(
   jobId: string,
-  documentId: string,
+  applicationId: string,
   expectedStage: CandidateStage,
   targetStage: CandidateStage,
   reason?: string,
 ): Promise<CandidateStageUpdateRecord> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/stage`,
+    `/api/jobs/${jobId}/applications/${applicationId}/stage`,
     {
       method: 'POST',
       body: JSON.stringify({
@@ -2789,10 +3236,10 @@ export function updateCandidateStage(
 
 export function fetchCandidateProcessTimeline(
   jobId: string,
-  documentId: string,
+  applicationId: string,
 ): Promise<CandidateProcessTimelineEventRecord[]> {
   return apiRequest(
-    `/api/jobs/${jobId}/candidate-processes/${documentId}/timeline`,
+    `/api/jobs/${jobId}/applications/${applicationId}/timeline`,
     {},
     '无法读取候选人流程记录',
   )

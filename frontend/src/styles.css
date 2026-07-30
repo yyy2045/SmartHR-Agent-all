@@ -3761,6 +3761,10 @@ input {
   width: min(420px, 100%);
 }
 
+.candidate-center-toolbar > .ant-btn {
+  flex: 0 0 auto;
+}
+
 .candidate-center-table .ant-table-container {
   overflow: hidden;
   border: 1px solid #e2e7ee;
@@ -3868,7 +3872,178 @@ input {
 
 .candidate-detail-actions {
   display: flex;
+  gap: 8px;
   justify-content: flex-end;
+}
+
+/* 人才库 */
+.talent-page-heading {
+  margin-bottom: 4px;
+}
+
+.talent-page-tabs {
+  margin-bottom: 16px;
+}
+
+.talent-page-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.talent-page-section {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.talent-page-section > * {
+  min-width: 0;
+}
+
+.talent-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(160px, 220px) auto 40px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e3e8ef;
+}
+
+.talent-candidate-cell {
+  display: flex;
+  min-width: 0;
+  gap: 10px;
+  align-items: center;
+}
+
+.talent-candidate-cell > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.talent-candidate-cell .ant-avatar {
+  flex: 0 0 auto;
+  color: #176b52;
+  background: #e1f3ec;
+}
+
+.talent-reason-input,
+.talent-modal-alert {
+  margin-top: 16px;
+}
+
+.talent-recommendation-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(140px, 0.7fr) minmax(150px, 0.8fr) 150px 150px 40px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e3e8ef;
+}
+
+.talent-recommendation-list .ant-list-item {
+  gap: 16px;
+  padding: 16px 4px;
+}
+
+.talent-recommendation-list-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  color: #176b52;
+  background: #e1f3ec;
+  border-radius: 6px;
+  place-items: center;
+}
+
+.talent-recommendation-list-meta,
+.talent-recommendation-detail-line {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.talent-recommendation-create-form,
+.talent-recommendation-detail,
+.talent-recommendation-evidence {
+  display: grid;
+  gap: 16px;
+}
+
+.talent-recommendation-create-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.talent-recommendation-result-heading {
+  display: grid;
+  grid-template-columns: 24px minmax(130px, 1fr) minmax(180px, auto) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.talent-recommendation-result-heading > div:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.talent-recommendation-scores {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+
+.talent-recommendation-evidence section {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.talent-recommendation-insights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.talent-recommendation-insights > div {
+  padding-left: 10px;
+  border-left: 3px solid #d7e4df;
+}
+
+.talent-recommendation-insights .ant-typography {
+  margin-bottom: 0;
+}
+
+.talent-recommendation-inline-alert {
+  margin-bottom: 16px;
+}
+
+.talent-recommendation-selection-bar {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.talent-recommendation-selection-bar h4,
+.talent-recommendation-selection-outcome h4 {
+  margin: 0;
+}
+
+.talent-recommendation-selection-outcome {
+  padding-top: 16px;
+  border-top: 1px solid #e3e8ef;
+}
+
+.status-success-icon {
+  color: #168a60;
+}
+
+.status-error-icon {
+  color: #d04444;
 }
 
 .candidate-detail-content section {
@@ -3972,8 +4147,74 @@ input {
     width: 100%;
   }
 
+  .candidate-detail-actions {
+    flex-direction: column;
+  }
+
   .candidate-merge-choices {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .talent-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .talent-toolbar .ant-input-search,
+  .talent-toolbar .ant-select,
+  .talent-toolbar .ant-segmented,
+  .talent-toolbar > .ant-btn {
+    width: 100%;
+  }
+
+  .talent-toolbar .ant-segmented-group {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .talent-recommendation-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .talent-recommendation-toolbar > *,
+  .talent-recommendation-toolbar .ant-select,
+  .talent-recommendation-toolbar .ant-btn {
+    width: 100%;
+  }
+
+  .talent-recommendation-list .ant-list-item,
+  .talent-recommendation-selection-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .talent-recommendation-list .ant-list-item-action {
+    margin-inline-start: 0;
+  }
+
+  .talent-recommendation-list .ant-list-item-action > li,
+  .talent-recommendation-list .ant-list-item-action .ant-btn,
+  .talent-recommendation-selection-bar .ant-btn {
+    width: 100%;
+  }
+
+  .talent-recommendation-result-heading {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .talent-recommendation-result-heading > .ant-space,
+  .talent-recommendation-scores {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .talent-recommendation-insights {
+    grid-template-columns: 1fr;
+  }
+
+  .talent-recommendation-drawer .ant-drawer-content-wrapper {
+    width: 100% !important;
   }
 }
 

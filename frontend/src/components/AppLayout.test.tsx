@@ -115,12 +115,12 @@ describe('招聘业务导航', () => {
       '面试管理',
     ],
     [
-      '/jobs/job-1/candidates/document-1/interview-schedule',
+      '/jobs/job-1/applications/application-1/interview-schedule',
       'interviews',
       '面试管理',
     ],
     [
-      '/jobs/job-1/candidates/document-1/interview-evaluations/round-1',
+      '/jobs/job-1/applications/application-1/interview-evaluations/round-1',
       'interviews',
       '面试管理',
     ],
@@ -158,6 +158,22 @@ describe('招聘业务导航', () => {
     expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
   })
 
+  it('将人才库归入全局模块并允许用人经理只读进入', () => {
+    expect(businessModuleForPath('/talent')).toBe('talent')
+    expect(jobIdFromPath('/talent')).toBeNull()
+    mockApi()
+    renderLayout('/talent', {
+      ...auth,
+      user: { ...auth.user!, roles: ['hiring_manager'] },
+    })
+    expect(screen.getByRole('button', { name: '人才库' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '人才库' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
+  })
+
   it('将数据分析归入四角色可访问的全局模块', () => {
     expect(businessModuleForPath('/analytics')).toBe('analytics')
     expect(jobIdFromPath('/analytics')).toBeNull()
@@ -185,7 +201,7 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: /面试管理/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /录用管理/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /工作台/ })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /人才库/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /人才库/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /数据分析/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /系统设置/ })).toBeDisabled()
   })

@@ -182,15 +182,15 @@ export function CandidateProcessPage() {
     enabled: Boolean(jobId),
   })
   const timeline = useQuery({
-    queryKey: ['candidate-process-timeline', jobId, timelineTarget?.document_id],
-    queryFn: () => fetchCandidateProcessTimeline(jobId!, timelineTarget!.document_id),
+    queryKey: ['candidate-process-timeline', jobId, timelineTarget?.application_id],
+    queryFn: () => fetchCandidateProcessTimeline(jobId!, timelineTarget!.application_id),
     enabled: Boolean(jobId && timelineTarget),
   })
   const changeMutation = useMutation({
     mutationFn: () =>
       updateCandidateStage(
         jobId!,
-        changeTarget!.document_id,
+        changeTarget!.application_id,
         changeTarget!.current_stage,
         targetStage!,
         reason,
@@ -452,7 +452,7 @@ export function CandidateProcessPage() {
                             icon={<FileDoneOutlined />}
                             onClick={() =>
                               navigate(
-                                `/jobs/${jobId}/candidates/${candidate.document_id}/interview-evaluations/${candidate.interview_evaluation?.action_round_id}`,
+                                `/jobs/${jobId}/applications/${candidate.application_id}/interview-evaluations/${candidate.interview_evaluation?.action_round_id}`,
                               )
                             }
                           >
@@ -479,23 +479,30 @@ export function CandidateProcessPage() {
                       </div>
                     )}
                     <div className="candidate-flow-actions">
-                      <Button
-                        size="small"
-                        icon={<EyeOutlined />}
-                        onClick={() =>
-                          navigate(
-                            `/jobs/${jobId}/batches/${candidate.batch_id}/documents/${candidate.document_id}/history`,
-                          )
-                        }
-                      >
-                        查看档案
-                      </Button>
+                        <Button
+                          size="small"
+                          icon={<EyeOutlined />}
+                          disabled={!candidate.batch_id}
+                          title={
+                            candidate.batch_id
+                              ? undefined
+                              : '来源批次已删除，简历资产仍保留'
+                          }
+                          onClick={() =>
+                            candidate.batch_id &&
+                            navigate(
+                              `/jobs/${jobId}/batches/${candidate.batch_id}/documents/${candidate.document_id}/history`,
+                            )
+                          }
+                        >
+                          {candidate.batch_id ? '查看档案' : '来源已删除'}
+                        </Button>
                       <Button
                         size="small"
                         icon={<CalendarOutlined />}
                         onClick={() =>
                           navigate(
-                            `/jobs/${jobId}/candidates/${candidate.document_id}/interview-schedule`,
+                            `/jobs/${jobId}/applications/${candidate.application_id}/interview-schedule`,
                           )
                         }
                       >

@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Numeric,
     String,
@@ -25,7 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
-    from app.models.candidate import Candidate, JobApplication
+    from app.models.candidate import ApplicationResumeDocument, Candidate, JobApplication
     from app.models.job import Job, JobCriteriaVersion
     from app.models.knowledge import ResumeEmbeddingChunk
     from app.models.user import User
@@ -81,7 +82,6 @@ class ScreeningBatch(Base):
     )
     documents: Mapped[list[ResumeDocument]] = relationship(
         back_populates="batch",
-        cascade="all, delete-orphan",
         order_by="ResumeDocument.created_at",
     )
 
@@ -98,9 +98,8 @@ class ResumeDocument(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    batch_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("screening_batches.id", ondelete="CASCADE"),
-        nullable=False,
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("screening_batches.id", ondelete="SET NULL"),
         index=True,
     )
     candidate_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -145,9 +144,17 @@ class ResumeDocument(Base):
         onupdate=func.now(),
     )
 
-    batch: Mapped[ScreeningBatch] = relationship(back_populates="documents")
+    batch: Mapped[ScreeningBatch | None] = relationship(back_populates="documents")
     candidate: Mapped[Candidate | None] = relationship(back_populates="documents")
-    application: Mapped[JobApplication | None] = relationship(back_populates="documents")
+    application: Mapped[JobApplication | None] = relationship(
+        back_populates="documents",
+        foreign_keys=[application_id],
+    )
+    application_links: Mapped[list[ApplicationResumeDocument]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        foreign_keys="ApplicationResumeDocument.document_id",
+    )
     text_segments: Mapped[list[ResumeTextSegment]] = relationship(
         back_populates="document",
         cascade="all, delete-orphan",
@@ -273,6 +280,12 @@ class CandidateProfile(Base):
             "version_number",
             name="uq_candidate_profile_document_version",
         ),
+        UniqueConstraint(
+            "id",
+            "document_id",
+            "version_number",
+            name="uq_candidate_profiles_snapshot_identity",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -335,16 +348,33 @@ class ScreeningResult(Base):
             name="ck_screening_results_pass_threshold",
         ),
         UniqueConstraint(
-            "document_id",
+            "application_id",
             "criteria_version_id",
             "analysis_version",
             name="uq_screening_result_analysis_version",
+        ),
+        ForeignKeyConstraint(
+            ["application_id", "document_id"],
+            [
+                "application_resume_documents.application_id",
+                "application_resume_documents.document_id",
+            ],
+            name="fk_screening_results_application_document",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     document_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("resume_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("job_applications.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -384,6 +414,10 @@ class ScreeningResult(Base):
     )
 
     document: Mapped[ResumeDocument] = relationship(back_populates="screening_results")
+    application: Mapped[JobApplication] = relationship(
+        back_populates="screening_results",
+        foreign_keys=[application_id],
+    )
     candidate_profile: Mapped[CandidateProfile | None] = relationship(
         back_populates="screening_results"
     )

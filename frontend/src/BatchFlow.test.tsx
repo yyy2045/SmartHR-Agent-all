@@ -576,8 +576,9 @@ describe('resume batch flow', () => {
         return jsonResponse({
           status: 'deleted',
           batch_id: 'batch-delete',
-          deleted_document_count: 1,
-          deleted_file_count: 1,
+          deleted_document_count: 0,
+          retained_document_count: 1,
+          deleted_file_count: 0,
           message: null,
         })
       }
@@ -596,6 +597,11 @@ describe('resume batch flow', () => {
 
     expect(await screen.findByRole('heading', { name: '待删除批次' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /永久删除/ }))
+    expect(
+      await screen.findByText(
+        /仍被应聘记录引用的简历、解析文本、档案、向量和筛选历史会继续保留/,
+      ),
+    ).toBeInTheDocument()
     const confirmButton = await screen.findByRole('button', { name: '确认永久删除' })
     expect(confirmButton).toBeDisabled()
     const confirmation = screen.getByLabelText('请输入“永久删除”确认操作')
@@ -616,6 +622,11 @@ describe('resume batch flow', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: '待删除批次' })).toBeNull(),
     )
+    expect(
+      await screen.findByText(
+        '批次来源已删除，保留 1 份已被应聘引用的简历，清理 0 份无引用简历',
+      ),
+    ).toBeInTheDocument()
     expect(await screen.findByText('还没有简历批次')).toBeInTheDocument()
   })
 

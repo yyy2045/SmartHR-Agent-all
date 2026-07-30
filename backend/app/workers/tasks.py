@@ -7,6 +7,8 @@ from app.config import settings
 from app.services.knowledge_index import index_candidate_profile
 from app.services.resume_analysis import analyze_resume_document
 from app.services.resume_processing import process_resume_document
+from app.services.talent_recommendation_rescoring import rescore_talent_recommendations
+from app.services.talent_recommendation_retrieval import retrieve_talent_recommendations
 from app.workers.celery_app import celery_app
 from app.workers.dispatcher import enqueue_knowledge_index, enqueue_resume_analysis
 
@@ -21,7 +23,11 @@ def parse_resume_task(task, document_id: str) -> dict[str, str | int | bool]:
     )
     if result.get("status") == "completed":
         try:
-            result["analysis_task_id"] = enqueue_resume_analysis(uuid.UUID(document_id))
+            application_id = result.get("application_id")
+            result["analysis_task_id"] = enqueue_resume_analysis(
+                uuid.UUID(document_id),
+                application_id=(uuid.UUID(str(application_id)) if application_id else None),
+            )
             result["analysis_enqueued"] = True
         except Exception:
             logger.exception("AI 分析任务创建失败，document_id=%s", document_id)
@@ -33,6 +39,7 @@ def parse_resume_task(task, document_id: str) -> dict[str, str | int | bool]:
 def analyze_resume_task(
     task,
     document_id: str,
+    application_id: str | None = None,
     criteria_version_id: str | None = None,
     candidate_profile_id: str | None = None,
     analysis_version: int | None = None,
@@ -41,6 +48,7 @@ def analyze_resume_task(
     result = asyncio.run(
         analyze_resume_document(
             uuid.UUID(document_id),
+            application_id=uuid.UUID(application_id) if application_id else None,
             criteria_version_id=(
                 uuid.UUID(criteria_version_id) if criteria_version_id else None
             ),
@@ -82,3 +90,32 @@ def index_candidate_profile_task(
             force=force,
         )
     )
+
+
+@celery_app.task(name="talent.recommendation.run", bind=True, acks_late=True)
+def run_talent_recommendation_task(
+    task,
+    run_id: str,
+    retry_failed_only: bool = False,
+) -> dict[str, Any]:
+    async def execute() -> dict[str, Any]:
+        resolved_run_id = uuid.UUID(run_id)
+        task_id = str(task.request.id)
+        if retry_failed_only:
+            return await rescore_talent_recommendations(
+                resolved_run_id,
+                task_id=task_id,
+                retry_failed_only=True,
+            )
+        retrieval = await retrieve_talent_recommendations(
+            resolved_run_id,
+            task_id=task_id,
+        )
+        if retrieval.get("status") != "rescoring":
+            return retrieval
+        return await rescore_talent_recommendations(
+            resolved_run_id,
+            task_id=task_id,
+        )
+
+    return asyncio.run(execute())

@@ -13,7 +13,6 @@ from app.models import (
     JobApplication,
     RecruiterDecision,
     ResumeDocument,
-    ScreeningBatch,
     ScreeningResult,
     User,
 )
@@ -39,9 +38,7 @@ DbSession = Annotated[Session, Depends(get_db)]
 def _result_options() -> tuple[object, ...]:
     return (
         selectinload(ScreeningResult.document).selectinload(ResumeDocument.batch),
-        selectinload(ScreeningResult.document)
-        .selectinload(ResumeDocument.application)
-        .selectinload(JobApplication.process),
+        selectinload(ScreeningResult.application).selectinload(JobApplication.process),
         selectinload(ScreeningResult.candidate_profile),
         selectinload(ScreeningResult.criteria_version),
         selectinload(ScreeningResult.dimension_scores).selectinload(
@@ -68,11 +65,10 @@ def _get_owned_result(
         ensure_job_writable(job, user)
     statement = (
         select(ScreeningResult)
-        .join(ResumeDocument)
-        .join(ScreeningBatch)
+        .join(JobApplication, ScreeningResult.application_id == JobApplication.id)
         .where(
             ScreeningResult.id == result_id,
-            ScreeningBatch.job_id == job_id,
+            JobApplication.job_id == job_id,
         )
         .options(*_result_options())
     )
@@ -136,15 +132,14 @@ def list_screening_results(
 
     statement = (
         select(ScreeningResult)
-        .join(ResumeDocument)
-        .join(ScreeningBatch)
-        .where(ScreeningBatch.job_id == job_id)
+        .join(JobApplication, ScreeningResult.application_id == JobApplication.id)
+        .where(JobApplication.job_id == job_id)
         .options(*_result_options())
     )
     all_results = list(db.scalars(statement).unique().all())
     grouped: dict[uuid.UUID, list[ScreeningResult]] = {}
     for item in all_results:
-        grouped.setdefault(item.document_id, []).append(item)
+        grouped.setdefault(item.application_id, []).append(item)
 
     results: list[ScreeningResult] = []
     for document_results in grouped.values():
@@ -193,8 +188,13 @@ def list_screening_results(
     return [
         ScreeningResultSummaryResponse(
             id=item.id,
+            application_id=item.application_id,
             batch_id=item.document.batch_id,
-            batch_name=item.document.batch.name,
+            batch_name=(
+                item.document.batch.name
+                if item.document.batch is not None
+                else "来源批次已删除"
+            ),
             document_id=item.document_id,
             candidate_code=item.document.candidate_code,
             criteria_version_id=item.criteria_version_id,
@@ -230,10 +230,10 @@ def compare_screening_results(
     results = list(
         db.scalars(
             select(ScreeningResult)
-            .join(ResumeDocument)
-            .join(ScreeningBatch)
+            .join(JobApplication, ScreeningResult.application_id == JobApplication.id)
             .where(
                 ScreeningResult.id.in_(payload.result_ids),
+                JobApplication.job_id == job_id,
             )
             .options(*_result_options())
         )
@@ -245,11 +245,8 @@ def compare_screening_results(
 
     by_id = {item.id: item for item in results}
     ordered_results = [by_id[result_id] for result_id in payload.result_ids]
-    if any(item.document.batch.job_id != job_id for item in ordered_results):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="只能比较同一职位的候选人",
-        )
+    if any(item.application.job_id != job_id for item in ordered_results):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="筛选结果不存在")
     if any(item.status != "completed" for item in ordered_results):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -368,10 +365,7 @@ def create_recruiter_decision(
             status_code=status.HTTP_409_CONFLICT,
             detail="只有已完成的 AI 分析可以作出人工决策",
         )
-    if (
-        result.document.application is not None
-        and result.document.application.process is not None
-    ):
+    if result.application.process is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="候选人已进入流程看板，请在看板中调整阶段",

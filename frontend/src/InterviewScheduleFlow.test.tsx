@@ -185,7 +185,7 @@ describe('candidate interview scheduling flow', () => {
       }
       if (path === '/api/jobs/job-1/candidate-processes') return jsonResponse([candidate])
       if (path === '/api/jobs/job-1/interview-plans/versions') return jsonResponse([plan])
-      if (path === '/api/jobs/job-1/candidate-processes/document-1/interview-schedule') {
+      if (path === '/api/jobs/job-1/applications/application-1/interview-schedule') {
         return jsonResponse(schedule)
       }
       return jsonResponse({ detail: 'not found' }, 404)
@@ -193,7 +193,7 @@ describe('candidate interview scheduling flow', () => {
     window.history.replaceState(
       {},
       '',
-      '/jobs/job-1/candidates/document-1/interview-schedule',
+      '/jobs/job-1/applications/application-1/interview-schedule',
     )
     renderApp()
 
@@ -217,13 +217,13 @@ describe('candidate interview scheduling flow', () => {
       if (path === '/api/jobs/job-1/candidate-processes') return jsonResponse([candidate])
       if (path === '/api/jobs/job-1/interview-plans/versions') return jsonResponse([plan])
       if (
-        path === '/api/jobs/job-1/candidate-processes/document-1/interview-schedule' &&
+        path === '/api/jobs/job-1/applications/application-1/interview-schedule' &&
         method === 'GET'
       ) {
         return schedule ? jsonResponse(schedule) : jsonResponse({ detail: '不存在' }, 404)
       }
       if (
-        path === '/api/jobs/job-1/candidate-processes/document-1/interview-schedule' &&
+        path === '/api/jobs/job-1/applications/application-1/interview-schedule' &&
         method === 'POST'
       ) {
         createPayload = JSON.parse(init?.body as string) as InterviewScheduleCreateInput
@@ -291,7 +291,7 @@ describe('candidate interview scheduling flow', () => {
     window.history.replaceState(
       {},
       '',
-      '/jobs/job-1/candidates/document-1/interview-schedule',
+      '/jobs/job-1/applications/application-1/interview-schedule',
     )
     renderApp()
 
@@ -368,7 +368,7 @@ describe('candidate interview scheduling flow', () => {
     window.history.replaceState(
       {},
       '',
-      '/jobs/job-1/candidates/document-1/interview-schedule',
+      '/jobs/job-1/applications/application-1/interview-schedule',
     )
     renderApp()
 

@@ -152,12 +152,12 @@ def _latest_profile(db: Session, document_id: uuid.UUID) -> CandidateProfile | N
 def _next_analysis_version(
     db: Session,
     *,
-    document_ids: list[uuid.UUID],
+    application_ids: list[uuid.UUID],
     criteria_version_id: uuid.UUID,
 ) -> int:
     latest = db.scalar(
         select(func.max(ScreeningResult.analysis_version)).where(
-            ScreeningResult.document_id.in_(document_ids),
+            ScreeningResult.application_id.in_(application_ids),
             ScreeningResult.criteria_version_id == criteria_version_id,
         )
     )
@@ -166,6 +166,7 @@ def _next_analysis_version(
 
 def _queue_reanalysis(
     *,
+    application_id: uuid.UUID,
     document_id: uuid.UUID,
     criteria_version_id: uuid.UUID,
     candidate_profile_id: uuid.UUID | None,
@@ -174,6 +175,7 @@ def _queue_reanalysis(
     try:
         task_id = enqueue_resume_analysis(
             document_id,
+            application_id=application_id,
             criteria_version_id=criteria_version_id,
             candidate_profile_id=candidate_profile_id,
             analysis_version=analysis_version,
@@ -284,7 +286,10 @@ def list_candidate_analysis_history(
     results = list(
         db.scalars(
             select(ScreeningResult)
-            .where(ScreeningResult.document_id == document_id)
+            .where(
+                ScreeningResult.document_id == document_id,
+                ScreeningResult.application_id == document.application_id,
+            )
             .options(*_result_options())
             .order_by(ScreeningResult.created_at.desc(), ScreeningResult.id.desc())
         )
@@ -364,10 +369,11 @@ def correct_candidate_profile(
 
     analysis_version = _next_analysis_version(
         db,
-        document_ids=[document.id],
+        application_ids=[document.application_id],
         criteria_version_id=criteria.id,
     )
     reanalysis = _queue_reanalysis(
+        application_id=document.application_id,
         document_id=document.id,
         criteria_version_id=criteria.id,
         candidate_profile_id=profile.id,
@@ -447,10 +453,11 @@ def reanalyze_candidate(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="候选人资料版本不存在")
     analysis_version = _next_analysis_version(
         db,
-        document_ids=[document.id],
+        application_ids=[document.application_id],
         criteria_version_id=criteria.id,
     )
     task = _queue_reanalysis(
+        application_id=document.application_id,
         document_id=document.id,
         criteria_version_id=criteria.id,
         candidate_profile_id=profile.id if profile is not None else None,
@@ -518,7 +525,11 @@ def reanalyze_batch(
         )
     analysis_version = _next_analysis_version(
         db,
-        document_ids=[document.id for document in ready_documents],
+        application_ids=[
+            document.application_id
+            for document in ready_documents
+            if document.application_id is not None
+        ],
         criteria_version_id=criteria.id,
     )
     tasks: list[ReanalysisTaskResponse] = []
@@ -542,6 +553,7 @@ def reanalyze_batch(
         )
         tasks.append(
             _queue_reanalysis(
+                application_id=document.application_id,
                 document_id=document.id,
                 criteria_version_id=criteria.id,
                 candidate_profile_id=profile.id if profile is not None else None,

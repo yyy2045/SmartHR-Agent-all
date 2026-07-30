@@ -35,6 +35,7 @@ from app.services.session_store import SessionStore
 class InterviewScheduleDependencies:
     session_factory: sessionmaker[Session]
     job_id: uuid.UUID
+    application_id: uuid.UUID
     document_id: uuid.UUID
     confirmed_plan_id: uuid.UUID
     draft_plan_id: uuid.UUID
@@ -134,6 +135,7 @@ def interview_schedule_dependencies() -> Generator[InterviewScheduleDependencies
         dependency = InterviewScheduleDependencies(
             session_factory=testing_session,
             job_id=job.id,
+            application_id=application.id,
             document_id=document.id,
             confirmed_plan_id=confirmed_plan.id,
             draft_plan_id=draft_plan.id,
@@ -199,8 +201,8 @@ async def test_interview_schedule_requires_authentication(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            f"/jobs/{dependency.job_id}/candidate-processes/"
-            f"{dependency.document_id}/interview-schedule"
+            f"/jobs/{dependency.job_id}/applications/"
+            f"{dependency.application_id}/interview-schedule"
         )
 
     assert response.status_code == 401
@@ -212,8 +214,8 @@ async def test_schedule_requires_confirmed_plan_and_all_rounds(
 ) -> None:
     dependency = interview_schedule_dependencies
     path = (
-        f"/jobs/{dependency.job_id}/candidate-processes/"
-        f"{dependency.document_id}/interview-schedule"
+        f"/jobs/{dependency.job_id}/applications/"
+        f"{dependency.application_id}/interview-schedule"
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -280,8 +282,8 @@ async def test_round_reschedule_and_cancel_require_reasons_and_are_audited(
 ) -> None:
     dependency = interview_schedule_dependencies
     path = (
-        f"/jobs/{dependency.job_id}/candidate-processes/"
-        f"{dependency.document_id}/interview-schedule"
+        f"/jobs/{dependency.job_id}/applications/"
+        f"{dependency.application_id}/interview-schedule"
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -372,8 +374,8 @@ async def test_archived_job_is_read_only_and_cross_owner_access_is_hidden(
 ) -> None:
     dependency = interview_schedule_dependencies
     path = (
-        f"/jobs/{dependency.job_id}/candidate-processes/"
-        f"{dependency.document_id}/interview-schedule"
+        f"/jobs/{dependency.job_id}/applications/"
+        f"{dependency.application_id}/interview-schedule"
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

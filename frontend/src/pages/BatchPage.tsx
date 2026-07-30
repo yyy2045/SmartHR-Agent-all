@@ -48,6 +48,7 @@ import {
   resumeFileUrl,
   retryResumeDocument,
   retryResumeParsing,
+  type BatchDeletionRecord,
   type BatchReanalysisRecord,
   type BatchStatus,
   type AIInputMode,
@@ -129,12 +130,14 @@ function BatchCard({
   canWrite,
   canViewSensitive,
   criteriaVersions,
+  onDeleteSuccess,
 }: {
   batch: ScreeningBatchRecord
   jobId: string
   canWrite: boolean
   canViewSensitive: boolean
   criteriaVersions: CriteriaVersion[]
+  onDeleteSuccess: (response: BatchDeletionRecord) => void
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -193,13 +196,7 @@ function BatchCard({
     onSuccess: async (response) => {
       setDeleteOpen(false)
       setDeleteConfirmation('')
-      if (response.status === 'cleanup_pending') {
-        messageApi.warning(response.message ?? '批次已删除，私有暂存文件等待继续清理')
-      } else {
-        messageApi.success(
-          `批次已永久删除，共清理 ${response.deleted_document_count} 份简历`,
-        )
-      }
+      onDeleteSuccess(response)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['batches', jobId] }),
         queryClient.invalidateQueries({ queryKey: ['screening-results', jobId] }),
@@ -561,8 +558,8 @@ function BatchCard({
           <Alert
             type="error"
             showIcon
-            message="该操作不可撤销"
-            description={`将永久删除批次中的 ${batch.total_count} 份原始文件、解析文本、脱敏记录、候选人档案、分析结果和人工决策。`}
+            message="删除批次来源后不可恢复"
+            description={`批次中的 ${batch.total_count} 份简历将解除来源。仍被应聘记录引用的简历、解析文本、档案、向量和筛选历史会继续保留；没有任何应聘引用的简历资产才会永久删除。`}
           />
           <div>
             <label htmlFor={`batch-delete-confirmation-${batch.id}`}>
@@ -661,6 +658,19 @@ export function BatchPage() {
   const canWrite = canManageRecruitment(auth.user) && !archived
   const canViewSensitive = canViewSensitiveRecruitmentData(auth.user)
   const selectedFiles = fileList.flatMap((item) => (item.originFileObj ? [item.originFileObj] : []))
+  const showBatchDeletionResult = (response: BatchDeletionRecord) => {
+    if (response.status === 'cleanup_pending') {
+      messageApi.warning(response.message ?? '批次已删除，私有暂存文件等待继续清理')
+    } else if (response.retained_document_count > 0) {
+      messageApi.success(
+        `批次来源已删除，保留 ${response.retained_document_count} 份已被应聘引用的简历，清理 ${response.deleted_document_count} 份无引用简历`,
+      )
+    } else {
+      messageApi.success(
+        `批次已删除，共清理 ${response.deleted_document_count} 份无引用简历`,
+      )
+    }
+  }
 
   return (
     <>
@@ -828,6 +838,7 @@ export function BatchPage() {
                 canWrite={canWrite}
                 canViewSensitive={canViewSensitive}
                 criteriaVersions={confirmedVersions}
+                onDeleteSuccess={showBatchDeletionResult}
               />
             ))}
           </div>

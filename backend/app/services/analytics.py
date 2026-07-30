@@ -30,7 +30,6 @@ from app.models import (
     RecruiterDecision,
     RecruitmentRequest,
     RecruitmentRequestVersion,
-    ResumeDocument,
     ScreeningResult,
     User,
 )
@@ -326,24 +325,22 @@ def collect_funnel(db: Session, context: AnalyticsContext) -> AnalyticsFunnelRes
     if cohort:
         raw["ai_screening_completed"] = _application_id_set(
             db,
-            select(ResumeDocument.application_id)
-            .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
+            select(ScreeningResult.application_id)
             .where(
-                _uuid_ids_clause(db, ResumeDocument.application_id, cohort),
+                _uuid_ids_clause(db, ScreeningResult.application_id, cohort),
                 ScreeningResult.status == "completed",
                 ScreeningResult.completed_at <= context.as_of,
             ),
         )
         raw["recruiter_shortlisted"] = _application_id_set(
             db,
-            select(ResumeDocument.application_id)
-            .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
+            select(ScreeningResult.application_id)
             .join(
                 RecruiterDecision,
                 RecruiterDecision.screening_result_id == ScreeningResult.id,
             )
             .where(
-                _uuid_ids_clause(db, ResumeDocument.application_id, cohort),
+                _uuid_ids_clause(db, ScreeningResult.application_id, cohort),
                 RecruiterDecision.decision == "shortlisted",
                 RecruiterDecision.created_at <= context.as_of,
             ),
@@ -604,10 +601,9 @@ def _stage_timestamps(
 
     timestamps["ai_screening_completed"] = _first_timestamp_by_application(
         db.execute(
-            select(ResumeDocument.application_id, ScreeningResult.completed_at)
-            .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
+            select(ScreeningResult.application_id, ScreeningResult.completed_at)
             .where(
-                _uuid_ids_clause(db, ResumeDocument.application_id, application_ids),
+                _uuid_ids_clause(db, ScreeningResult.application_id, application_ids),
                 ScreeningResult.status == "completed",
                 ScreeningResult.completed_at.is_not(None),
                 ScreeningResult.completed_at <= context.as_of,
@@ -616,14 +612,13 @@ def _stage_timestamps(
     )
     timestamps["recruiter_shortlisted"] = _first_timestamp_by_application(
         db.execute(
-            select(ResumeDocument.application_id, RecruiterDecision.created_at)
-            .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
+            select(ScreeningResult.application_id, RecruiterDecision.created_at)
             .join(
                 RecruiterDecision,
                 RecruiterDecision.screening_result_id == ScreeningResult.id,
             )
             .where(
-                _uuid_ids_clause(db, ResumeDocument.application_id, application_ids),
+                _uuid_ids_clause(db, ScreeningResult.application_id, application_ids),
                 RecruiterDecision.decision == "shortlisted",
                 RecruiterDecision.created_at <= context.as_of,
             )
@@ -988,17 +983,16 @@ def collect_decision_differences(
     if context.application_ids:
         result_rows = db.execute(
             select(
-                ResumeDocument.application_id,
+                ScreeningResult.application_id,
                 ScreeningResult.id,
                 ScreeningResult.ai_group,
                 ScreeningResult.completed_at,
                 ScreeningResult.analysis_version,
             )
-            .join(ScreeningResult, ScreeningResult.document_id == ResumeDocument.id)
             .where(
                 _uuid_ids_clause(
                     db,
-                    ResumeDocument.application_id,
+                    ScreeningResult.application_id,
                     context.application_ids,
                 ),
                 ScreeningResult.status == "completed",

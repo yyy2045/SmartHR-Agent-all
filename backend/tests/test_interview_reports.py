@@ -171,6 +171,7 @@ def interview_report_dependencies() -> Generator[InterviewReportDependencies, No
         db.flush()
 
         old_screening = ScreeningResult(
+            application_id=application.id,
             document_id=document.id,
             criteria_version_id=criteria.id,
             analysis_version=1,
@@ -187,6 +188,7 @@ def interview_report_dependencies() -> Generator[InterviewReportDependencies, No
             completed_at=now - timedelta(hours=3),
         )
         latest_screening = ScreeningResult(
+            application_id=application.id,
             document_id=document.id,
             criteria_version_id=criteria.id,
             analysis_version=2,
@@ -213,6 +215,7 @@ def interview_report_dependencies() -> Generator[InterviewReportDependencies, No
             ],
         )
         processing_screening = ScreeningResult(
+            application_id=application.id,
             document_id=document.id,
             criteria_version_id=criteria.id,
             analysis_version=3,
@@ -223,6 +226,7 @@ def interview_report_dependencies() -> Generator[InterviewReportDependencies, No
             started_at=now,
         )
         completed_without_timestamp = ScreeningResult(
+            application_id=application.id,
             document_id=document.id,
             criteria_version_id=criteria.id,
             analysis_version=4,

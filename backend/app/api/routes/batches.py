@@ -10,6 +10,7 @@ from app.api.dependencies.auth import CurrentUser
 from app.config import settings
 from app.database import get_db
 from app.models import (
+    ApplicationResumeDocument,
     Candidate,
     CandidateProfile,
     DimensionScore,
@@ -256,6 +257,7 @@ def screening_result_response(
     ]
     return ScreeningResultResponse(
         id=result.id,
+        application_id=result.application_id,
         document_id=result.document_id,
         candidate_code=candidate_code,
         criteria_version_id=result.criteria_version_id,
@@ -444,6 +446,10 @@ async def create_batch(
         )
         batch.documents.append(document)
         db.flush()
+        application.document_links.append(
+            ApplicationResumeDocument(document=document)
+        )
+        application.primary_document = document
         await process_upload(db, batch=batch, document=document, upload=upload)
         db.flush()
 
@@ -637,7 +643,7 @@ def retry_document_analysis(
         )
     processing_result = db.scalar(
         select(ScreeningResult.id).where(
-            ScreeningResult.document_id == document.id,
+            ScreeningResult.application_id == document.application_id,
             ScreeningResult.criteria_version_id == document.batch.criteria_version_id,
             ScreeningResult.status == "processing",
         )
@@ -652,13 +658,14 @@ def retry_document_analysis(
     )
     latest_version = db.scalar(
         select(func.max(ScreeningResult.analysis_version)).where(
-            ScreeningResult.document_id == document.id,
+            ScreeningResult.application_id == document.application_id,
             ScreeningResult.criteria_version_id == document.batch.criteria_version_id,
         )
     )
     try:
         task_id = enqueue_resume_analysis(
             document.id,
+            application_id=document.application_id,
             criteria_version_id=document.batch.criteria_version_id,
             candidate_profile_id=profile_id,
             analysis_version=(latest_version or 0) + 1,
@@ -768,16 +775,35 @@ def delete_screening_batch(
             detail="请输入“永久删除”以确认该操作",
         )
 
+    documents = list(batch.documents)
+    document_ids = [document.id for document in documents]
+    referenced_document_ids = set(
+        db.scalars(
+            select(ApplicationResumeDocument.document_id).where(
+                ApplicationResumeDocument.document_id.in_(document_ids)
+            )
+        ).all()
+    )
+    retained_documents = [
+        document for document in documents if document.id in referenced_document_ids
+    ]
+    deleted_documents = [
+        document for document in documents if document.id not in referenced_document_ids
+    ]
     storage_keys = [
         document.storage_key
-        for document in batch.documents
+        for document in deleted_documents
         if document.storage_key is not None
     ]
     try:
-        staged_files = stage_batch_files(
-            settings.file_storage_root,
-            batch_id=batch.id,
-            storage_keys=storage_keys,
+        staged_files = (
+            stage_batch_files(
+                settings.file_storage_root,
+                batch_id=batch.id,
+                storage_keys=storage_keys,
+            )
+            if storage_keys
+            else None
         )
     except BatchDeletionError as error:
         record_audit(
@@ -797,49 +823,16 @@ def delete_screening_batch(
             detail=str(error),
         ) from error
 
-    document_count = len(batch.documents)
-    file_count = len(staged_files.files)
-    application_ids = {
-        document.application_id
-        for document in batch.documents
-        if document.application_id is not None
-    }
-    candidate_ids = {
-        document.candidate_id
-        for document in batch.documents
-        if document.candidate_id is not None
-    }
+    deleted_document_count = len(deleted_documents)
+    retained_document_count = len(retained_documents)
+    file_count = len(staged_files.files) if staged_files is not None else 0
     try:
+        for document in retained_documents:
+            document.batch = None
+        for document in deleted_documents:
+            db.delete(document)
         db.delete(batch)
         db.flush()
-        for application_id in application_ids:
-            remaining_documents = db.scalar(
-                select(func.count(ResumeDocument.id)).where(
-                    ResumeDocument.application_id == application_id
-                )
-            )
-            application = db.get(JobApplication, application_id)
-            if application is not None and remaining_documents == 0:
-                db.delete(application)
-        db.flush()
-        for candidate_id in candidate_ids:
-            remaining_documents = db.scalar(
-                select(func.count(ResumeDocument.id)).where(
-                    ResumeDocument.candidate_id == candidate_id
-                )
-            )
-            remaining_applications = db.scalar(
-                select(func.count(JobApplication.id)).where(
-                    JobApplication.candidate_id == candidate_id
-                )
-            )
-            candidate = db.get(Candidate, candidate_id)
-            if (
-                candidate is not None
-                and remaining_documents == 0
-                and remaining_applications == 0
-            ):
-                db.delete(candidate)
         record_audit(
             db,
             action="batch.permanent_delete",
@@ -850,20 +843,23 @@ def delete_screening_batch(
             result="success",
             actor=current_user,
             details={
-                "document_count": document_count,
-                "file_count": file_count,
+                "source_document_count": len(documents),
+                "deleted_document_count": deleted_document_count,
+                "retained_document_count": retained_document_count,
+                "deleted_file_count": file_count,
             },
         )
         db.commit()
     except Exception as error:
         db.rollback()
-        try:
-            staged_files.restore()
-        except BatchDeletionError as restore_error:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(restore_error),
-            ) from restore_error
+        if staged_files is not None:
+            try:
+                staged_files.restore()
+            except BatchDeletionError as restore_error:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=str(restore_error),
+                ) from restore_error
         record_audit(
             db,
             action="batch.permanent_delete",
@@ -882,7 +878,8 @@ def delete_screening_batch(
         ) from error
 
     try:
-        staged_files.purge()
+        if staged_files is not None:
+            staged_files.purge()
     except OSError:
         record_audit(
             db,
@@ -899,13 +896,15 @@ def delete_screening_batch(
         return BatchDeletionResponse(
             status="cleanup_pending",
             batch_id=batch_id,
-            deleted_document_count=document_count,
+            deleted_document_count=deleted_document_count,
+            retained_document_count=retained_document_count,
             deleted_file_count=0,
             message="批次数据已删除，私有暂存文件将在服务重启时继续清理",
         )
     return BatchDeletionResponse(
         status="deleted",
         batch_id=batch_id,
-        deleted_document_count=document_count,
+        deleted_document_count=deleted_document_count,
+        retained_document_count=retained_document_count,
         deleted_file_count=file_count,
     )
