@@ -13,6 +13,7 @@ from app.api.routes.interview_reports import router as interview_reports_router
 from app.api.routes.interview_schedules import router as interview_schedules_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.knowledge import router as knowledge_router
+from app.api.routes.message_templates import router as message_templates_router
 from app.api.routes.offer_portal import router as offer_portal_router
 from app.api.routes.offers import router as offers_router
 from app.api.routes.onboardings import router as onboardings_router
@@ -38,6 +39,11 @@ api_router.include_router(
 )
 api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
+api_router.include_router(
+    message_templates_router,
+    prefix="/message-templates",
+    tags=["message-templates"],
+)
 api_router.include_router(offers_router, tags=["offers"])
 api_router.include_router(onboardings_router, tags=["onboardings"])
 api_router.include_router(
