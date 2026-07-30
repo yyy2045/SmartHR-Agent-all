@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, SaveOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, DatabaseOutlined, SaveOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Form, Input, Select, Skeleton, Space, Typography, message } from 'antd'
 import { useEffect } from 'react'
@@ -101,9 +101,23 @@ export function JobFormPage() {
           <Title level={2}>{heading}</Title>
           <Text type="secondary">职位信息和原始 JD 将作为后续筛选标准与 AI 分析的基础</Text>
         </div>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)}>
-          返回
-        </Button>
+        <Space wrap>
+          {editing && (
+            <Button
+              icon={<DatabaseOutlined />}
+              onClick={() =>
+                navigate(
+                  `/talent?view=recommendations&job_id=${encodeURIComponent(jobId!)}${!readOnly ? '&create=1' : ''}`,
+                )
+              }
+            >
+              {!readOnly ? '从人才库推荐' : '查看人才推荐'}
+            </Button>
+          )}
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)}>
+            返回
+          </Button>
+        </Space>
       </div>
 
       {archived && (

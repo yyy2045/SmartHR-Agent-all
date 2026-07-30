@@ -1485,6 +1485,134 @@ export interface TalentPoolMembershipOperationRecord {
   }>
 }
 
+export type TalentRecommendationRunStatus =
+  | 'queued'
+  | 'retrieving'
+  | 'rescoring'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'cancelled'
+export type TalentRecommendationResultStatus =
+  | 'retrieved'
+  | 'rescoring'
+  | 'completed'
+  | 'failed'
+  | 'excluded'
+export type TalentRecommendationAction =
+  | 'cancel'
+  | 'retry_failed_items'
+  | 'select_candidates'
+
+export interface TalentRecommendationRunRecord {
+  id: string
+  job_id: string
+  job_title: string
+  criteria_version_id: string
+  criteria_version_number: number
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  status: TalentRecommendationRunStatus
+  ai_input_mode: 'raw' | 'redacted'
+  recall_limit: number
+  rescore_limit: number
+  scope_candidate_count: number
+  retrieved_count: number
+  rescored_count: number
+  completed_count: number
+  failed_count: number
+  excluded_count: number
+  criteria_stale: boolean
+  criteria_stale_at: string | null
+  failure_code: string | null
+  failure_summary: string | null
+  resource_version: number
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+  groups: Array<{ group_id: string; group_name: string; group_version: number }>
+  allowed_actions: TalentRecommendationAction[]
+}
+
+export interface TalentRecommendationResultRecord {
+  id: string
+  candidate_id: string
+  resolved_candidate_id: string
+  candidate_code: string
+  candidate_name: string | null
+  candidate_merged_at: string | null
+  document_id: string
+  candidate_profile_id: string
+  profile_version: number
+  vector_rank: number
+  similarity_score: number
+  matched_group_ids: string[]
+  matched_chunks: Array<Record<string, unknown>>
+  status: TalentRecommendationResultStatus
+  ai_score: number | null
+  ai_group: 'passed' | 'low_match' | 'auto_rejected' | null
+  ai_dimension_scores: Array<Record<string, unknown>>
+  ai_hard_requirement_results: Array<Record<string, unknown>>
+  ai_strengths: string[]
+  ai_gaps: string[]
+  ai_missing_items: string[]
+  ai_interview_questions: string[]
+  ai_evidence: Array<Record<string, unknown>>
+  processing_attempt_count: number
+  failure_code: string | null
+  failure_message: string | null
+  exclusion_code: string | null
+  exclusion_reason: string | null
+  document_stale: boolean
+  profile_stale: boolean
+  embedding_stale: boolean
+  stale_at: string | null
+  completed_at: string | null
+}
+
+export interface TalentRecommendationRunDetailRecord
+  extends TalentRecommendationRunRecord {
+  results: TalentRecommendationResultRecord[]
+}
+
+export interface TalentRecommendationRunListRecord {
+  items: TalentRecommendationRunRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface TalentRecommendationSelectionRecord {
+  created_count: number
+  existing_count: number
+  failed_count: number
+  items: Array<{
+    result_id: string
+    status: 'created' | 'existing' | 'failed'
+    application_id: string | null
+    screening_result_id: string | null
+    failure_code: string | null
+    failure_message: string | null
+  }>
+}
+
+export interface TalentRecommendationCreateRecord {
+  run: TalentRecommendationRunRecord
+  replayed: boolean
+  reused_active_run: boolean
+}
+
+export interface TalentRecommendationFilters {
+  status?: TalentRecommendationRunStatus
+  createdById?: string
+  createdFrom?: string
+  createdTo?: string
+  limit?: number
+  offset?: number
+}
+
 export interface ScreeningResultDetail {
   id: string
   document_id: string
@@ -2910,6 +3038,127 @@ export function removeTalentPoolMemberships(
       }),
     },
     '移出人才库失败',
+  )
+}
+
+export function fetchTalentRecommendations(
+  jobId: string,
+  filters: TalentRecommendationFilters = {},
+): Promise<TalentRecommendationRunListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.createdById) query.set('created_by_id', filters.createdById)
+  if (filters.createdFrom) query.set('created_from', filters.createdFrom)
+  if (filters.createdTo) query.set('created_to', filters.createdTo)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations${suffix}`,
+    {},
+    '无法读取人才推荐任务',
+  )
+}
+
+export function fetchTalentRecommendation(
+  jobId: string,
+  runId: string,
+): Promise<TalentRecommendationRunDetailRecord> {
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations/${encodeURIComponent(runId)}`,
+    {},
+    '无法读取人才推荐详情',
+  )
+}
+
+export function createTalentRecommendation(
+  jobId: string,
+  groupIds: string[],
+  aiInputMode: 'raw' | 'redacted',
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TalentRecommendationCreateRecord> {
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        group_ids: groupIds,
+        ai_input_mode: aiInputMode,
+        idempotency_key: idempotencyKey,
+      }),
+    },
+    '创建人才推荐任务失败',
+  )
+}
+
+function talentRecommendationAction(
+  jobId: string,
+  runId: string,
+  action: 'cancel' | 'retry-failures',
+  expectedVersion: number,
+  idempotencyKey: string,
+): Promise<TalentRecommendationRunRecord> {
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations/${encodeURIComponent(runId)}/${action}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+        idempotency_key: idempotencyKey,
+      }),
+    },
+    action === 'cancel' ? '取消人才推荐任务失败' : '重试人才推荐任务失败',
+  )
+}
+
+export function cancelTalentRecommendation(
+  jobId: string,
+  runId: string,
+  expectedVersion: number,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TalentRecommendationRunRecord> {
+  return talentRecommendationAction(
+    jobId,
+    runId,
+    'cancel',
+    expectedVersion,
+    idempotencyKey,
+  )
+}
+
+export function retryTalentRecommendationFailures(
+  jobId: string,
+  runId: string,
+  expectedVersion: number,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TalentRecommendationRunRecord> {
+  return talentRecommendationAction(
+    jobId,
+    runId,
+    'retry-failures',
+    expectedVersion,
+    idempotencyKey,
+  )
+}
+
+export function selectTalentRecommendationCandidates(
+  jobId: string,
+  runId: string,
+  resultIds: string[],
+  confirmedStaleResultIds: string[] = [],
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TalentRecommendationSelectionRecord> {
+  return apiRequest(
+    `/api/jobs/${encodeURIComponent(jobId)}/recommendations/${encodeURIComponent(runId)}/select`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        result_ids: resultIds,
+        confirmed_stale_result_ids: confirmedStaleResultIds,
+        idempotency_key: idempotencyKey,
+      }),
+    },
+    '推荐候选人转应聘失败',
   )
 }
 

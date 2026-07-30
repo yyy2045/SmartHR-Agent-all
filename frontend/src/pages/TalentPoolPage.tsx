@@ -46,6 +46,7 @@ import {
   type TalentPoolMembershipStatus,
 } from '../api/client'
 import { useAuth } from '../auth/context'
+import { TalentRecommendationPanel } from '../components/TalentRecommendationPanel'
 
 const { Title, Text } = Typography
 const PAGE_SIZE = 20
@@ -88,7 +89,11 @@ export function TalentPoolPage() {
   const [archiveReason, setArchiveReason] = useState('')
   const [removingMember, setRemovingMember] = useState<TalentPoolMembershipRecord>()
   const [removeReason, setRemoveReason] = useState('')
-  const activeView = searchParams.get('view') === 'groups' ? 'groups' : 'candidates'
+  const requestedView = searchParams.get('view')
+  const activeView =
+    requestedView === 'groups' || requestedView === 'recommendations'
+      ? requestedView
+      : 'candidates'
   const canWrite = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
   )
@@ -335,7 +340,9 @@ export function TalentPoolPage() {
           <Text type="secondary">
             {activeView === 'candidates'
               ? `${memberships.data?.total ?? 0} 条有效人才关系`
-              : `${groups.data?.total ?? 0} 个人才分组`}
+              : activeView === 'groups'
+                ? `${groups.data?.total ?? 0} 个人才分组`
+                : '按当前职位标准召回并重新评估历史人才'}
           </Text>
         </div>
         {activeView === 'groups' && canWrite && (
@@ -348,10 +355,19 @@ export function TalentPoolPage() {
       <Tabs
         className="talent-page-tabs"
         activeKey={activeView}
-        onChange={(key) => setSearchParams(key === 'groups' ? { view: 'groups' } : {})}
+        onChange={(key) =>
+          setSearchParams(
+            key === 'candidates'
+              ? {}
+              : key === 'groups'
+                ? { view: 'groups' }
+                : { view: 'recommendations' },
+          )
+        }
         items={[
           { key: 'candidates', label: '候选人' },
           { key: 'groups', label: '分组' },
+          { key: 'recommendations', label: '推荐任务' },
         ]}
       />
 
@@ -482,6 +498,8 @@ export function TalentPoolPage() {
           />
         </section>
       )}
+
+      {activeView === 'recommendations' && <TalentRecommendationPanel />}
 
       <Modal
         open={groupModalOpen}
