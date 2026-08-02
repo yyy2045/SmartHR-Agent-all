@@ -28,7 +28,7 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{([a-z][a-z0-9_]{0,63})\}\}")
 _OFFER_LINK_PLACEHOLDER = "[候选人专属链接已隐藏]"
 
-_TEMPLATE_CONTEXTS = {
+TEMPLATE_CONTEXTS = {
     "interview_invitation": "interview_round",
     "interview_reschedule": "interview_round",
     "interview_cancellation": "interview_round",
@@ -374,7 +374,7 @@ def preview_communication(
 ) -> CommunicationPreviewResponse:
     _ensure_preview_role(actor)
     template, version = _load_template_version(db, payload.template_version_id)
-    expected_context_type = _TEMPLATE_CONTEXTS[template.template_type]
+    expected_context_type = TEMPLATE_CONTEXTS[template.template_type]
     if payload.context_type != expected_context_type:
         raise MessagePreviewError("模板类型与业务上下文不匹配", status_code=422)
 

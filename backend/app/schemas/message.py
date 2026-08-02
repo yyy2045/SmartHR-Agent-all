@@ -17,6 +17,9 @@ MessageTemplateType = Literal[
 MessageTemplateStatus = Literal["active", "inactive"]
 MessageTemplateAction = Literal["create_version", "activate", "deactivate"]
 CommunicationContextType = Literal["interview_round", "offer", "onboarding"]
+CommunicationChannel = Literal["wechat", "phone", "sms", "email", "other"]
+CommunicationRecordKind = Literal["sent", "correction"]
+CommunicationAction = Literal["copy", "record_send", "correct"]
 
 _VARIABLE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
@@ -121,6 +124,146 @@ class MessageTemplateListResponse(BaseModel):
     limit: int
     offset: int
 
+class CommunicationRecordCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context_type: CommunicationContextType
+    context_id: uuid.UUID
+    template_version_id: uuid.UUID | None = None
+    channel: CommunicationChannel
+    channel_detail: str | None = Field(default=None, min_length=1, max_length=100)
+    subject: str = Field(min_length=1, max_length=500)
+    body: str = Field(min_length=1, max_length=10_000)
+    sent_at: datetime
+    is_historical: bool = False
+    historical_note: str | None = Field(default=None, min_length=1, max_length=2_000)
+    idempotency_key: uuid.UUID
+
+    @field_validator("channel_detail", "historical_note")
+    @classmethod
+    def normalize_optional_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalized_text(value, detail="沟通说明不能为空")
+
+    @field_validator("subject", "body")
+    @classmethod
+    def normalize_record_text(cls, value: str) -> str:
+        return _normalized_text(value, detail="沟通文案不能为空")
+
+
+class CommunicationCorrectionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    template_version_id: uuid.UUID | None = None
+    channel: CommunicationChannel
+    channel_detail: str | None = Field(default=None, min_length=1, max_length=100)
+    subject: str = Field(min_length=1, max_length=500)
+    body: str = Field(min_length=1, max_length=10_000)
+    sent_at: datetime
+    correction_reason: str = Field(min_length=1, max_length=2_000)
+    idempotency_key: uuid.UUID
+
+    @field_validator("channel_detail")
+    @classmethod
+    def normalize_channel_detail(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalized_text(value, detail="渠道说明不能为空")
+
+    @field_validator("subject", "body")
+    @classmethod
+    def normalize_record_text(cls, value: str) -> str:
+        return _normalized_text(value, detail="沟通文案不能为空")
+
+    @field_validator("correction_reason")
+    @classmethod
+    def normalize_correction_reason(cls, value: str) -> str:
+        return _normalized_text(value, detail="更正原因不能为空")
+
+
+class CommunicationCopyAuditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context_type: CommunicationContextType
+    context_id: uuid.UUID
+    template_version_id: uuid.UUID | None = None
+    subject: str = Field(min_length=1, max_length=500)
+    body: str = Field(min_length=1, max_length=10_000)
+    idempotency_key: uuid.UUID
+
+    @field_validator("subject", "body")
+    @classmethod
+    def normalize_copied_text(cls, value: str) -> str:
+        return _normalized_text(value, detail="复制文案不能为空")
+
+
+class CommunicationRecordResponse(BaseModel):
+    id: uuid.UUID
+    application_id: uuid.UUID
+    candidate_id: uuid.UUID
+    job_id: uuid.UUID
+    context_type: CommunicationContextType
+    context_id: uuid.UUID
+    template_version_id: uuid.UUID | None
+    record_kind: CommunicationRecordKind
+    root_record_id: uuid.UUID | None
+    corrects_record_id: uuid.UUID | None
+    correction_sequence: int
+    correction_reason: str | None
+    channel: CommunicationChannel
+    channel_detail: str | None
+    recipient_type: Literal["phone", "email", "other"]
+    recipient_masked: str
+    candidate_name_snapshot: str
+    subject_snapshot: str
+    body_snapshot: str
+    sent_at: datetime
+    is_historical: bool
+    historical_note: str | None
+    created_by_id: uuid.UUID | None
+    created_by_username: str
+    created_by_display_name: str
+    created_at: datetime
+    allowed_actions: list[CommunicationAction]
+
+
+class CommunicationRecordSummaryResponse(BaseModel):
+    id: uuid.UUID
+    application_id: uuid.UUID
+    candidate_id: uuid.UUID
+    job_id: uuid.UUID
+    context_type: CommunicationContextType
+    context_id: uuid.UUID
+    record_kind: CommunicationRecordKind
+    channel: CommunicationChannel
+    channel_detail: str | None
+    recipient_masked: str
+    candidate_name_snapshot: str
+    subject_snapshot: str
+    sent_at: datetime
+    correction_count: int
+    latest_correction_id: uuid.UUID | None
+    allowed_actions: list[CommunicationAction]
+
+
+class CommunicationRecordListResponse(BaseModel):
+    items: list[CommunicationRecordSummaryResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class CommunicationRecordDetailResponse(CommunicationRecordResponse):
+    corrections: list[CommunicationRecordResponse]
+
+
+class CommunicationCopyAuditResponse(BaseModel):
+    audit_id: uuid.UUID
+    context_type: CommunicationContextType
+    context_id: uuid.UUID
+    template_version_id: uuid.UUID | None
+    copied_at: datetime
 
 class CommunicationPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
