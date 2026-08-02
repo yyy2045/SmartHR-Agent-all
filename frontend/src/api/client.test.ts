@@ -11,6 +11,8 @@ import {
   deactivateMessageTemplate,
   fetchOfferPortalStatus,
   fetchCurrentUser,
+  fetchCommunicationRecord,
+  fetchCommunicationRecords,
   fetchInternalNotificationUnreadCount,
   fetchMessageTemplate,
   fetchMessageTemplates,
@@ -304,6 +306,30 @@ describe('API client', () => {
       expected_version: 5,
       idempotency_key: 'activate-key-1',
     })
+  })
+
+  it('builds communication record query requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ items: [], total: 0, limit: 20, offset: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchCommunicationRecords({
+      contextType: 'offer',
+      contextId: 'offer-1',
+      applicationId: 'application-1',
+      limit: 20,
+      offset: 40,
+    })
+    await fetchCommunicationRecord('record-1')
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/communications?context_type=offer&context_id=offer-1&application_id=application-1&limit=20&offset=40',
+    )
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/communications/record-1')
   })
 
   it('使用浏览器生成的 multipart 边界上传简历批次', async () => {

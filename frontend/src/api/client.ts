@@ -1074,6 +1074,9 @@ export type MessageTemplateType =
   | 'onboarding_date_confirmation'
 export type MessageTemplateStatus = 'active' | 'inactive' | 'all'
 export type CommunicationContextType = 'interview_round' | 'offer' | 'onboarding'
+export type CommunicationChannel = 'wechat' | 'phone' | 'sms' | 'email' | 'other'
+export type CommunicationRecordKind = 'sent' | 'correction'
+export type CommunicationAction = 'copy' | 'record_send' | 'correct'
 
 export interface MessageTemplateVersionRecord {
   id: string
@@ -1166,6 +1169,57 @@ export interface CommunicationCopyAuditRecord {
   context_id: string
   template_version_id: string | null
   copied_at: string
+}
+
+export interface CommunicationRecordSummaryRecord {
+  id: string
+  application_id: string
+  candidate_id: string
+  job_id: string
+  context_type: CommunicationContextType
+  context_id: string
+  record_kind: CommunicationRecordKind
+  channel: CommunicationChannel
+  channel_detail: string | null
+  recipient_masked: string
+  candidate_name_snapshot: string
+  subject_snapshot: string
+  sent_at: string
+  correction_count: number
+  latest_correction_id: string | null
+  allowed_actions: CommunicationAction[]
+}
+
+export interface CommunicationRecordDetailRecord extends CommunicationRecordSummaryRecord {
+  template_version_id: string | null
+  root_record_id: string | null
+  corrects_record_id: string | null
+  correction_sequence: number
+  correction_reason: string | null
+  recipient_type: 'phone' | 'email' | 'other'
+  body_snapshot: string
+  is_historical: boolean
+  historical_note: string | null
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+  corrections: CommunicationRecordDetailRecord[]
+}
+
+export interface CommunicationRecordListRecord {
+  items: CommunicationRecordSummaryRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface CommunicationRecordFilters {
+  contextType?: CommunicationContextType
+  contextId?: string
+  applicationId?: string
+  limit?: number
+  offset?: number
 }
 
 export interface CommunicationPreviewInput {
@@ -2537,6 +2591,23 @@ export function deactivateMessageTemplate(
     },
     '停用沟通模板失败',
   )
+}
+
+export function fetchCommunicationRecords(
+  filters: CommunicationRecordFilters = {},
+): Promise<CommunicationRecordListRecord> {
+  const query = new URLSearchParams()
+  if (filters.contextType) query.set('context_type', filters.contextType)
+  if (filters.contextId) query.set('context_id', filters.contextId)
+  if (filters.applicationId) query.set('application_id', filters.applicationId)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/communications${suffix}`, {}, '无法读取沟通留痕')
+}
+
+export function fetchCommunicationRecord(recordId: string): Promise<CommunicationRecordDetailRecord> {
+  return apiRequest(`/api/communications/${recordId}`, {}, '无法读取沟通留痕详情')
 }
 
 export function previewCommunication(
