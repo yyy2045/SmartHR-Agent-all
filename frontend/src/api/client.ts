@@ -124,6 +124,48 @@ export interface WorkbenchFilters {
   page?: number
   pageSize?: number
 }
+export type InternalNotificationReadStatus = 'all' | 'unread' | 'read'
+
+export interface InternalNotificationRecord {
+  id: string
+  notification_type: string
+  title: string
+  summary: string
+  resource_type: string
+  resource_id: string
+  route_path: string
+  read_at: string | null
+  created_at: string
+}
+
+export interface InternalNotificationListRecord {
+  items: InternalNotificationRecord[]
+  total: number
+  unread_count: number
+  limit: number
+  offset: number
+}
+
+export interface InternalNotificationFilters {
+  status?: InternalNotificationReadStatus
+  notificationType?: string
+  limit?: number
+  offset?: number
+}
+
+export interface InternalNotificationUnreadCountRecord {
+  unread_count: number
+}
+
+export interface InternalNotificationReadRecord {
+  id: string
+  read_at: string
+}
+
+export interface InternalNotificationReadAllRecord {
+  updated_count: number
+  read_at: string
+}
 
 export type AnalyticsInterval = 'day' | 'week'
 export type AnalyticsFunnelStage =
@@ -1022,6 +1064,181 @@ export interface OfferSummary {
   updated_at: string
 }
 
+export type MessageTemplateType =
+  | 'interview_invitation'
+  | 'interview_reschedule'
+  | 'interview_cancellation'
+  | 'meeting_details'
+  | 'offer_notification'
+  | 'offer_reminder'
+  | 'onboarding_date_confirmation'
+export type MessageTemplateStatus = 'active' | 'inactive' | 'all'
+export type CommunicationContextType = 'interview_round' | 'offer' | 'onboarding'
+export type CommunicationChannel = 'wechat' | 'phone' | 'sms' | 'email' | 'other'
+export type CommunicationRecordKind = 'sent' | 'correction'
+export type CommunicationAction = 'copy' | 'record_send' | 'correct'
+
+export interface MessageTemplateVersionRecord {
+  id: string
+  version_number: number
+  source_version_id: string | null
+  subject: string
+  body: string
+  variables: string[]
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+}
+
+export interface MessageTemplateSummaryRecord {
+  id: string
+  system_key: string | null
+  template_type: MessageTemplateType
+  name: string
+  status: Exclude<MessageTemplateStatus, 'all'>
+  current_version_number: number
+  resource_version: number
+  current_subject: string
+  updated_at: string
+  allowed_actions: string[]
+}
+
+export interface MessageTemplateRecord extends MessageTemplateSummaryRecord {
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+  current_version: MessageTemplateVersionRecord
+  versions: MessageTemplateVersionRecord[]
+}
+
+export interface MessageTemplateListRecord {
+  items: MessageTemplateSummaryRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface MessageTemplateFilters {
+  status?: MessageTemplateStatus
+  templateType?: MessageTemplateType
+  query?: string
+  limit?: number
+  offset?: number
+}
+
+export interface MessageTemplateContentInput {
+  subject: string
+  body: string
+  variables: string[]
+}
+
+export interface MessageTemplateCreateInput extends MessageTemplateContentInput {
+  templateType: MessageTemplateType
+  name: string
+  idempotencyKey?: string
+}
+
+export interface MessageTemplateVersionCreateInput extends MessageTemplateContentInput {
+  expectedVersion: number
+  idempotencyKey?: string
+}
+
+export interface MessageTemplateStatusInput {
+  expectedVersion: number
+  idempotencyKey?: string
+}
+
+export interface CommunicationPreviewRecord {
+  template_id: string
+  template_version_id: string
+  template_type: MessageTemplateType
+  context_type: CommunicationContextType
+  context_id: string
+  subject: string
+  body: string
+  variables_used: string[]
+  resolved_variables: Record<string, string>
+  missing_optional_variables: string[]
+}
+
+export interface CommunicationCopyAuditRecord {
+  audit_id: string
+  context_type: CommunicationContextType
+  context_id: string
+  template_version_id: string | null
+  copied_at: string
+}
+
+export interface CommunicationRecordSummaryRecord {
+  id: string
+  application_id: string
+  candidate_id: string
+  job_id: string
+  context_type: CommunicationContextType
+  context_id: string
+  record_kind: CommunicationRecordKind
+  channel: CommunicationChannel
+  channel_detail: string | null
+  recipient_masked: string
+  candidate_name_snapshot: string
+  subject_snapshot: string
+  sent_at: string
+  correction_count: number
+  latest_correction_id: string | null
+  allowed_actions: CommunicationAction[]
+}
+
+export interface CommunicationRecordDetailRecord extends CommunicationRecordSummaryRecord {
+  template_version_id: string | null
+  root_record_id: string | null
+  corrects_record_id: string | null
+  correction_sequence: number
+  correction_reason: string | null
+  recipient_type: 'phone' | 'email' | 'other'
+  body_snapshot: string
+  is_historical: boolean
+  historical_note: string | null
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+  corrections: CommunicationRecordDetailRecord[]
+}
+
+export interface CommunicationRecordListRecord {
+  items: CommunicationRecordSummaryRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface CommunicationRecordFilters {
+  contextType?: CommunicationContextType
+  contextId?: string
+  applicationId?: string
+  limit?: number
+  offset?: number
+}
+
+export interface CommunicationPreviewInput {
+  templateVersionId: string
+  contextType: CommunicationContextType
+  contextId: string
+  subjectOverride?: string | null
+  bodyOverride?: string | null
+}
+
+export interface CommunicationCopyAuditInput {
+  contextType: CommunicationContextType
+  contextId: string
+  templateVersionId?: string | null
+  subject: string
+  body: string
+  idempotencyKey?: string
+}
+
 export type BatchStatus =
   | 'uploading'
   | 'ready'
@@ -1863,6 +2080,39 @@ export function fetchWorkbenchItems(
   const suffix = query.size ? `?${query.toString()}` : ''
   return apiRequest(`/api/workbench/items${suffix}`, {}, '无法读取工作台待办')
 }
+export function fetchInternalNotifications(
+  filters: InternalNotificationFilters = {},
+): Promise<InternalNotificationListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status && filters.status !== 'all') query.set('status', filters.status)
+  if (filters.notificationType) query.set('notification_type', filters.notificationType)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/notifications${suffix}`, {}, '无法读取站内通知')
+}
+
+export function fetchInternalNotificationUnreadCount(): Promise<InternalNotificationUnreadCountRecord> {
+  return apiRequest('/api/notifications/unread-count', {}, '无法读取未读通知数量')
+}
+
+export function markInternalNotificationRead(
+  notificationId: string,
+): Promise<InternalNotificationReadRecord> {
+  return apiRequest(
+    `/api/notifications/${notificationId}/read`,
+    { method: 'POST' },
+    '标记通知已读失败',
+  )
+}
+
+export function markAllInternalNotificationsRead(): Promise<InternalNotificationReadAllRecord> {
+  return apiRequest(
+    '/api/notifications/read-all',
+    { method: 'POST' },
+    '全部标记已读失败',
+  )
+}
 
 export function fetchAnalyticsDashboard(
   filters: AnalyticsFilters = {},
@@ -2249,6 +2499,153 @@ export function confirmInterviewReport(
       body: JSON.stringify({ version_id: versionId }),
     },
     '确认面试报告失败',
+  )
+}
+
+export function fetchMessageTemplates(
+  filters: MessageTemplateFilters = {},
+): Promise<MessageTemplateListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.templateType) query.set('template_type', filters.templateType)
+  if (filters.query) query.set('query', filters.query)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/message-templates${suffix}`, {}, '\u65e0\u6cd5\u8bfb\u53d6\u6c9f\u901a\u6a21\u677f')
+}
+
+export function fetchMessageTemplate(templateId: string): Promise<MessageTemplateRecord> {
+  return apiRequest(`/api/message-templates/${templateId}`, {}, '\u65e0\u6cd5\u8bfb\u53d6\u6a21\u677f\u8be6\u60c5')
+}
+
+export function createMessageTemplate(
+  input: MessageTemplateCreateInput,
+): Promise<MessageTemplateRecord> {
+  return apiRequest(
+    '/api/message-templates',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        template_type: input.templateType,
+        name: input.name,
+        subject: input.subject,
+        body: input.body,
+        variables: input.variables,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '创建沟通模板失败',
+  )
+}
+
+export function createMessageTemplateVersion(
+  templateId: string,
+  input: MessageTemplateVersionCreateInput,
+): Promise<MessageTemplateRecord> {
+  return apiRequest(
+    `/api/message-templates/${templateId}/versions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: input.expectedVersion,
+        subject: input.subject,
+        body: input.body,
+        variables: input.variables,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '保存沟通模板新版本失败',
+  )
+}
+
+export function activateMessageTemplate(
+  templateId: string,
+  input: MessageTemplateStatusInput,
+): Promise<MessageTemplateRecord> {
+  return apiRequest(
+    `/api/message-templates/${templateId}/activate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: input.expectedVersion,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '启用沟通模板失败',
+  )
+}
+
+export function deactivateMessageTemplate(
+  templateId: string,
+  input: MessageTemplateStatusInput,
+): Promise<MessageTemplateRecord> {
+  return apiRequest(
+    `/api/message-templates/${templateId}/deactivate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: input.expectedVersion,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '停用沟通模板失败',
+  )
+}
+
+export function fetchCommunicationRecords(
+  filters: CommunicationRecordFilters = {},
+): Promise<CommunicationRecordListRecord> {
+  const query = new URLSearchParams()
+  if (filters.contextType) query.set('context_type', filters.contextType)
+  if (filters.contextId) query.set('context_id', filters.contextId)
+  if (filters.applicationId) query.set('application_id', filters.applicationId)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/communications${suffix}`, {}, '无法读取沟通留痕')
+}
+
+export function fetchCommunicationRecord(recordId: string): Promise<CommunicationRecordDetailRecord> {
+  return apiRequest(`/api/communications/${recordId}`, {}, '无法读取沟通留痕详情')
+}
+
+export function previewCommunication(
+  input: CommunicationPreviewInput,
+): Promise<CommunicationPreviewRecord> {
+  return apiRequest(
+    '/api/communications/preview',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        template_version_id: input.templateVersionId,
+        context_type: input.contextType,
+        context_id: input.contextId,
+        subject_override: input.subjectOverride ?? null,
+        body_override: input.bodyOverride ?? null,
+      }),
+    },
+    '\u751f\u6210\u6c9f\u901a\u9884\u89c8\u5931\u8d25',
+  )
+}
+
+export function recordCommunicationCopyAudit(
+  input: CommunicationCopyAuditInput,
+): Promise<CommunicationCopyAuditRecord> {
+  return apiRequest(
+    '/api/communications/copy-audit',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        context_type: input.contextType,
+        context_id: input.contextId,
+        template_version_id: input.templateVersionId ?? null,
+        subject: input.subject,
+        body: input.body,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '\u8bb0\u5f55\u6c9f\u901a\u7559\u75d5\u5931\u8d25',
   )
 }
 

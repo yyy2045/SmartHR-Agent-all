@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
@@ -379,4 +379,163 @@ describe('candidate interview scheduling flow', () => {
     expect(screen.queryByRole('button', { name: /改期/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /取消本轮/ })).not.toBeInTheDocument()
   })
+
+  it('recruiter previews and copies interview notification text with audit', async () => {
+    const communicationTitle = '\u751f\u6210\u9762\u8bd5\u901a\u77e5\u6587\u6848'
+    const generatePreviewText = '\u751f\u6210\u9884\u89c8'
+    const copyAndAuditText = '\u590d\u5236\u6587\u6848\u5e76\u7559\u75d5'
+    const copySuccessText = '\u9762\u8bd5\u901a\u77e5\u6587\u6848\u5df2\u590d\u5236\u5e76\u8bb0\u5f55\u7559\u75d5'
+    const schedule: InterviewScheduleRecord = {
+      id: 'schedule-1',
+      document_id: 'document-1',
+      candidate_code: 'CAND-0001',
+      plan_version_id: 'plan-1',
+      plan_version_number: 1,
+      status: 'scheduled',
+      created_by_id: user.id,
+      created_at: timestamp,
+      updated_at: timestamp,
+      rounds: [
+        roundFromInput(
+          {
+            plan_round_id: 'plan-round-1',
+            scheduled_start_at: timestamp,
+            interview_method: 'online',
+            location: null,
+            meeting_url: 'https://meeting.example.com/room',
+          },
+          0,
+        ),
+      ],
+    }
+    const previewSubject = 'Candidate CAND-0001 technical interview invitation'
+    const previewBody = 'Please join the interview at https://meeting.example.com/room'
+    const copyText = vi.fn().mockResolvedValue(undefined)
+    const copyAuditPayloads: Array<Record<string, unknown>> = []
+    vi.stubGlobal('navigator', { ...window.navigator, clipboard: { writeText: copyText } })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      if (path === '/api/auth/me') return jsonResponse(user)
+      if (path === '/api/health/live') return jsonResponse({ status: 'ok' })
+      if (path === '/api/jobs/job-1') return jsonResponse(job())
+      if (path === '/api/jobs/job-1/candidate-processes') return jsonResponse([candidate])
+      if (path === '/api/jobs/job-1/interview-plans/versions') return jsonResponse([plan])
+      if (path === '/api/jobs/job-1/applications/application-1/interview-schedule') {
+        return jsonResponse(schedule)
+      }
+      if (
+        path === '/api/message-templates?status=active&template_type=interview_invitation&limit=20&offset=0'
+      ) {
+        return jsonResponse({
+          items: [
+            {
+              id: 'template-1',
+              system_key: 'default_interview_invitation',
+              template_type: 'interview_invitation',
+              name: 'Interview invitation',
+              status: 'active',
+              current_version_number: 1,
+              resource_version: 1,
+              current_subject: '{{candidate_code}} interview invitation',
+              updated_at: timestamp,
+              allowed_actions: [],
+            },
+          ],
+          total: 1,
+          limit: 20,
+          offset: 0,
+        })
+      }
+      if (path === '/api/message-templates/template-1') {
+        return jsonResponse({
+          id: 'template-1',
+          system_key: 'default_interview_invitation',
+          template_type: 'interview_invitation',
+          name: 'Interview invitation',
+          status: 'active',
+          current_version_number: 1,
+          resource_version: 1,
+          current_subject: '{{candidate_code}} interview invitation',
+          updated_at: timestamp,
+          created_by_id: null,
+          created_by_username: 'system',
+          created_by_display_name: 'system',
+          created_at: timestamp,
+          current_version: {
+            id: 'template-version-1',
+            version_number: 1,
+            source_version_id: null,
+            subject: '{{candidate_code}} interview invitation',
+            body: 'Please join {{meeting_url}}',
+            variables: ['candidate_code', 'meeting_url'],
+            created_by_id: null,
+            created_by_username: 'system',
+            created_by_display_name: 'system',
+            created_at: timestamp,
+          },
+          versions: [],
+        })
+      }
+      if (path === '/api/communications/preview' && method === 'POST') {
+        return jsonResponse({
+          template_id: 'template-1',
+          template_version_id: 'template-version-1',
+          template_type: 'interview_invitation',
+          context_type: 'interview_round',
+          context_id: 'schedule-round-1',
+          subject: previewSubject,
+          body: previewBody,
+          variables_used: ['candidate_code', 'meeting_url'],
+          resolved_variables: {
+            candidate_code: 'CAND-0001',
+            meeting_url: 'https://meeting.example.com/room',
+          },
+          missing_optional_variables: [],
+        })
+      }
+      if (path === '/api/communications/copy-audit' && method === 'POST') {
+        copyAuditPayloads.push(JSON.parse(init?.body as string) as Record<string, unknown>)
+        return jsonResponse({
+          audit_id: 'audit-1',
+          context_type: 'interview_round',
+          context_id: 'schedule-round-1',
+          template_version_id: 'template-version-1',
+          copied_at: timestamp,
+        })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.replaceState(
+      {},
+      '',
+      '/jobs/job-1/applications/application-1/interview-schedule',
+    )
+    renderApp()
+
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(communicationTitle) }))
+    const dialog = await screen.findByRole('dialog')
+    const generateButton = within(dialog).getByRole('button', { name: generatePreviewText })
+    await waitFor(() => expect(generateButton).not.toBeDisabled())
+    fireEvent.click(generateButton)
+
+    expect(await within(dialog).findByDisplayValue(previewSubject)).toBeInTheDocument()
+    expect(await within(dialog).findByText(previewBody)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: new RegExp(copyAndAuditText) }))
+
+    await waitFor(() => {
+      expect(copyText).toHaveBeenCalledWith(`${previewSubject}\n\n${previewBody}`)
+      expect(copyAuditPayloads[0]).toMatchObject({
+        context_type: 'interview_round',
+        context_id: 'schedule-round-1',
+        template_version_id: 'template-version-1',
+        subject: previewSubject,
+        body: previewBody,
+      })
+      expect(copyAuditPayloads[0].idempotency_key).toEqual(expect.any(String))
+    })
+    expect(await screen.findByText(copySuccessText)).toBeInTheDocument()
+  })
+
 })

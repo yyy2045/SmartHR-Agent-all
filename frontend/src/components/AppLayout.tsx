@@ -10,6 +10,7 @@ import {
   FileSearchOutlined,
   FileDoneOutlined,
   LogoutOutlined,
+  MailOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
@@ -20,11 +21,11 @@ import {
   UserOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Layout, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Badge, Button, Layout, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import { useState, type ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
-import { fetchJob, fetchJobs, fetchLiveHealth } from '../api/client'
+import { fetchInternalNotificationUnreadCount, fetchJob, fetchJobs, fetchLiveHealth } from '../api/client'
 import { useAuth } from '../auth/context'
 import {
   businessModuleForPath,
@@ -66,6 +67,15 @@ function pageMeta(pathname: string) {
   }
   if (pathname.startsWith('/analytics')) {
     return { title: '数据分析', subtitle: '追踪招聘转化、效率与决策质量' }
+  }
+  if (pathname.startsWith('/notifications')) {
+    return { title: '消息中心', subtitle: '查看招聘流程提醒并快速回到对应业务页面' }
+  }
+  if (pathname.startsWith('/message-templates')) {
+    return { title: '沟通模板', subtitle: '维护面试、Offer 和入职沟通文案及版本历史' }
+  }
+  if (pathname.startsWith('/communications')) {
+    return { title: '沟通留痕', subtitle: '查询候选人沟通记录、正文快照和更正历史' }
   }
   if (pathname === '/jobs/new') {
     return { title: '新建职位', subtitle: '录入职位信息并建立筛选标准' }
@@ -134,6 +144,12 @@ export function AppLayout() {
     ['administrator', 'recruiter'].includes(role),
   )
   const canAccessTalentPool = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
+  )
+  const canAccessMessageTemplates = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter'].includes(role),
+  )
+  const canAccessCommunications = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
   )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
@@ -223,11 +239,38 @@ export function AppLayout() {
           },
         ]
       : []),
+    ...(canAccessMessageTemplates
+      ? [
+          {
+            key: 'message-templates' as const,
+            label: '沟通模板',
+            icon: <BellOutlined />,
+            path: '/message-templates',
+          },
+        ]
+      : []),
+    ...(canAccessCommunications
+      ? [
+          {
+            key: 'communications' as const,
+            label: '沟通留痕',
+            icon: <MailOutlined />,
+            path: '/communications',
+          },
+        ]
+      : []),
   ]
   const health = useQuery({
     queryKey: ['health', 'live'],
     queryFn: fetchLiveHealth,
     staleTime: 30_000,
+  })
+  const notificationUnreadCount = useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: fetchInternalNotificationUnreadCount,
+    enabled: Boolean(auth.user),
+    staleTime: 15_000,
+    refetchInterval: 60_000,
   })
   const jobs = useQuery({
     queryKey: ['jobs', { includeArchived: true }],
@@ -403,8 +446,14 @@ export function AppLayout() {
                 发布职位
               </Button>
             )}
-            <Tooltip title="消息中心将在后续功能开放">
-              <Button aria-label="消息中心" icon={<BellOutlined />} disabled />
+            <Tooltip title="消息中心">
+              <Badge count={notificationUnreadCount.data?.unread_count ?? 0} size="small">
+                <Button
+                  aria-label="消息中心"
+                  icon={<BellOutlined />}
+                  onClick={() => navigate('/notifications')}
+                />
+              </Badge>
             </Tooltip>
             <div className="account-label">
               <span className="account-avatar" aria-hidden="true">

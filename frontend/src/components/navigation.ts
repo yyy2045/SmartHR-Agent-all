@@ -8,6 +8,8 @@ export type BusinessModule =
   | 'interviews'
   | 'hiring'
   | 'talent'
+  | 'message-templates'
+  | 'communications'
   | 'analytics'
   | 'settings'
 
@@ -16,6 +18,8 @@ export function businessModuleForPath(pathname: string): BusinessModule {
   if (pathname.startsWith('/recruitment-requests')) return 'requests'
   if (pathname.startsWith('/candidates')) return 'candidates'
   if (pathname.startsWith('/talent')) return 'talent'
+  if (pathname.startsWith('/message-templates')) return 'message-templates'
+  if (pathname.startsWith('/communications')) return 'communications'
   if (pathname.startsWith('/offers')) return 'hiring'
   if (pathname.startsWith('/onboardings')) return 'hiring'
   if (pathname.startsWith('/analytics')) return 'analytics'

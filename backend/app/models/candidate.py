@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from app.models.interview import CandidateInterviewSchedule
     from app.models.interview_report import InterviewReport
     from app.models.job import Job
+    from app.models.message import CommunicationRecord
     from app.models.offer import Offer
     from app.models.onboarding import Onboarding
     from app.models.resume import ResumeDocument, ScreeningResult
@@ -270,6 +271,11 @@ class JobApplication(Base):
         cascade="all, delete-orphan",
         foreign_keys="ScreeningResult.application_id",
         order_by="ScreeningResult.created_at",
+        passive_deletes=True,
+    )
+    communication_records: Mapped[list[CommunicationRecord]] = relationship(
+        back_populates="application",
+        order_by="CommunicationRecord.sent_at",
         passive_deletes=True,
     )
 

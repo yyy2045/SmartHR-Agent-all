@@ -357,4 +357,137 @@ describe('onboarding management flow', () => {
     expect(screen.getByText(/只有管理员可以继续处理/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /标记已入职/ })).toBeInTheDocument()
   })
+
+  it('recruiter previews and copies onboarding reminder text with audit', async () => {
+    const communicationTitle = '\u751f\u6210\u5165\u804c\u63d0\u9192\u6587\u6848'
+    const generatePreviewText = '\u751f\u6210\u9884\u89c8'
+    const copyAndAuditText = '\u590d\u5236\u6587\u6848\u5e76\u7559\u75d5'
+    const copySuccessText = '\u5165\u804c\u63d0\u9192\u6587\u6848\u5df2\u590d\u5236\u5e76\u8bb0\u5f55\u7559\u75d5'
+    const currentSummary = summary({ status: 'pending_start', action_owner: 'none' })
+    const currentDetail = detail({
+      ...currentSummary,
+      confirmed_start_date: '2026-09-08',
+    })
+    const previewSubject = 'Candidate A onboarding reminder'
+    const previewBody = 'Please arrive on 2026-09-08 and contact recruiter.'
+    const copyText = vi.fn().mockResolvedValue(undefined)
+    const copyAuditPayloads: Array<Record<string, unknown>> = []
+    vi.stubGlobal('navigator', { ...window.navigator, clipboard: { writeText: copyText } })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      const common = commonResponse(path, users.recruiter, currentSummary)
+      if (common) return common
+      if (path === '/api/onboardings/onboarding-1') return jsonResponse(currentDetail)
+      if (path === '/api/offers/offer-1/portal-links') return jsonResponse([])
+      if (
+        path === '/api/message-templates?status=active&template_type=onboarding_date_confirmation&limit=20&offset=0'
+      ) {
+        return jsonResponse({
+          items: [
+            {
+              id: 'template-1',
+              system_key: 'default_onboarding_reminder',
+              template_type: 'onboarding_date_confirmation',
+              name: 'Onboarding reminder',
+              status: 'active',
+              current_version_number: 1,
+              resource_version: 1,
+              current_subject: '{{candidate_name}} onboarding reminder',
+              updated_at: timestamp,
+              allowed_actions: [],
+            },
+          ],
+          total: 1,
+          limit: 20,
+          offset: 0,
+        })
+      }
+      if (path === '/api/message-templates/template-1') {
+        return jsonResponse({
+          id: 'template-1',
+          system_key: 'default_onboarding_reminder',
+          template_type: 'onboarding_date_confirmation',
+          name: 'Onboarding reminder',
+          status: 'active',
+          current_version_number: 1,
+          resource_version: 1,
+          current_subject: '{{candidate_name}} onboarding reminder',
+          updated_at: timestamp,
+          created_by_id: null,
+          created_by_username: 'system',
+          created_by_display_name: 'system',
+          created_at: timestamp,
+          current_version: {
+            id: 'template-version-1',
+            version_number: 1,
+            source_version_id: null,
+            subject: '{{candidate_name}} onboarding reminder',
+            body: 'Please arrive on {{confirmed_start_date}}.',
+            variables: ['candidate_name', 'confirmed_start_date'],
+            created_by_id: null,
+            created_by_username: 'system',
+            created_by_display_name: 'system',
+            created_at: timestamp,
+          },
+          versions: [],
+        })
+      }
+      if (path === '/api/communications/preview' && method === 'POST') {
+        return jsonResponse({
+          template_id: 'template-1',
+          template_version_id: 'template-version-1',
+          template_type: 'onboarding_date_confirmation',
+          context_type: 'onboarding',
+          context_id: 'onboarding-1',
+          subject: previewSubject,
+          body: previewBody,
+          variables_used: ['candidate_name', 'confirmed_start_date'],
+          resolved_variables: {
+            candidate_name: 'Candidate A',
+            confirmed_start_date: '2026-09-08',
+          },
+          missing_optional_variables: [],
+        })
+      }
+      if (path === '/api/communications/copy-audit' && method === 'POST') {
+        copyAuditPayloads.push(JSON.parse(init?.body as string) as Record<string, unknown>)
+        return jsonResponse({
+          audit_id: 'audit-1',
+          context_type: 'onboarding',
+          context_id: 'onboarding-1',
+          template_version_id: 'template-version-1',
+          copied_at: timestamp,
+        })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderApp()
+
+    await openDetail()
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(communicationTitle) }))
+    const dialog = await findModalByTitle(communicationTitle)
+    const generateButton = within(dialog).getByRole('button', { name: generatePreviewText })
+    await waitFor(() => expect(generateButton).not.toBeDisabled())
+    fireEvent.click(generateButton)
+
+    expect(await within(dialog).findByDisplayValue(previewSubject)).toBeInTheDocument()
+    expect(await within(dialog).findByText(previewBody)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: new RegExp(copyAndAuditText) }))
+
+    await waitFor(() => {
+      expect(copyText).toHaveBeenCalledWith(`${previewSubject}\n\n${previewBody}`)
+      expect(copyAuditPayloads[0]).toMatchObject({
+        context_type: 'onboarding',
+        context_id: 'onboarding-1',
+        template_version_id: 'template-version-1',
+        subject: previewSubject,
+        body: previewBody,
+      })
+      expect(copyAuditPayloads[0].idempotency_key).toEqual(expect.any(String))
+    })
+    expect(await screen.findByText(copySuccessText)).toBeInTheDocument()
+  })
+
 })

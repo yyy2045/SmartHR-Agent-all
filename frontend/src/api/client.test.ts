@@ -3,10 +3,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   AUTH_UNAUTHORIZED_EVENT,
+  activateMessageTemplate,
   createOfferPortalLink,
+  createMessageTemplate,
+  createMessageTemplateVersion,
   createScreeningBatch,
+  deactivateMessageTemplate,
   fetchOfferPortalStatus,
   fetchCurrentUser,
+  fetchCommunicationRecord,
+  fetchCommunicationRecords,
+  fetchInternalNotificationUnreadCount,
+  fetchMessageTemplate,
+  fetchMessageTemplates,
+  fetchInternalNotifications,
   fetchJobs,
   fetchLiveHealth,
   fetchWorkbenchItems,
@@ -15,6 +25,10 @@ import {
   generateJDAIDraft,
   login,
   logout,
+  markAllInternalNotificationsRead,
+  markInternalNotificationRead,
+  previewCommunication,
+  recordCommunicationCopyAudit,
   respondToOfferPortal,
   retryResumeParsing,
   updateCandidatePhone,
@@ -142,6 +156,180 @@ describe('API client', () => {
     expect(fetchMock.mock.calls[1][0]).toBe(
       '/api/workbench/items?section=action_required&item_type=offer_approval&priority=high&job_id=job-1&page=2&page_size=6',
     )
+  })
+  it('按消息中心筛选契约生成查询和已读请求', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ items: [], total: 0, unread_count: 0, limit: 10, offset: 10 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchInternalNotifications({
+      status: 'unread',
+      notificationType: 'offer_approved',
+      limit: 10,
+      offset: 10,
+    })
+    await fetchInternalNotificationUnreadCount()
+    await markInternalNotificationRead('notification-1')
+    await markAllInternalNotificationsRead()
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/notifications?status=unread&notification_type=offer_approved&limit=10&offset=10',
+    )
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/notifications/unread-count')
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/notifications/notification-1/read')
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/notifications/read-all')
+    expect(fetchMock.mock.calls[3][1]).toMatchObject({ method: 'POST' })
+  })
+
+  it('builds message template and communication requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ items: [], total: 0, limit: 20, offset: 0 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchMessageTemplates({
+      status: 'active',
+      templateType: 'offer_notification',
+      limit: 20,
+      offset: 0,
+    })
+    await fetchMessageTemplate('template-1')
+    await previewCommunication({
+      templateVersionId: 'template-version-1',
+      contextType: 'offer',
+      contextId: 'offer-1',
+    })
+    await recordCommunicationCopyAudit({
+      contextType: 'offer',
+      contextId: 'offer-1',
+      templateVersionId: 'template-version-1',
+      subject: 'Offer notice',
+      body: 'Offer body',
+      idempotencyKey: 'copy-key-1',
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/message-templates?status=active&template_type=offer_notification&limit=20&offset=0',
+    )
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/message-templates/template-1')
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/communications/preview')
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
+      template_version_id: 'template-version-1',
+      context_type: 'offer',
+      context_id: 'offer-1',
+      subject_override: null,
+      body_override: null,
+    })
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/communications/copy-audit')
+    expect(fetchMock.mock.calls[3][1]).toMatchObject({ method: 'POST' })
+    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
+      context_type: 'offer',
+      context_id: 'offer-1',
+      template_version_id: 'template-version-1',
+      subject: 'Offer notice',
+      body: 'Offer body',
+      idempotency_key: 'copy-key-1',
+    })
+  })
+
+  it('builds message template management requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ id: 'template-1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createMessageTemplate({
+      templateType: 'interview_invitation',
+      name: '默认面试通知',
+      subject: '面试通知',
+      body: '你好 {{candidate_name}}',
+      variables: ['candidate_name'],
+      idempotencyKey: 'create-key-1',
+    })
+    await createMessageTemplateVersion('template-1', {
+      expectedVersion: 3,
+      subject: '新版面试通知',
+      body: '新版正文',
+      variables: ['candidate_name', 'interview_time'],
+      idempotencyKey: 'version-key-1',
+    })
+    await deactivateMessageTemplate('template-1', {
+      expectedVersion: 4,
+      idempotencyKey: 'deactivate-key-1',
+    })
+    await activateMessageTemplate('template-1', {
+      expectedVersion: 5,
+      idempotencyKey: 'activate-key-1',
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/message-templates')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      template_type: 'interview_invitation',
+      name: '默认面试通知',
+      subject: '面试通知',
+      body: '你好 {{candidate_name}}',
+      variables: ['candidate_name'],
+      idempotency_key: 'create-key-1',
+    })
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/message-templates/template-1/versions')
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+      expected_version: 3,
+      subject: '新版面试通知',
+      body: '新版正文',
+      variables: ['candidate_name', 'interview_time'],
+      idempotency_key: 'version-key-1',
+    })
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/message-templates/template-1/deactivate')
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
+      expected_version: 4,
+      idempotency_key: 'deactivate-key-1',
+    })
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/message-templates/template-1/activate')
+    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
+      expected_version: 5,
+      idempotency_key: 'activate-key-1',
+    })
+  })
+
+  it('builds communication record query requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ items: [], total: 0, limit: 20, offset: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchCommunicationRecords({
+      contextType: 'offer',
+      contextId: 'offer-1',
+      applicationId: 'application-1',
+      limit: 20,
+      offset: 40,
+    })
+    await fetchCommunicationRecord('record-1')
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/communications?context_type=offer&context_id=offer-1&application_id=application-1&limit=20&offset=40',
+    )
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/communications/record-1')
   })
 
   it('使用浏览器生成的 multipart 边界上传简历批次', async () => {

@@ -376,6 +376,155 @@ describe('Offer management flow', () => {
     expect(screen.getByRole('button', { name: /撤回链接/ })).toBeInTheDocument()
   })
 
+  it('recruiter previews and copies offer notification text with audit', async () => {
+    const offerCommunicationTitle = '\u751f\u6210 Offer \u901a\u77e5\u6587\u6848'
+    const generatePreviewText = '\u751f\u6210\u9884\u89c8'
+    const copyAndAuditText = '\u590d\u5236\u6587\u6848\u5e76\u7559\u75d5'
+    const copySuccessText = 'Offer \u901a\u77e5\u6587\u6848\u5df2\u590d\u5236\u5e76\u8bb0\u5f55\u7559\u75d5'
+    const approvedVersion = {
+      ...version(),
+      approval: {
+        id: 'approval-1',
+        idempotency_key: 'approval-key',
+        approver_id: users.approver.id,
+        approver_username: users.approver.username,
+        approver_display_name: users.approver.display_name,
+        decision: 'approved' as const,
+        comment: 'approved',
+        decided_at: timestamp,
+      },
+    }
+    const saved = offerRecord('approved', approvedVersion)
+    const previewSubject = 'Candidate A - Senior Backend Engineer Offer notice'
+    const previewBody = 'Candidate A, please review your offer.\n\nPortal: [candidate portal link hidden]'
+    const copyText = vi.fn().mockResolvedValue(undefined)
+    const copyAuditPayloads: Array<Record<string, unknown>> = []
+    vi.stubGlobal('navigator', { ...window.navigator, clipboard: { writeText: copyText } })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = input.toString()
+      const method = init?.method ?? 'GET'
+      const common = commonResponse(path, users.recruiter, [saved])
+      if (common) return common
+      if (path === '/api/offers/offer-1') return jsonResponse(saved)
+      if (path === '/api/offers/offer-1/portal-links') return jsonResponse([])
+      if (
+        path === '/api/message-templates?status=active&template_type=offer_notification&limit=20&offset=0'
+      ) {
+        return jsonResponse({
+          items: [
+            {
+              id: 'template-1',
+              system_key: 'default_offer_notification',
+              template_type: 'offer_notification',
+              name: 'Offer notice',
+              status: 'active',
+              current_version_number: 1,
+              resource_version: 1,
+              current_subject: '{{candidate_name}} - {{job_title}} Offer notice',
+              updated_at: timestamp,
+              allowed_actions: [],
+            },
+          ],
+          total: 1,
+          limit: 20,
+          offset: 0,
+        })
+      }
+      if (path === '/api/message-templates/template-1') {
+        return jsonResponse({
+          id: 'template-1',
+          system_key: 'default_offer_notification',
+          template_type: 'offer_notification',
+          name: 'Offer notice',
+          status: 'active',
+          current_version_number: 1,
+          resource_version: 1,
+          current_subject: '{{candidate_name}} - {{job_title}} Offer notice',
+          updated_at: timestamp,
+          created_by_id: null,
+          created_by_username: 'system',
+          created_by_display_name: 'system',
+          created_at: timestamp,
+          current_version: {
+            id: 'template-version-1',
+            version_number: 1,
+            source_version_id: null,
+            subject: '{{candidate_name}} - {{job_title}} Offer notice',
+            body: 'Please review your offer. {{offer_portal_link}}',
+            variables: ['candidate_name', 'job_title', 'offer_portal_link'],
+            created_by_id: null,
+            created_by_username: 'system',
+            created_by_display_name: 'system',
+            created_at: timestamp,
+          },
+          versions: [],
+        })
+      }
+      if (path === '/api/communications/preview' && method === 'POST') {
+        return jsonResponse({
+          template_id: 'template-1',
+          template_version_id: 'template-version-1',
+          template_type: 'offer_notification',
+          context_type: 'offer',
+          context_id: 'offer-1',
+          subject: previewSubject,
+          body: previewBody,
+          variables_used: ['candidate_name', 'job_title', 'offer_portal_link'],
+          resolved_variables: {
+            candidate_name: 'Candidate A',
+            job_title: 'Senior Backend Engineer',
+            offer_portal_link: '[candidate portal link hidden]',
+          },
+          missing_optional_variables: [],
+        })
+      }
+      if (path === '/api/communications/copy-audit' && method === 'POST') {
+        copyAuditPayloads.push(JSON.parse(init?.body as string) as Record<string, unknown>)
+        return jsonResponse({
+          audit_id: 'audit-1',
+          context_type: 'offer',
+          context_id: 'offer-1',
+          template_version_id: 'template-version-1',
+          copied_at: timestamp,
+        })
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderApp('/offers')
+
+    const viewOfferButton = await screen.findByRole('button', {
+      name: /\u67e5\u770b .* Offer$/,
+    })
+    fireEvent.click(viewOfferButton)
+    await screen.findByText(/\u5019\u9009\u4eba\u95e8\u6237/)
+    const communicationButtonLabel = await screen.findByText(offerCommunicationTitle)
+    const communicationButton = communicationButtonLabel.closest('button')
+    if (!communicationButton) throw new Error('offer communication button not found')
+    fireEvent.click(communicationButton)
+    const dialog = await findModalByTitle(offerCommunicationTitle)
+    const generateButton = within(dialog).getByRole('button', { name: generatePreviewText })
+    await waitFor(() => expect(generateButton).not.toBeDisabled())
+    fireEvent.click(generateButton)
+
+    expect(await within(dialog).findByDisplayValue(previewSubject)).toBeInTheDocument()
+    expect(await within(dialog).findByText(/candidate portal link hidden/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: new RegExp(copyAndAuditText) }))
+
+    await waitFor(() => {
+      expect(copyText).toHaveBeenCalledWith(`${previewSubject}\n\n${previewBody}`)
+      expect(copyAuditPayloads[0]).toMatchObject({
+        context_type: 'offer',
+        context_id: 'offer-1',
+        template_version_id: 'template-version-1',
+        subject: previewSubject,
+        body: previewBody,
+      })
+      expect(copyAuditPayloads[0].idempotency_key).toEqual(expect.any(String))
+    })
+    expect(await screen.findByText(copySuccessText)).toBeInTheDocument()
+  })
+
   it('招聘专员填写原因后重新生成并撤回候选人链接', async () => {
     const approvedVersion = {
       ...version(),

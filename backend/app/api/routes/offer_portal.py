@@ -52,6 +52,10 @@ from app.services.onboarding import (
     find_event_by_key,
     onboarding_action_owner,
 )
+from app.services.recruitment_notifications import (
+    notify_offer_candidate_responded,
+    notify_onboarding_event,
+)
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -404,6 +408,9 @@ def respond_to_offer(
                 "rejection_reason_code": payload.rejection_reason_code,
             },
         )
+        notify_offer_candidate_responded(db, offer, response)
+        if payload.decision == "accepted" and offer.onboarding is not None:
+            notify_onboarding_event(db, offer.onboarding, offer.onboarding.events[-1])
         db.commit()
     except IntegrityError as error:
         db.rollback()
@@ -519,6 +526,7 @@ def confirm_onboarding_date(
         actor_username="candidate_portal",
         details={"status": onboarding.status, "version": onboarding.version},
     )
+    notify_onboarding_event(db, onboarding, onboarding.events[-1])
     db.commit()
     db.expire_all()
     return _candidate_offer_view(_get_portal_link(db, payload.token))
@@ -560,6 +568,7 @@ def propose_onboarding_date(
         actor_username="candidate_portal",
         details={"status": onboarding.status, "version": onboarding.version},
     )
+    notify_onboarding_event(db, onboarding, onboarding.events[-1])
     db.commit()
     db.expire_all()
     return _candidate_offer_view(_get_portal_link(db, payload.token))
@@ -604,6 +613,7 @@ def abandon_portal_onboarding(
         actor_username="candidate_portal",
         details={"status": onboarding.status, "version": onboarding.version},
     )
+    notify_onboarding_event(db, onboarding, onboarding.events[-1])
     db.commit()
     db.expire_all()
     return _candidate_offer_view(_get_portal_link(db, payload.token))

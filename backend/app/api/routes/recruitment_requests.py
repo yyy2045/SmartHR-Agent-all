@@ -29,6 +29,10 @@ from app.schemas.recruitment_request import (
     RecruitmentRequestVersionCreate,
 )
 from app.services.audit import record_audit
+from app.services.recruitment_notifications import (
+    notify_recruitment_request_decided,
+    notify_recruitment_request_submitted,
+)
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -514,6 +518,7 @@ def submit_recruitment_request(
             "version_number": current_version.version_number,
         },
     )
+    notify_recruitment_request_submitted(db, request)
     db.commit()
     return _reload_request(db, request.id, current_user)
 
@@ -574,5 +579,6 @@ def decide_recruitment_request(
             "comment": payload.comment,
         },
     )
+    notify_recruitment_request_decided(db, request, decision=payload.decision)
     db.commit()
     return _reload_request(db, request.id, current_user)
