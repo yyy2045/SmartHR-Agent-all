@@ -124,6 +124,48 @@ export interface WorkbenchFilters {
   page?: number
   pageSize?: number
 }
+export type InternalNotificationReadStatus = 'all' | 'unread' | 'read'
+
+export interface InternalNotificationRecord {
+  id: string
+  notification_type: string
+  title: string
+  summary: string
+  resource_type: string
+  resource_id: string
+  route_path: string
+  read_at: string | null
+  created_at: string
+}
+
+export interface InternalNotificationListRecord {
+  items: InternalNotificationRecord[]
+  total: number
+  unread_count: number
+  limit: number
+  offset: number
+}
+
+export interface InternalNotificationFilters {
+  status?: InternalNotificationReadStatus
+  notificationType?: string
+  limit?: number
+  offset?: number
+}
+
+export interface InternalNotificationUnreadCountRecord {
+  unread_count: number
+}
+
+export interface InternalNotificationReadRecord {
+  id: string
+  read_at: string
+}
+
+export interface InternalNotificationReadAllRecord {
+  updated_count: number
+  read_at: string
+}
 
 export type AnalyticsInterval = 'day' | 'week'
 export type AnalyticsFunnelStage =
@@ -1862,6 +1904,39 @@ export function fetchWorkbenchItems(
   if (filters.pageSize !== undefined) query.set('page_size', String(filters.pageSize))
   const suffix = query.size ? `?${query.toString()}` : ''
   return apiRequest(`/api/workbench/items${suffix}`, {}, '无法读取工作台待办')
+}
+export function fetchInternalNotifications(
+  filters: InternalNotificationFilters = {},
+): Promise<InternalNotificationListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status && filters.status !== 'all') query.set('status', filters.status)
+  if (filters.notificationType) query.set('notification_type', filters.notificationType)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/notifications${suffix}`, {}, '无法读取站内通知')
+}
+
+export function fetchInternalNotificationUnreadCount(): Promise<InternalNotificationUnreadCountRecord> {
+  return apiRequest('/api/notifications/unread-count', {}, '无法读取未读通知数量')
+}
+
+export function markInternalNotificationRead(
+  notificationId: string,
+): Promise<InternalNotificationReadRecord> {
+  return apiRequest(
+    `/api/notifications/${notificationId}/read`,
+    { method: 'POST' },
+    '标记通知已读失败',
+  )
+}
+
+export function markAllInternalNotificationsRead(): Promise<InternalNotificationReadAllRecord> {
+  return apiRequest(
+    '/api/notifications/read-all',
+    { method: 'POST' },
+    '全部标记已读失败',
+  )
 }
 
 export function fetchAnalyticsDashboard(

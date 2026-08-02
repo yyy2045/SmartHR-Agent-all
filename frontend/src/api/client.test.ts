@@ -7,6 +7,8 @@ import {
   createScreeningBatch,
   fetchOfferPortalStatus,
   fetchCurrentUser,
+  fetchInternalNotificationUnreadCount,
+  fetchInternalNotifications,
   fetchJobs,
   fetchLiveHealth,
   fetchWorkbenchItems,
@@ -15,6 +17,8 @@ import {
   generateJDAIDraft,
   login,
   logout,
+  markAllInternalNotificationsRead,
+  markInternalNotificationRead,
   respondToOfferPortal,
   retryResumeParsing,
   updateCandidatePhone,
@@ -142,6 +146,36 @@ describe('API client', () => {
     expect(fetchMock.mock.calls[1][0]).toBe(
       '/api/workbench/items?section=action_required&item_type=offer_approval&priority=high&job_id=job-1&page=2&page_size=6',
     )
+  })
+  it('按消息中心筛选契约生成查询和已读请求', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ items: [], total: 0, unread_count: 0, limit: 10, offset: 10 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchInternalNotifications({
+      status: 'unread',
+      notificationType: 'offer_approved',
+      limit: 10,
+      offset: 10,
+    })
+    await fetchInternalNotificationUnreadCount()
+    await markInternalNotificationRead('notification-1')
+    await markAllInternalNotificationsRead()
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/notifications?status=unread&notification_type=offer_approved&limit=10&offset=10',
+    )
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/notifications/unread-count')
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/notifications/notification-1/read')
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/notifications/read-all')
+    expect(fetchMock.mock.calls[3][1]).toMatchObject({ method: 'POST' })
   })
 
   it('使用浏览器生成的 multipart 边界上传简历批次', async () => {
