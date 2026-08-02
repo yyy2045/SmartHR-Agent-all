@@ -4788,3 +4788,24 @@ input {
     grid-template-columns: 1fr;
   }
 }
+
+.interview-communication-panel {
+  width: 100%;
+}
+
+.interview-communication-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.interview-communication-preview {
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .interview-communication-controls {
+    grid-template-columns: 1fr;
+  }
+}

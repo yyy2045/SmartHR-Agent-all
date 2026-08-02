@@ -2,10 +2,12 @@ import {
   ArrowLeftOutlined,
   CalendarOutlined,
   CloseCircleOutlined,
+  CopyOutlined,
   EnvironmentOutlined,
   FileDoneOutlined,
   LinkOutlined,
   ReloadOutlined,
+  SendOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -31,17 +33,44 @@ import {
   createCandidateInterviewSchedule,
   fetchCandidateInterviewSchedule,
   fetchCandidateProcesses,
+  fetchMessageTemplate,
+  fetchMessageTemplates,
   fetchInterviewPlanVersions,
   fetchJob,
+  previewCommunication,
+  recordCommunicationCopyAudit,
   rescheduleCandidateInterviewRound,
+  type CommunicationPreviewRecord,
   type InterviewMethod,
   type InterviewRound,
   type InterviewScheduleRoundRecord,
+  type MessageTemplateSummaryRecord,
 } from '../api/client'
 import { useAuth } from '../auth/context'
 import { canManageRecruitment } from '../auth/permissions'
 
 const { Title, Text, Paragraph } = Typography
+
+const interviewCommunicationText = {
+  title: '\u751f\u6210\u9762\u8bd5\u901a\u77e5\u6587\u6848',
+  safetyMessage:
+    '\u7cfb\u7edf\u53ea\u751f\u6210\u53ef\u590d\u5236\u6587\u6848\uff0c\u4e0d\u8fde\u63a5\u817e\u8baf\u4f1a\u8bae\u6216\u5916\u90e8\u53d1\u9001\u6e20\u9053',
+  safetyDescription:
+    '\u817e\u8baf\u4f1a\u8bae\u94fe\u63a5\u3001\u4f1a\u8bae\u53f7\u6216\u7ebf\u4e0b\u9762\u8bd5\u5730\u5740\u6765\u81ea\u5f53\u524d\u9762\u8bd5\u5b89\u6392\uff1b\u590d\u5236\u540e\u7531\u62db\u8058\u4e13\u5458\u901a\u8fc7\u5916\u90e8\u5de5\u5177\u53d1\u9001\u3002',
+  templateLoadError: '\u65e0\u6cd5\u8bfb\u53d6\u6c9f\u901a\u6a21\u677f',
+  templateDetailLoadError: '\u65e0\u6cd5\u8bfb\u53d6\u6a21\u677f\u8be6\u60c5',
+  previewError: '\u751f\u6210\u9762\u8bd5\u901a\u77e5\u6587\u6848\u5931\u8d25',
+  copyUnsupported: '\u5f53\u524d\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u526a\u8d34\u677f',
+  copySuccess: '\u9762\u8bd5\u901a\u77e5\u6587\u6848\u5df2\u590d\u5236\u5e76\u8bb0\u5f55\u7559\u75d5',
+  copyError: '\u590d\u5236\u5e76\u7559\u75d5\u5931\u8d25',
+  retryLater: '\u8bf7\u7a0d\u540e\u91cd\u8bd5',
+  selectTemplate: '\u9009\u62e9\u9762\u8bd5\u901a\u77e5\u6a21\u677f',
+  generatePreview: '\u751f\u6210\u9884\u89c8',
+  subjectLabel: '\u9762\u8bd5\u901a\u77e5\u6807\u9898',
+  bodyLabel: '\u9762\u8bd5\u901a\u77e5\u6b63\u6587',
+  copyAndAudit: '\u590d\u5236\u6587\u6848\u5e76\u7559\u75d5',
+  templateVersion: '\u6a21\u677f',
+}
 
 interface RoundDraft {
   planRoundId: string
@@ -135,6 +164,11 @@ export function InterviewSchedulePage() {
   const [editReason, setEditReason] = useState('')
   const [cancellingRound, setCancellingRound] = useState<InterviewScheduleRoundRecord>()
   const [cancelReason, setCancelReason] = useState('')
+  const [communicationOpen, setCommunicationOpen] = useState(false)
+  const [communicationRound, setCommunicationRound] = useState<InterviewScheduleRoundRecord>()
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>()
+  const [communicationDraft, setCommunicationDraft] = useState<CommunicationPreviewRecord>()
+  const [communicationCopyKey, setCommunicationCopyKey] = useState(() => crypto.randomUUID())
 
   const job = useQuery({
     queryKey: ['job', jobId],
@@ -157,6 +191,23 @@ export function InterviewSchedulePage() {
     enabled: Boolean(jobId && applicationId),
   })
 
+  const interviewMessageTemplates = useQuery({
+    queryKey: ['message-templates', { templateType: 'interview_invitation' }],
+    queryFn: () =>
+      fetchMessageTemplates({
+        status: 'active',
+        templateType: 'interview_invitation',
+        limit: 20,
+        offset: 0,
+      }),
+    enabled: communicationOpen,
+  })
+  const selectedTemplate = useQuery({
+    queryKey: ['message-template', selectedTemplateId],
+    queryFn: () => fetchMessageTemplate(selectedTemplateId!),
+    enabled: communicationOpen && Boolean(selectedTemplateId),
+  })
+
   const candidate = candidates.data?.find((item) => item.application_id === applicationId)
   const confirmedPlans = useMemo(
     () => plans.data?.filter((item) => item.status === 'confirmed') ?? [],
@@ -176,6 +227,12 @@ export function InterviewSchedulePage() {
   useEffect(() => {
     if (selectedPlan && !schedule.data) setDrafts(createDrafts(selectedPlan.rounds))
   }, [schedule.data, selectedPlan])
+
+  useEffect(() => {
+    if (!communicationOpen || selectedTemplateId) return
+    const firstTemplate = interviewMessageTemplates.data?.items[0]
+    if (firstTemplate) setSelectedTemplateId(firstTemplate.id)
+  }, [communicationOpen, interviewMessageTemplates.data?.items, selectedTemplateId])
 
   const createMutation = useMutation({
     mutationFn: () => {
@@ -262,10 +319,59 @@ export function InterviewSchedulePage() {
     },
   })
 
+  const communicationPreviewMutation = useMutation({
+    mutationFn: ({ templateVersionId, roundId }: { templateVersionId: string; roundId: string }) =>
+      previewCommunication({
+        templateVersionId,
+        contextType: 'interview_round',
+        contextId: roundId,
+      }),
+    onSuccess: (draft) => setCommunicationDraft(draft),
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : interviewCommunicationText.previewError),
+  })
+  const communicationCopyMutation = useMutation({
+    mutationFn: async (draft: CommunicationPreviewRecord) => {
+      if (!navigator.clipboard) throw new Error(interviewCommunicationText.copyUnsupported)
+      await navigator.clipboard.writeText(`${draft.subject}
+
+${draft.body}`)
+      return recordCommunicationCopyAudit({
+        contextType: 'interview_round',
+        contextId: draft.context_id,
+        templateVersionId: draft.template_version_id,
+        subject: draft.subject,
+        body: draft.body,
+        idempotencyKey: communicationCopyKey,
+      })
+    },
+    onSuccess: () => {
+      setCommunicationCopyKey(crypto.randomUUID())
+      void messageApi.success(interviewCommunicationText.copySuccess)
+    },
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : interviewCommunicationText.copyError),
+  })
+
   function updateDraft(index: number, changes: Partial<RoundDraft>) {
     setDrafts((current) =>
       current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...changes } : item)),
     )
+  }
+
+  function openInterviewCommunication(round: InterviewScheduleRoundRecord) {
+    setCommunicationRound(round)
+    setCommunicationDraft(undefined)
+    setCommunicationCopyKey(crypto.randomUUID())
+    setCommunicationOpen(true)
+  }
+
+  function generateInterviewCommunication() {
+    if (!communicationRound || !selectedTemplate.data?.current_version.id) return
+    communicationPreviewMutation.mutate({
+      templateVersionId: selectedTemplate.data.current_version.id,
+      roundId: communicationRound.id,
+    })
   }
 
   function openReschedule(round: InterviewScheduleRoundRecord) {
@@ -281,6 +387,13 @@ export function InterviewSchedulePage() {
   }
 
   const loading = job.isPending || candidates.isPending || plans.isPending || schedule.isPending
+
+  const messageTemplateOptions = (interviewMessageTemplates.data?.items ?? []).map(
+    (template: MessageTemplateSummaryRecord) => ({
+      value: template.id,
+      label: `${template.name} \u00b7 V${template.current_version_number}`,
+    }),
+  )
 
   return (
     <>
@@ -519,6 +632,9 @@ export function InterviewSchedulePage() {
                   </Button>
                   {canWrite && round.status !== 'cancelled' && (
                     <>
+                      <Button icon={<SendOutlined />} onClick={() => openInterviewCommunication(round)}>
+                        {interviewCommunicationText.title}
+                      </Button>
                       <Button icon={<CalendarOutlined />} onClick={() => openReschedule(round)}>
                         改期
                       </Button>
@@ -540,6 +656,89 @@ export function InterviewSchedulePage() {
           </div>
         </div>
       )}
+
+      {canWrite && <Modal
+        title={interviewCommunicationText.title}
+        open={communicationOpen}
+        width={720}
+        footer={null}
+        onCancel={() => setCommunicationOpen(false)}
+      >
+        <Space direction="vertical" size="middle" className="interview-communication-panel">
+          <Alert
+            type="info"
+            showIcon
+            message={interviewCommunicationText.safetyMessage}
+            description={interviewCommunicationText.safetyDescription}
+          />
+          {communicationRound && (
+            <Text type="secondary">
+              {communicationRound.name} ? {formatDateTime(communicationRound.scheduled_start_at)}
+            </Text>
+          )}
+          {interviewMessageTemplates.error && (
+            <Alert
+              type="error"
+              showIcon
+              message={interviewCommunicationText.templateLoadError}
+              description={interviewMessageTemplates.error instanceof Error ? interviewMessageTemplates.error.message : interviewCommunicationText.retryLater}
+            />
+          )}
+          <div className="interview-communication-controls">
+            <Select
+              aria-label={interviewCommunicationText.selectTemplate}
+              placeholder={interviewCommunicationText.selectTemplate}
+              value={selectedTemplateId}
+              loading={interviewMessageTemplates.isFetching}
+              options={messageTemplateOptions}
+              onChange={(value) => {
+                setSelectedTemplateId(value)
+                setCommunicationDraft(undefined)
+              }}
+            />
+            <Button
+              type="primary"
+              loading={communicationPreviewMutation.isPending || selectedTemplate.isFetching}
+              disabled={!communicationRound || !selectedTemplate.data?.current_version.id}
+              onClick={generateInterviewCommunication}
+            >
+              {interviewCommunicationText.generatePreview}
+            </Button>
+          </div>
+          {selectedTemplate.error && (
+            <Alert
+              type="error"
+              showIcon
+              message={interviewCommunicationText.templateDetailLoadError}
+              description={selectedTemplate.error instanceof Error ? selectedTemplate.error.message : interviewCommunicationText.retryLater}
+            />
+          )}
+          {communicationDraft && (
+            <div className="interview-communication-preview">
+              <Input value={communicationDraft.subject} readOnly aria-label={interviewCommunicationText.subjectLabel} />
+              <Input.TextArea
+                value={communicationDraft.body}
+                readOnly
+                rows={8}
+                aria-label={interviewCommunicationText.bodyLabel}
+              />
+              <Space wrap>
+                <Button
+                  type="primary"
+                  icon={<CopyOutlined />}
+                  loading={communicationCopyMutation.isPending}
+                  onClick={() => communicationCopyMutation.mutate(communicationDraft)}
+                >
+                  {interviewCommunicationText.copyAndAudit}
+                </Button>
+                <Text type="secondary">
+                  {interviewCommunicationText.templateVersion} V{selectedTemplate.data?.current_version.version_number ?? '-'}
+                </Text>
+              </Space>
+            </div>
+          )}
+        </Space>
+      </Modal>}
 
       {canWrite && <Modal
         title={editingRound ? `改期：${editingRound.name}` : '面试改期'}
