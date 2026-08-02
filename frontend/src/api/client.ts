@@ -1125,6 +1125,28 @@ export interface MessageTemplateFilters {
   offset?: number
 }
 
+export interface MessageTemplateContentInput {
+  subject: string
+  body: string
+  variables: string[]
+}
+
+export interface MessageTemplateCreateInput extends MessageTemplateContentInput {
+  templateType: MessageTemplateType
+  name: string
+  idempotencyKey?: string
+}
+
+export interface MessageTemplateVersionCreateInput extends MessageTemplateContentInput {
+  expectedVersion: number
+  idempotencyKey?: string
+}
+
+export interface MessageTemplateStatusInput {
+  expectedVersion: number
+  idempotencyKey?: string
+}
+
 export interface CommunicationPreviewRecord {
   template_id: string
   template_version_id: string
@@ -2441,6 +2463,80 @@ export function fetchMessageTemplates(
 
 export function fetchMessageTemplate(templateId: string): Promise<MessageTemplateRecord> {
   return apiRequest(`/api/message-templates/${templateId}`, {}, '\u65e0\u6cd5\u8bfb\u53d6\u6a21\u677f\u8be6\u60c5')
+}
+
+export function createMessageTemplate(
+  input: MessageTemplateCreateInput,
+): Promise<MessageTemplateRecord> {
+  return apiRequest(
+    '/api/message-templates',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        template_type: input.templateType,
+        name: input.name,
+        subject: input.subject,
+        body: input.body,
+        variables: input.variables,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '创建沟通模板失败',
+  )
+}
+
+export function createMessageTemplateVersion(
+  templateId: string,
+  input: MessageTemplateVersionCreateInput,
+): Promise<MessageTemplateRecord> {
+  return apiRequest(
+    `/api/message-templates/${templateId}/versions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: input.expectedVersion,
+        subject: input.subject,
+        body: input.body,
+        variables: input.variables,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '保存沟通模板新版本失败',
+  )
+}
+
+export function activateMessageTemplate(
+  templateId: string,
+  input: MessageTemplateStatusInput,
+): Promise<MessageTemplateRecord> {
+  return apiRequest(
+    `/api/message-templates/${templateId}/activate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: input.expectedVersion,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '启用沟通模板失败',
+  )
+}
+
+export function deactivateMessageTemplate(
+  templateId: string,
+  input: MessageTemplateStatusInput,
+): Promise<MessageTemplateRecord> {
+  return apiRequest(
+    `/api/message-templates/${templateId}/deactivate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_version: input.expectedVersion,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '停用沟通模板失败',
+  )
 }
 
 export function previewCommunication(

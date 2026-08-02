@@ -3,8 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   AUTH_UNAUTHORIZED_EVENT,
+  activateMessageTemplate,
   createOfferPortalLink,
+  createMessageTemplate,
+  createMessageTemplateVersion,
   createScreeningBatch,
+  deactivateMessageTemplate,
   fetchOfferPortalStatus,
   fetchCurrentUser,
   fetchInternalNotificationUnreadCount,
@@ -236,6 +240,69 @@ describe('API client', () => {
       subject: 'Offer notice',
       body: 'Offer body',
       idempotency_key: 'copy-key-1',
+    })
+  })
+
+  it('builds message template management requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ id: 'template-1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createMessageTemplate({
+      templateType: 'interview_invitation',
+      name: '默认面试通知',
+      subject: '面试通知',
+      body: '你好 {{candidate_name}}',
+      variables: ['candidate_name'],
+      idempotencyKey: 'create-key-1',
+    })
+    await createMessageTemplateVersion('template-1', {
+      expectedVersion: 3,
+      subject: '新版面试通知',
+      body: '新版正文',
+      variables: ['candidate_name', 'interview_time'],
+      idempotencyKey: 'version-key-1',
+    })
+    await deactivateMessageTemplate('template-1', {
+      expectedVersion: 4,
+      idempotencyKey: 'deactivate-key-1',
+    })
+    await activateMessageTemplate('template-1', {
+      expectedVersion: 5,
+      idempotencyKey: 'activate-key-1',
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/message-templates')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      template_type: 'interview_invitation',
+      name: '默认面试通知',
+      subject: '面试通知',
+      body: '你好 {{candidate_name}}',
+      variables: ['candidate_name'],
+      idempotency_key: 'create-key-1',
+    })
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/message-templates/template-1/versions')
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+      expected_version: 3,
+      subject: '新版面试通知',
+      body: '新版正文',
+      variables: ['candidate_name', 'interview_time'],
+      idempotency_key: 'version-key-1',
+    })
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/message-templates/template-1/deactivate')
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
+      expected_version: 4,
+      idempotency_key: 'deactivate-key-1',
+    })
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/message-templates/template-1/activate')
+    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
+      expected_version: 5,
+      idempotency_key: 'activate-key-1',
     })
   })
 

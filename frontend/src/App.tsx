@@ -103,6 +103,11 @@ const NotificationCenterPage = lazy(() =>
     default: module.NotificationCenterPage,
   })),
 )
+const MessageTemplateManagementPage = lazy(() =>
+  import('./pages/MessageTemplateManagementPage').then((module) => ({
+    default: module.MessageTemplateManagementPage,
+  })),
+)
 const AnalyticsPage = lazy(() =>
   import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })),
 )
@@ -192,6 +197,7 @@ function AppRoutes() {
                 <Route element={<RoleRoute roles={['administrator', 'recruiter']} />}>
                   <Route path="/jobs/new" element={<JobFormPage />} />
                   <Route path="/candidates" element={<CandidateCenterPage />} />
+                  <Route path="/message-templates" element={<MessageTemplateManagementPage />} />
                 </Route>
                 <Route
                   element={

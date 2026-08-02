@@ -4830,3 +4830,46 @@ input {
     grid-template-columns: 1fr;
   }
 }
+
+.message-template-page {
+  display: grid;
+  gap: 18px;
+}
+
+.message-template-toolbar {
+  display: grid;
+  grid-template-columns: 180px 180px minmax(220px, 1fr);
+  gap: 12px;
+}
+
+.message-template-detail {
+  width: 100%;
+}
+
+.message-template-body-preview {
+  margin: 0 0 12px;
+  padding: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.92);
+  color: #0f172a;
+  font-family: inherit;
+  line-height: 1.7;
+}
+
+.message-template-version-alert {
+  margin-bottom: 16px;
+}
+
+@media (max-width: 720px) {
+  .message-template-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .message-template-toolbar .ant-select,
+  .message-template-toolbar .ant-input-search {
+    width: 100%;
+  }
+}

@@ -70,6 +70,9 @@ function pageMeta(pathname: string) {
   if (pathname.startsWith('/notifications')) {
     return { title: '消息中心', subtitle: '查看招聘流程提醒并快速回到对应业务页面' }
   }
+  if (pathname.startsWith('/message-templates')) {
+    return { title: '沟通模板', subtitle: '维护面试、Offer 和入职沟通文案及版本历史' }
+  }
   if (pathname === '/jobs/new') {
     return { title: '新建职位', subtitle: '录入职位信息并建立筛选标准' }
   }
@@ -138,6 +141,9 @@ export function AppLayout() {
   )
   const canAccessTalentPool = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
+  )
+  const canAccessMessageTemplates = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter'].includes(role),
   )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
   const showJobContext = ['jobs', 'screening', 'candidate-process', 'interviews'].includes(
@@ -223,6 +229,16 @@ export function AppLayout() {
             label: '数据分析',
             icon: <BarChartOutlined />,
             path: '/analytics',
+          },
+        ]
+      : []),
+    ...(canAccessMessageTemplates
+      ? [
+          {
+            key: 'message-templates' as const,
+            label: '沟通模板',
+            icon: <BellOutlined />,
+            path: '/message-templates',
           },
         ]
       : []),
