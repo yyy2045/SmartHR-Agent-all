@@ -5,6 +5,7 @@ import {
   EditOutlined,
   LinkOutlined,
   ReloadOutlined,
+  SendOutlined,
   StopOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
@@ -29,7 +30,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
@@ -38,11 +39,17 @@ import {
   correctOnboardingStatus,
   createOnboardingPortalLink,
   decideOnboardingDate,
+  fetchMessageTemplate,
+  fetchMessageTemplates,
   fetchOfferPortalLinks,
   fetchOnboarding,
   fetchOnboardings,
   markOnboardingCompleted,
+  previewCommunication,
+  recordCommunicationCopyAudit,
   regenerateOnboardingPortalLink,
+  type CommunicationPreviewRecord,
+  type MessageTemplateSummaryRecord,
   type OnboardingAbandonmentReason,
   type OnboardingAbandonmentSource,
   type OnboardingDetailRecord,
@@ -54,6 +61,27 @@ import { useAuth } from '../auth/context'
 import { HiringModuleNav } from '../components/HiringModuleNav'
 
 const { Title, Text } = Typography
+
+const onboardingCommunicationText = {
+  title: '\u751f\u6210\u5165\u804c\u63d0\u9192\u6587\u6848',
+  safetyMessage:
+    '\u7cfb\u7edf\u53ea\u751f\u6210\u53ef\u590d\u5236\u6587\u6848\uff0c\u4e0d\u6536\u96c6\u8eab\u4efd\u8bc1\u3001\u94f6\u884c\u5361\u6216\u4f53\u68c0\u7b49\u9ad8\u654f\u6750\u6599',
+  safetyDescription:
+    '\u5165\u804c\u63d0\u9192\u7528\u4e8e\u786e\u8ba4\u5230\u5c97\u65e5\u671f\u548c\u57fa\u672c\u62a5\u5230\u8bf4\u660e\uff1b\u590d\u5236\u540e\u7531\u62db\u8058\u4e13\u5458\u901a\u8fc7\u5916\u90e8\u5de5\u5177\u53d1\u9001\u3002',
+  templateLoadError: '\u65e0\u6cd5\u8bfb\u53d6\u6c9f\u901a\u6a21\u677f',
+  templateDetailLoadError: '\u65e0\u6cd5\u8bfb\u53d6\u6a21\u677f\u8be6\u60c5',
+  previewError: '\u751f\u6210\u5165\u804c\u63d0\u9192\u6587\u6848\u5931\u8d25',
+  copyUnsupported: '\u5f53\u524d\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u526a\u8d34\u677f',
+  copySuccess: '\u5165\u804c\u63d0\u9192\u6587\u6848\u5df2\u590d\u5236\u5e76\u8bb0\u5f55\u7559\u75d5',
+  copyError: '\u590d\u5236\u5e76\u7559\u75d5\u5931\u8d25',
+  retryLater: '\u8bf7\u7a0d\u540e\u91cd\u8bd5',
+  selectTemplate: '\u9009\u62e9\u5165\u804c\u63d0\u9192\u6a21\u677f',
+  generatePreview: '\u751f\u6210\u9884\u89c8',
+  subjectLabel: '\u5165\u804c\u63d0\u9192\u6807\u9898',
+  bodyLabel: '\u5165\u804c\u63d0\u9192\u6b63\u6587',
+  copyAndAudit: '\u590d\u5236\u6587\u6848\u5e76\u7559\u75d5',
+  templateVersion: '\u6a21\u677f',
+}
 
 type StatusFilter = 'all' | 'pending_confirmation' | 'pending_start' | 'onboarded' | 'abandoned'
 type DialogKind = 'propose' | 'onboard' | 'abandon' | 'correct' | 'regenerate-link'
@@ -174,6 +202,10 @@ export function OnboardingManagementPage() {
   const sourcePath = safeInternalPath(searchParams.get('from'))
   const [dialog, setDialog] = useState<DialogKind>()
   const [issuedPortalUrl, setIssuedPortalUrl] = useState<string>()
+  const [communicationOpen, setCommunicationOpen] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>()
+  const [communicationDraft, setCommunicationDraft] = useState<CommunicationPreviewRecord>()
+  const [communicationCopyKey, setCommunicationCopyKey] = useState(() => crypto.randomUUID())
   const canWrite = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
   ) ?? false
@@ -205,6 +237,23 @@ export function OnboardingManagementPage() {
     queryKey: ['offer-portal-links', detail.data?.offer_id],
     queryFn: () => fetchOfferPortalLinks(detail.data!.offer_id),
     enabled: Boolean(detail.data?.offer_id) && canWrite,
+  })
+
+  const onboardingMessageTemplates = useQuery({
+    queryKey: ['message-templates', { templateType: 'onboarding_date_confirmation' }],
+    queryFn: () =>
+      fetchMessageTemplates({
+        status: 'active',
+        templateType: 'onboarding_date_confirmation',
+        limit: 20,
+        offset: 0,
+      }),
+    enabled: communicationOpen,
+  })
+  const selectedTemplate = useQuery({
+    queryKey: ['message-template', selectedTemplateId],
+    queryFn: () => fetchMessageTemplate(selectedTemplateId!),
+    enabled: communicationOpen && Boolean(selectedTemplateId),
   })
 
   const visibleItems = useMemo(
@@ -285,6 +334,38 @@ export function OnboardingManagementPage() {
     },
   })
 
+  const communicationPreviewMutation = useMutation({
+    mutationFn: ({ templateVersionId, onboardingId }: { templateVersionId: string; onboardingId: string }) =>
+      previewCommunication({
+        templateVersionId,
+        contextType: 'onboarding',
+        contextId: onboardingId,
+      }),
+    onSuccess: (draft) => setCommunicationDraft(draft),
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : onboardingCommunicationText.previewError),
+  })
+  const communicationCopyMutation = useMutation({
+    mutationFn: async (draft: CommunicationPreviewRecord) => {
+      if (!navigator.clipboard) throw new Error(onboardingCommunicationText.copyUnsupported)
+      await navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`)
+      return recordCommunicationCopyAudit({
+        contextType: 'onboarding',
+        contextId: draft.context_id,
+        templateVersionId: draft.template_version_id,
+        subject: draft.subject,
+        body: draft.body,
+        idempotencyKey: communicationCopyKey,
+      })
+    },
+    onSuccess: () => {
+      setCommunicationCopyKey(crypto.randomUUID())
+      void messageApi.success(onboardingCommunicationText.copySuccess)
+    },
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : onboardingCommunicationText.copyError),
+  })
+
   const linkMutation = useMutation({
     mutationFn: async ({ record, reason }: { record: OnboardingDetailRecord; reason?: string }) => {
       const hasUnrevokedLink = (portalLinks.data ?? []).some((link) => link.state !== 'revoked')
@@ -360,9 +441,38 @@ export function OnboardingManagementPage() {
     },
   ]
 
+  useEffect(() => {
+    if (!communicationOpen || selectedTemplateId) return
+    const firstTemplate = onboardingMessageTemplates.data?.items[0]
+    if (firstTemplate) setSelectedTemplateId(firstTemplate.id)
+  }, [communicationOpen, onboardingMessageTemplates.data?.items, selectedTemplateId])
+
   const current = detail.data
   const hasUnrevokedLink = (portalLinks.data ?? []).some((link) => link.state !== 'revoked')
   const actionError = acceptDate.error ?? actionMutation.error ?? linkMutation.error
+
+  const canGenerateOnboardingCommunication =
+    canWrite && Boolean(current && ['pending_confirmation', 'candidate_proposed_date', 'pending_start'].includes(current.status))
+  const messageTemplateOptions = (onboardingMessageTemplates.data?.items ?? []).map(
+    (template: MessageTemplateSummaryRecord) => ({
+      value: template.id,
+      label: `${template.name} \u00b7 V${template.current_version_number}`,
+    }),
+  )
+
+  function openOnboardingCommunication() {
+    setCommunicationDraft(undefined)
+    setCommunicationCopyKey(crypto.randomUUID())
+    setCommunicationOpen(true)
+  }
+
+  function generateOnboardingCommunication() {
+    if (!current || !selectedTemplate.data?.current_version.id) return
+    communicationPreviewMutation.mutate({
+      templateVersionId: selectedTemplate.data.current_version.id,
+      onboardingId: current.id,
+    })
+  }
 
   function openDialog(kind: DialogKind) {
     if (!current) return
@@ -525,6 +635,11 @@ export function OnboardingManagementPage() {
                   标记已入职
                 </Button>
               )}
+              {canGenerateOnboardingCommunication && (
+                <Button icon={<SendOutlined />} onClick={openOnboardingCommunication}>
+                  {onboardingCommunicationText.title}
+                </Button>
+              )}
               {canWrite && ['pending_confirmation', 'candidate_proposed_date', 'pending_start'].includes(current.status) && (
                 <Button danger icon={<StopOutlined />} onClick={() => openDialog('abandon')}>
                   标记放弃
@@ -647,6 +762,85 @@ export function OnboardingManagementPage() {
           </div>
         )}
       </Drawer>
+
+      <Modal
+        zIndex={1200}
+        title={onboardingCommunicationText.title}
+        open={communicationOpen}
+        width={720}
+        footer={null}
+        onCancel={() => setCommunicationOpen(false)}
+      >
+        <Space direction="vertical" size="middle" className="onboarding-communication-panel">
+          <Alert
+            type="info"
+            showIcon
+            message={onboardingCommunicationText.safetyMessage}
+            description={onboardingCommunicationText.safetyDescription}
+          />
+          {onboardingMessageTemplates.error && (
+            <Alert
+              type="error"
+              showIcon
+              message={onboardingCommunicationText.templateLoadError}
+              description={onboardingMessageTemplates.error instanceof Error ? onboardingMessageTemplates.error.message : onboardingCommunicationText.retryLater}
+            />
+          )}
+          <div className="onboarding-communication-controls">
+            <Select
+              aria-label={onboardingCommunicationText.selectTemplate}
+              placeholder={onboardingCommunicationText.selectTemplate}
+              value={selectedTemplateId}
+              loading={onboardingMessageTemplates.isFetching}
+              options={messageTemplateOptions}
+              onChange={(value) => {
+                setSelectedTemplateId(value)
+                setCommunicationDraft(undefined)
+              }}
+            />
+            <Button
+              type="primary"
+              loading={communicationPreviewMutation.isPending || selectedTemplate.isFetching}
+              disabled={!current || !selectedTemplate.data?.current_version.id}
+              onClick={generateOnboardingCommunication}
+            >
+              {onboardingCommunicationText.generatePreview}
+            </Button>
+          </div>
+          {selectedTemplate.error && (
+            <Alert
+              type="error"
+              showIcon
+              message={onboardingCommunicationText.templateDetailLoadError}
+              description={selectedTemplate.error instanceof Error ? selectedTemplate.error.message : onboardingCommunicationText.retryLater}
+            />
+          )}
+          {communicationDraft && (
+            <div className="onboarding-communication-preview">
+              <Input value={communicationDraft.subject} readOnly aria-label={onboardingCommunicationText.subjectLabel} />
+              <Input.TextArea
+                value={communicationDraft.body}
+                readOnly
+                rows={8}
+                aria-label={onboardingCommunicationText.bodyLabel}
+              />
+              <Space wrap>
+                <Button
+                  type="primary"
+                  icon={<CopyOutlined />}
+                  loading={communicationCopyMutation.isPending}
+                  onClick={() => communicationCopyMutation.mutate(communicationDraft)}
+                >
+                  {onboardingCommunicationText.copyAndAudit}
+                </Button>
+                <Text type="secondary">
+                  {onboardingCommunicationText.templateVersion} V{selectedTemplate.data?.current_version.version_number ?? '-'}
+                </Text>
+              </Space>
+            </div>
+          )}
+        </Space>
+      </Modal>
 
       <Modal
         zIndex={1100}

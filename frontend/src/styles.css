@@ -4809,3 +4809,24 @@ input {
     grid-template-columns: 1fr;
   }
 }
+
+.onboarding-communication-panel {
+  width: 100%;
+}
+
+.onboarding-communication-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.onboarding-communication-preview {
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .onboarding-communication-controls {
+    grid-template-columns: 1fr;
+  }
+}
