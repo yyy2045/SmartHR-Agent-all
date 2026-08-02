@@ -22,6 +22,7 @@ from app.models.interview_report import InterviewReport, InterviewReportVersion
 from app.models.job import HardRequirement, Job, JobCriteriaVersion, ScoringDimension
 from app.models.knowledge import ResumeEmbeddingChunk
 from app.models.message import CommunicationRecord, MessageTemplate, MessageTemplateVersion
+from app.models.notification import InternalNotification
 from app.models.offer import (
     Offer,
     OfferApproval,
@@ -85,6 +86,7 @@ __all__ = [
     "InterviewRound",
     "InterviewScoreAnchor",
     "InterviewScoreDimension",
+    "InternalNotification",
     "Job",
     "JobApplication",
     "JobCriteriaVersion",

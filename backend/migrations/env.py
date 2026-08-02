@@ -10,6 +10,7 @@ from app.models import (  # noqa: F401
     Candidate,
     CandidateDuplicateReview,
     HardRequirement,
+    InternalNotification,
     InterviewReport,
     InterviewReportVersion,
     Job,
