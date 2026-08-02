@@ -23,6 +23,7 @@ import {
   InputNumber,
   Modal,
   Segmented,
+  Select,
   Skeleton,
   Space,
   Table,
@@ -39,15 +40,21 @@ import {
   ApiError,
   createOffer,
   createOfferPortalLink,
+  fetchMessageTemplate,
+  fetchMessageTemplates,
   createOfferVersion,
   decideOfferAsApprover,
   decideOfferAsManager,
   fetchOffer,
   fetchOfferPortalLinks,
   fetchOffers,
+  previewCommunication,
+  recordCommunicationCopyAudit,
   regenerateOfferPortalLink,
   revokeOfferPortalLink,
   submitOffer,
+  type CommunicationPreviewRecord,
+  type MessageTemplateSummaryRecord,
   type OfferContentInput,
   type OfferPortalLinkIssuedRecord,
   type OfferPortalLinkRecord,
@@ -63,6 +70,27 @@ import { useAuth } from '../auth/context'
 import { HiringModuleNav } from '../components/HiringModuleNav'
 
 const { Title, Text, Paragraph } = Typography
+
+const offerCommunicationText = {
+  title: '\u751f\u6210 Offer \u901a\u77e5\u6587\u6848',
+  safetyMessage:
+    '\u7cfb\u7edf\u53ea\u751f\u6210\u53ef\u590d\u5236\u6587\u6848\uff0c\u4e0d\u8fde\u63a5\u5916\u90e8\u53d1\u9001\u6e20\u9053',
+  safetyDescription:
+    '\u5019\u9009\u4eba\u4e13\u5c5e\u94fe\u63a5\u5728\u9884\u89c8\u4e2d\u4f1a\u4ee5\u5b89\u5168\u5360\u4f4d\u7b26\u5c55\u793a\uff1b\u771f\u5b9e\u94fe\u63a5\u4ecd\u9700\u5728\u5019\u9009\u4eba\u95e8\u6237\u533a\u57df\u751f\u6210\u5e76\u590d\u5236\u3002',
+  templateLoadError: '\u65e0\u6cd5\u8bfb\u53d6\u6c9f\u901a\u6a21\u677f',
+  templateDetailLoadError: '\u65e0\u6cd5\u8bfb\u53d6\u6a21\u677f\u8be6\u60c5',
+  previewError: '\u751f\u6210 Offer \u901a\u77e5\u6587\u6848\u5931\u8d25',
+  copyUnsupported: '\u5f53\u524d\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u526a\u8d34\u677f',
+  copySuccess: 'Offer \u901a\u77e5\u6587\u6848\u5df2\u590d\u5236\u5e76\u8bb0\u5f55\u7559\u75d5',
+  copyError: '\u590d\u5236\u5e76\u7559\u75d5\u5931\u8d25',
+  retryLater: '\u8bf7\u7a0d\u540e\u91cd\u8bd5',
+  selectTemplate: '\u9009\u62e9 Offer \u901a\u77e5\u6a21\u677f',
+  generatePreview: '\u751f\u6210\u9884\u89c8',
+  subjectLabel: 'Offer \u901a\u77e5\u6807\u9898',
+  bodyLabel: 'Offer \u901a\u77e5\u6b63\u6587',
+  copyAndAudit: '\u590d\u5236\u6587\u6848\u5e76\u7559\u75d5',
+  templateVersion: '\u6a21\u677f',
+}
 
 const statusMeta: Record<OfferStatus, { label: string; color: string }> = {
   draft: { label: '草稿', color: 'default' },
@@ -196,6 +224,10 @@ export function OfferManagementPage() {
   const [decisionTarget, setDecisionTarget] = useState<DecisionTarget>()
   const [portalLinkAction, setPortalLinkAction] = useState<PortalLinkAction>()
   const [issuedPortalUrl, setIssuedPortalUrl] = useState<string>()
+  const [communicationOpen, setCommunicationOpen] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>()
+  const [communicationDraft, setCommunicationDraft] = useState<CommunicationPreviewRecord>()
+  const [communicationCopyKey, setCommunicationCopyKey] = useState(() => crypto.randomUUID())
   const [versionKey, setVersionKey] = useState(() => crypto.randomUUID())
   const canWrite = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
@@ -220,6 +252,22 @@ export function OfferManagementPage() {
     queryKey: ['offer-portal-links', selectedId],
     queryFn: () => fetchOfferPortalLinks(selectedId!),
     enabled: Boolean(selectedId),
+  })
+  const offerMessageTemplates = useQuery({
+    queryKey: ['message-templates', { templateType: 'offer_notification' }],
+    queryFn: () =>
+      fetchMessageTemplates({
+        status: 'active',
+        templateType: 'offer_notification',
+        limit: 20,
+        offset: 0,
+      }),
+    enabled: communicationOpen,
+  })
+  const selectedTemplate = useQuery({
+    queryKey: ['message-template', selectedTemplateId],
+    queryFn: () => fetchMessageTemplate(selectedTemplateId!),
+    enabled: communicationOpen && Boolean(selectedTemplateId),
   })
   const visibleOffers = useMemo(
     () =>
@@ -261,7 +309,17 @@ export function OfferManagementPage() {
   useEffect(() => {
     setIssuedPortalUrl(undefined)
     setPortalLinkAction(undefined)
+    setCommunicationOpen(false)
+    setSelectedTemplateId(undefined)
+    setCommunicationDraft(undefined)
+    setCommunicationCopyKey(crypto.randomUUID())
   }, [selectedId])
+
+  useEffect(() => {
+    if (!communicationOpen || selectedTemplateId) return
+    const firstTemplate = offerMessageTemplates.data?.items[0]
+    if (firstTemplate) setSelectedTemplateId(firstTemplate.id)
+  }, [communicationOpen, offerMessageTemplates.data?.items, selectedTemplateId])
 
   useEffect(() => {
     const selected = searchParams.get('selected')
@@ -436,6 +494,40 @@ export function OfferManagementPage() {
       void messageApi.error(error instanceof Error ? error.message : '撤回候选人链接失败'),
   })
 
+  const communicationPreviewMutation = useMutation({
+    mutationFn: ({ templateVersionId, offerId }: { templateVersionId: string; offerId: string }) =>
+      previewCommunication({
+        templateVersionId,
+        contextType: 'offer',
+        contextId: offerId,
+      }),
+    onSuccess: (draft) => setCommunicationDraft(draft),
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : offerCommunicationText.previewError),
+  })
+  const communicationCopyMutation = useMutation({
+    mutationFn: async (draft: CommunicationPreviewRecord) => {
+      if (!navigator.clipboard) throw new Error(offerCommunicationText.copyUnsupported)
+      await navigator.clipboard.writeText(`${draft.subject}
+
+${draft.body}`)
+      return recordCommunicationCopyAudit({
+        contextType: 'offer',
+        contextId: draft.context_id,
+        templateVersionId: draft.template_version_id,
+        subject: draft.subject,
+        body: draft.body,
+        idempotencyKey: communicationCopyKey,
+      })
+    },
+    onSuccess: () => {
+      setCommunicationCopyKey(crypto.randomUUID())
+      void messageApi.success(offerCommunicationText.copySuccess)
+    },
+    onError: (error) =>
+      void messageApi.error(error instanceof Error ? error.message : offerCommunicationText.copyError),
+  })
+
   async function copyIssuedPortalLink() {
     if (!issuedPortalUrl) return
     try {
@@ -446,6 +538,20 @@ export function OfferManagementPage() {
     } catch (error) {
       void messageApi.error(error instanceof Error ? error.message : '复制候选人链接失败')
     }
+  }
+
+  function openOfferCommunication() {
+    setCommunicationDraft(undefined)
+    setCommunicationCopyKey(crypto.randomUUID())
+    setCommunicationOpen(true)
+  }
+
+  function generateOfferCommunication() {
+    if (!detail.data || !selectedTemplate.data?.current_version.id) return
+    communicationPreviewMutation.mutate({
+      templateVersionId: selectedTemplate.data.current_version.id,
+      offerId: detail.data.id,
+    })
   }
 
   function submitPortalLinkAction() {
@@ -545,6 +651,15 @@ export function OfferManagementPage() {
       ),
     },
   ]
+
+  const canGenerateOfferCommunication =
+    canWrite && Boolean(detail.data && ['approved', 'pending_response'].includes(detail.data.status))
+  const messageTemplateOptions = (offerMessageTemplates.data?.items ?? []).map(
+    (template: MessageTemplateSummaryRecord) => ({
+      value: template.id,
+      label: `${template.name} \u00b7 V${template.current_version_number}`,
+    }),
+  )
 
   const listContent = (
     <>
@@ -809,6 +924,11 @@ export function OfferManagementPage() {
                       生成候选人链接
                     </Button>
                   )}
+                {canGenerateOfferCommunication && (
+                  <Button icon={<SendOutlined />} onClick={openOfferCommunication}>
+                    {offerCommunicationText.title}
+                  </Button>
+                )}
               </div>
 
               {issuedPortalUrl && (
@@ -1035,6 +1155,84 @@ export function OfferManagementPage() {
             <Input.TextArea rows={3} maxLength={5_000} showCount />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={offerCommunicationText.title}
+        open={communicationOpen}
+        width={720}
+        footer={null}
+        onCancel={() => setCommunicationOpen(false)}
+      >
+        <Space direction="vertical" size="middle" className="offer-communication-panel">
+          <Alert
+            type="info"
+            showIcon
+            message={offerCommunicationText.safetyMessage}
+            description={offerCommunicationText.safetyDescription}
+          />
+          {offerMessageTemplates.error && (
+            <Alert
+              type="error"
+              showIcon
+              message={offerCommunicationText.templateLoadError}
+              description={offerMessageTemplates.error instanceof Error ? offerMessageTemplates.error.message : offerCommunicationText.retryLater}
+            />
+          )}
+          <div className="offer-communication-controls">
+            <Select
+              aria-label={offerCommunicationText.selectTemplate}
+              placeholder={offerCommunicationText.selectTemplate}
+              value={selectedTemplateId}
+              loading={offerMessageTemplates.isFetching}
+              options={messageTemplateOptions}
+              onChange={(value) => {
+                setSelectedTemplateId(value)
+                setCommunicationDraft(undefined)
+              }}
+            />
+            <Button
+              type="primary"
+              loading={communicationPreviewMutation.isPending || selectedTemplate.isFetching}
+              disabled={!selectedTemplate.data?.current_version.id}
+              onClick={generateOfferCommunication}
+            >
+              {offerCommunicationText.generatePreview}
+            </Button>
+          </div>
+          {selectedTemplate.error && (
+            <Alert
+              type="error"
+              showIcon
+              message={offerCommunicationText.templateDetailLoadError}
+              description={selectedTemplate.error instanceof Error ? selectedTemplate.error.message : offerCommunicationText.retryLater}
+            />
+          )}
+          {communicationDraft && (
+            <div className="offer-communication-preview">
+              <Input value={communicationDraft.subject} readOnly aria-label={offerCommunicationText.subjectLabel} />
+              <Input.TextArea
+                value={communicationDraft.body}
+                readOnly
+                rows={8}
+                aria-label={offerCommunicationText.bodyLabel}
+              />
+              <Space wrap>
+                <Button
+                  type="primary"
+                  icon={<CopyOutlined />}
+                  loading={communicationCopyMutation.isPending}
+                  onClick={() => communicationCopyMutation.mutate(communicationDraft)}
+                >
+                  {offerCommunicationText.copyAndAudit}
+                </Button>
+                <Text type="secondary">
+                  {offerCommunicationText.templateVersion} V{selectedTemplate.data?.current_version.version_number ?? '-'}
+                </Text>
+              </Space>
+            </div>
+          )}
+        </Space>
       </Modal>
 
       <Modal

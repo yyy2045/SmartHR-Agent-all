@@ -1064,6 +1064,105 @@ export interface OfferSummary {
   updated_at: string
 }
 
+export type MessageTemplateType =
+  | 'interview_invitation'
+  | 'interview_reschedule'
+  | 'interview_cancellation'
+  | 'meeting_details'
+  | 'offer_notification'
+  | 'offer_reminder'
+  | 'onboarding_date_confirmation'
+export type MessageTemplateStatus = 'active' | 'inactive' | 'all'
+export type CommunicationContextType = 'interview_round' | 'offer' | 'onboarding'
+
+export interface MessageTemplateVersionRecord {
+  id: string
+  version_number: number
+  source_version_id: string | null
+  subject: string
+  body: string
+  variables: string[]
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+}
+
+export interface MessageTemplateSummaryRecord {
+  id: string
+  system_key: string | null
+  template_type: MessageTemplateType
+  name: string
+  status: Exclude<MessageTemplateStatus, 'all'>
+  current_version_number: number
+  resource_version: number
+  current_subject: string
+  updated_at: string
+  allowed_actions: string[]
+}
+
+export interface MessageTemplateRecord extends MessageTemplateSummaryRecord {
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+  current_version: MessageTemplateVersionRecord
+  versions: MessageTemplateVersionRecord[]
+}
+
+export interface MessageTemplateListRecord {
+  items: MessageTemplateSummaryRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface MessageTemplateFilters {
+  status?: MessageTemplateStatus
+  templateType?: MessageTemplateType
+  query?: string
+  limit?: number
+  offset?: number
+}
+
+export interface CommunicationPreviewRecord {
+  template_id: string
+  template_version_id: string
+  template_type: MessageTemplateType
+  context_type: CommunicationContextType
+  context_id: string
+  subject: string
+  body: string
+  variables_used: string[]
+  resolved_variables: Record<string, string>
+  missing_optional_variables: string[]
+}
+
+export interface CommunicationCopyAuditRecord {
+  audit_id: string
+  context_type: CommunicationContextType
+  context_id: string
+  template_version_id: string | null
+  copied_at: string
+}
+
+export interface CommunicationPreviewInput {
+  templateVersionId: string
+  contextType: CommunicationContextType
+  contextId: string
+  subjectOverride?: string | null
+  bodyOverride?: string | null
+}
+
+export interface CommunicationCopyAuditInput {
+  contextType: CommunicationContextType
+  contextId: string
+  templateVersionId?: string | null
+  subject: string
+  body: string
+  idempotencyKey?: string
+}
+
 export type BatchStatus =
   | 'uploading'
   | 'ready'
@@ -2324,6 +2423,62 @@ export function confirmInterviewReport(
       body: JSON.stringify({ version_id: versionId }),
     },
     '确认面试报告失败',
+  )
+}
+
+export function fetchMessageTemplates(
+  filters: MessageTemplateFilters = {},
+): Promise<MessageTemplateListRecord> {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.templateType) query.set('template_type', filters.templateType)
+  if (filters.query) query.set('query', filters.query)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/message-templates${suffix}`, {}, '\u65e0\u6cd5\u8bfb\u53d6\u6c9f\u901a\u6a21\u677f')
+}
+
+export function fetchMessageTemplate(templateId: string): Promise<MessageTemplateRecord> {
+  return apiRequest(`/api/message-templates/${templateId}`, {}, '\u65e0\u6cd5\u8bfb\u53d6\u6a21\u677f\u8be6\u60c5')
+}
+
+export function previewCommunication(
+  input: CommunicationPreviewInput,
+): Promise<CommunicationPreviewRecord> {
+  return apiRequest(
+    '/api/communications/preview',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        template_version_id: input.templateVersionId,
+        context_type: input.contextType,
+        context_id: input.contextId,
+        subject_override: input.subjectOverride ?? null,
+        body_override: input.bodyOverride ?? null,
+      }),
+    },
+    '\u751f\u6210\u6c9f\u901a\u9884\u89c8\u5931\u8d25',
+  )
+}
+
+export function recordCommunicationCopyAudit(
+  input: CommunicationCopyAuditInput,
+): Promise<CommunicationCopyAuditRecord> {
+  return apiRequest(
+    '/api/communications/copy-audit',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        context_type: input.contextType,
+        context_id: input.contextId,
+        template_version_id: input.templateVersionId ?? null,
+        subject: input.subject,
+        body: input.body,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '\u8bb0\u5f55\u6c9f\u901a\u7559\u75d5\u5931\u8d25',
   )
 }
 

@@ -4767,3 +4767,24 @@ input {
     justify-self: center;
   }
 }
+
+.offer-communication-panel {
+  width: 100%;
+}
+
+.offer-communication-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.offer-communication-preview {
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .offer-communication-controls {
+    grid-template-columns: 1fr;
+  }
+}
