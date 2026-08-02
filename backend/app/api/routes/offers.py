@@ -54,6 +54,11 @@ from app.services.offer_portal import (
     revoke_portal_link,
 )
 from app.services.onboarding import onboarding_action_owner
+from app.services.recruitment_notifications import (
+    notify_offer_approval_decided,
+    notify_offer_manager_decided,
+    notify_offer_submitted,
+)
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -903,6 +908,7 @@ def submit_offer(
         actor=current_user,
         details={"version_id": str(version.id), "version_number": version.version_number},
     )
+    notify_offer_submitted(db, offer)
     db.commit()
     return _offer_response(_reload_offer(db, offer.id, current_user))
 
@@ -956,6 +962,7 @@ def decide_offer_as_manager(
         actor=current_user,
         details={"version_id": str(version.id), "comment": payload.comment},
     )
+    notify_offer_manager_decided(db, offer, decision=payload.decision)
     db.commit()
     return _offer_response(_reload_offer(db, offer.id, current_user))
 
@@ -1021,5 +1028,6 @@ def decide_offer_as_approver(
         actor=current_user,
         details={"version_id": str(version.id), "comment": payload.comment},
     )
+    notify_offer_approval_decided(db, offer, decision=payload.decision)
     db.commit()
     return _offer_response(_reload_offer(db, offer.id, current_user))

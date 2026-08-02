@@ -58,6 +58,7 @@ from app.services.onboarding import (
     recruiter_date_decision,
     shanghai_today,
 )
+from app.services.recruitment_notifications import notify_onboarding_event
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -207,6 +208,7 @@ def _commit_action(
         actor=user,
         details={"status": onboarding.status, "version": onboarding.version},
     )
+    notify_onboarding_event(db, onboarding, onboarding.events[-1])
     try:
         db.commit()
     except IntegrityError as error:
