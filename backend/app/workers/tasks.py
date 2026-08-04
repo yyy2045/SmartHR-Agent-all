@@ -10,6 +10,7 @@ from app.services.ai_observability import (
     task_succeeded_from_result,
 )
 from app.services.knowledge_index import index_candidate_profile
+from app.services.recruitment_knowledge import index_recruitment_knowledge_version
 from app.services.resume_analysis import analyze_resume_document
 from app.services.resume_processing import process_resume_document
 from app.services.talent_recommendation_rescoring import rescore_talent_recommendations
@@ -180,6 +181,48 @@ def index_candidate_profile_task(
             succeeded=task_succeeded_from_result(result),
             failure_code=str(result.get("failure_code") or "") or None,
             failure_message=str(result.get("failure_message") or "") or None,
+        )
+        return result
+    except Exception as error:
+        _safe_record_task_finished(
+            celery_task_id=task_id,
+            succeeded=False,
+            failure_code=error.__class__.__name__,
+            failure_message=str(error)[:500],
+        )
+        raise
+
+
+@celery_app.task(name="knowledge.index_recruitment_document", bind=True, acks_late=True)
+def index_recruitment_knowledge_document_task(
+    task,
+    version_id: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    task_id = str(task.request.id)
+    resolved_version_id = uuid.UUID(version_id)
+    _safe_record_task_started(
+        celery_task_id=task_id,
+        task_name="knowledge.index_recruitment_document",
+        scenario="recruitment_knowledge_index",
+        resource_type="recruitment_knowledge_document_version",
+        resource_id=resolved_version_id,
+        attempt_count=int(getattr(task.request, "retries", 0)) + 1,
+    )
+    try:
+        result = asyncio.run(
+            index_recruitment_knowledge_version(
+                resolved_version_id,
+                task_id=task_id,
+                force=force,
+            )
+        )
+        _safe_record_task_finished(
+            celery_task_id=task_id,
+            succeeded=task_succeeded_from_result(result),
+            failure_code=str(result.get("failure_code") or result.get("code") or "") or None,
+            failure_message=str(result.get("failure_message") or result.get("message") or "")
+            or None,
         )
         return result
     except Exception as error:

@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.database import Base
 from app.models import (
     ApplicationResumeDocument,
@@ -26,6 +27,10 @@ from app.models import (
     ScreeningBatch,
     ScreeningResult,
     User,
+)
+from app.schemas.recruitment_knowledge import (
+    RecruitmentKnowledgeRetrievalCitation,
+    RecruitmentKnowledgeRetrievalResponse,
 )
 from app.schemas.screening import ResumeAnalysisDraft
 from app.services.ai_client import AIConfigurationError
@@ -472,6 +477,90 @@ async def test_analysis_saves_profile_weighted_score_and_low_match_group(
         )
         assert education["status"] == "unknown"
         assert result.document.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_analysis_payload_includes_recruitment_knowledge_citations(
+    analysis_dependencies: AnalysisDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_queries: list[object] = []
+
+    async def fake_retrieve(db, payload, *, actor):
+        captured_queries.append(payload)
+        assert actor.username == "recruiter"
+        return RecruitmentKnowledgeRetrievalResponse(
+            query_hash="resume-analysis-query",
+            returned_count=1,
+            filtered_count=0,
+            citations=[
+                RecruitmentKnowledgeRetrievalCitation(
+                    chunk_id=uuid.uuid4(),
+                    document_id=uuid.uuid4(),
+                    document_title="后端岗位能力模型",
+                    version_number=1,
+                    category="job_standard",
+                    heading_path=["后端工程师"],
+                    source_locator="第 2 段",
+                    snippet="系统设计评分需要关注复杂度、可维护性和稳定性。",
+                    score=0.9,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(
+        "app.services.resume_analysis.retrieve_recruitment_knowledge",
+        fake_retrieve,
+    )
+    client = StubAnalysisClient(valid_analysis(analysis_dependencies))
+
+    response = await analyze_resume_document(
+        analysis_dependencies.document_id,
+        session_factory=analysis_dependencies.session_factory,
+        ai_client=client,
+    )
+
+    assert response["status"] == "completed"
+    assert len(captured_queries) == 1
+    rag_payload = captured_queries[0]
+    assert rag_payload.scenario == "resume_analysis"
+    assert rag_payload.resource_id == analysis_dependencies.document_id
+    ai_payload = client.payloads[0]
+    assert ai_payload["enterprise_knowledge"]["status"] == "available"
+    assert (
+        ai_payload["enterprise_knowledge"]["citations"][0]["document_title"]
+        == "后端岗位能力模型"
+    )
+    assert "private.pdf" not in str(captured_queries[0].query)
+
+
+@pytest.mark.asyncio
+async def test_analysis_continues_when_recruitment_knowledge_retrieval_fails(
+    analysis_dependencies: AnalysisDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_retrieve(db, payload, *, actor):
+        raise RuntimeError("知识库检索暂时失败")
+
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(
+        "app.services.resume_analysis.retrieve_recruitment_knowledge",
+        fake_retrieve,
+    )
+    client = StubAnalysisClient(valid_analysis(analysis_dependencies))
+
+    response = await analyze_resume_document(
+        analysis_dependencies.document_id,
+        session_factory=analysis_dependencies.session_factory,
+        ai_client=client,
+    )
+
+    assert response["status"] == "completed"
+    ai_payload = client.payloads[0]
+    assert ai_payload["enterprise_knowledge"]["status"] == "unavailable"
+    assert ai_payload["enterprise_knowledge"]["citations"] == []
+    assert "RuntimeError" in ai_payload["enterprise_knowledge"]["error"]
 
 
 @pytest.mark.asyncio

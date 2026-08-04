@@ -43,6 +43,19 @@ def enqueue_knowledge_index(
     return str(result.id)
 
 
+def enqueue_recruitment_knowledge_index(
+    version_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> str:
+    result = celery_app.send_task(
+        "knowledge.index_recruitment_document",
+        args=[str(version_id)],
+        kwargs={"force": force},
+    )
+    return str(result.id)
+
+
 def enqueue_talent_recommendation(
     run_id: uuid.UUID,
     *,

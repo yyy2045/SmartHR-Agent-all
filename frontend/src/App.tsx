@@ -106,6 +106,11 @@ const PromptTemplateManagementPage = lazy(() =>
     default: module.PromptTemplateManagementPage,
   })),
 )
+const RecruitmentKnowledgePage = lazy(() =>
+  import('./pages/RecruitmentKnowledgePage').then((module) => ({
+    default: module.RecruitmentKnowledgePage,
+  })),
+)
 const NotificationCenterPage = lazy(() =>
   import('./pages/NotificationCenterPage').then((module) => ({
     default: module.NotificationCenterPage,
@@ -220,6 +225,7 @@ function AppRoutes() {
                   }
                 >
                   <Route path="/talent" element={<TalentPoolPage />} />
+                  <Route path="/recruitment-knowledge" element={<RecruitmentKnowledgePage />} />
                 </Route>
                 <Route
                   element={

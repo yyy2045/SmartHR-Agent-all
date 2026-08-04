@@ -10,18 +10,25 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
+from app.config import settings
 from app.database import SessionLocal
 from app.models import (
     ApplicationResumeDocument,
     CandidateProfile,
     DimensionScore,
     EvidenceCitation,
+    Job,
     JobApplication,
     JobCriteriaVersion,
     ResumeDocument,
     ResumeTextSegment,
     ScreeningBatch,
     ScreeningResult,
+    User,
+)
+from app.schemas.recruitment_knowledge import (
+    RecruitmentKnowledgeRetrievalCitation,
+    RecruitmentKnowledgeRetrievalRequest,
 )
 from app.schemas.screening import CandidateProfileDraft, EvidenceReference, ResumeAnalysisDraft
 from app.services.ai_client import (
@@ -37,11 +44,13 @@ from app.services.ai_client import (
 from app.services.ai_observability import record_ai_call
 from app.services.audit import record_audit
 from app.services.candidate_duplicates import detect_candidate_duplicates
+from app.services.embedding_client import EmbeddingClientError
 from app.services.model_payload import (
     ModelPayloadSecurityError,
     build_resume_analysis_payload,
 )
 from app.services.prompt_templates import get_published_prompt_snapshot
+from app.services.recruitment_knowledge import retrieve_recruitment_knowledge
 
 logger = logging.getLogger(__name__)
 SessionFactory = sessionmaker[Session]
@@ -322,6 +331,80 @@ def _failure_details(error: Exception) -> tuple[str, str]:
     return "analysis_failed", "AI 简历分析失败，请稍后重试"
 
 
+def _resume_analysis_rag_query(job: Job | None, criteria: JobCriteriaVersion) -> str:
+    lines = [
+        f"Job title: {job.title if job is not None else 'unknown'}",
+        "Scenario: score a resume against confirmed recruiting criteria.",
+        f"Pass threshold: {criteria.pass_threshold}",
+    ]
+    if criteria.hard_requirements:
+        lines.append("Hard requirements:")
+        for item in sorted(criteria.hard_requirements, key=lambda value: value.sort_order):
+            lines.append(
+                f"- {item.requirement_type}: {item.title}; "
+                f"expected={item.expected_value}; auto_reject={item.auto_reject}"
+            )
+    if criteria.scoring_dimensions:
+        lines.append("Scoring dimensions:")
+        for item in sorted(criteria.scoring_dimensions, key=lambda value: value.sort_order):
+            lines.append(
+                f"- {item.name}: weight={item.weight_percent}; "
+                f"description={item.description}"
+            )
+    return "\n".join(line for line in lines if line).strip()[:4_000]
+
+
+def _attach_enterprise_knowledge_to_resume_payload(
+    payload: dict[str, object],
+    *,
+    citations: list[RecruitmentKnowledgeRetrievalCitation] | None = None,
+    error: str | None = None,
+) -> None:
+    if citations is None and error is None:
+        return
+    payload["enterprise_knowledge"] = {
+        "status": "available" if error is None else "unavailable",
+        "citations": [item.model_dump(mode="json") for item in (citations or [])],
+        "error": error,
+        "usage_instruction": (
+            "Use enterprise knowledge only as policy, role standard or scoring guidance. "
+            "Candidate facts and evidence quotes must still come only from resume segments. "
+            "Do not invent evidence, scores or final decisions from knowledge citations."
+        ),
+    }
+
+
+async def _retrieve_resume_analysis_knowledge(
+    db: Session,
+    *,
+    job: Job | None,
+    criteria: JobCriteriaVersion,
+    actor: User | None,
+    document_id: uuid.UUID,
+    application_id: uuid.UUID,
+) -> tuple[list[RecruitmentKnowledgeRetrievalCitation] | None, str | None]:
+    if not settings.embedding_enabled or actor is None:
+        return None, None
+    try:
+        response = await retrieve_recruitment_knowledge(
+            db,
+            RecruitmentKnowledgeRetrievalRequest(
+                scenario="resume_analysis",
+                query=_resume_analysis_rag_query(job, criteria),
+                limit=5,
+                resource_type="resume_document",
+                resource_id=document_id,
+                job_id=criteria.job_id,
+                application_id=application_id,
+            ),
+            actor=actor,
+        )
+    except (EmbeddingClientError, RuntimeError) as error:
+        db.rollback()
+        return [], f"{error.__class__.__name__}: {str(error)[:500]}"
+    return response.citations, None
+
+
 def _mark_result_failed(
     result_id: uuid.UUID,
     error: Exception,
@@ -354,6 +437,7 @@ async def analyze_resume_document(
     client = ai_client or get_ai_client()
     resolved_job_id: uuid.UUID | None = None
     resolved_batch_id: uuid.UUID | None = None
+    resolved_recruiter_id: uuid.UUID | None = None
     prompt_template = None
     prompt_version = RESUME_MATCH_PROMPT_VERSION
     prompt_template_version_id: uuid.UUID | None = None
@@ -396,6 +480,8 @@ async def analyze_resume_document(
                 "status": "not_ready",
                 "document_id": str(document_id),
             }
+        job = db.get(Job, criteria.job_id)
+        resolved_recruiter_id = job.owner_id if job is not None else None
         profile = (
             _load_profile(db, candidate_profile_id)
             if candidate_profile_id is not None
@@ -495,6 +581,27 @@ async def analyze_resume_document(
                 document,
                 criteria,
                 profile,
+            )
+            job = db.get(Job, criteria.job_id)
+            actor = (
+                db.get(User, resolved_recruiter_id)
+                if resolved_recruiter_id is not None
+                else None
+            )
+            knowledge_citations, knowledge_error = (
+                await _retrieve_resume_analysis_knowledge(
+                    db,
+                    job=job,
+                    criteria=criteria,
+                    actor=actor,
+                    document_id=document.id,
+                    application_id=resolved_application_id,
+                )
+            )
+            _attach_enterprise_knowledge_to_resume_payload(
+                payload,
+                citations=knowledge_citations,
+                error=knowledge_error,
             )
         try:
             if hasattr(client, "analyze_resume_with_metrics"):

@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
@@ -42,6 +43,10 @@ from app.models import (
 )
 from app.redis_client import get_session_store
 from app.schemas.interview_report import InterviewReportAIDraft
+from app.schemas.recruitment_knowledge import (
+    RecruitmentKnowledgeRetrievalCitation,
+    RecruitmentKnowledgeRetrievalResponse,
+)
 from app.services.ai_client import (
     AIConfigurationError,
     AIRequestTimeout,
@@ -712,6 +717,96 @@ async def test_ai_report_uses_only_allowed_context_and_replay_does_not_call_ai_t
     assert version["prompt_version"] == "interview-report-v1"
     assert version["conclusion"] == "next_round"
     assert len(version["missing_rounds"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_ai_report_includes_recruitment_knowledge_citations(
+    interview_report_dependencies: InterviewReportDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependency = interview_report_dependencies
+    stub = StubInterviewReportAIClient()
+    captured_queries: list[object] = []
+
+    async def fake_retrieve(db, payload, *, actor):
+        captured_queries.append(payload)
+        assert actor.username == "recruiter"
+        return RecruitmentKnowledgeRetrievalResponse(
+            query_hash="knowledge-query-hash",
+            returned_count=1,
+            filtered_count=0,
+            citations=[
+                RecruitmentKnowledgeRetrievalCitation(
+                    chunk_id=uuid.uuid4(),
+                    document_id=uuid.uuid4(),
+                    document_title="面试评分标准",
+                    version_number=1,
+                    category="interview",
+                    heading_path=["技术面"],
+                    source_locator="第 1 段",
+                    snippet="系统设计能力需要结合复杂度、取舍和落地结果综合判断。",
+                    score=0.92,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(
+        "app.api.routes.interview_reports.retrieve_recruitment_knowledge",
+        fake_retrieve,
+    )
+    app.dependency_overrides[get_ai_client] = lambda: stub
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.post(
+            f"{report_path(dependency)}/ai-draft",
+            json={"idempotency_key": str(uuid.uuid4())},
+        )
+
+    assert response.status_code == 201, response.text
+    assert len(captured_queries) == 1
+    rag_payload = captured_queries[0]
+    assert rag_payload.scenario == "interview_report"
+    assert rag_payload.job_id == dependency.job_id
+    assert rag_payload.application_id == dependency.application_id
+    ai_payload = stub.calls[0]
+    assert ai_payload["enterprise_knowledge"]["status"] == "available"
+    assert ai_payload["enterprise_knowledge"]["citations"][0]["document_title"] == "面试评分标准"
+    assert "候选人A" not in ai_payload["enterprise_knowledge"]["usage_instruction"]
+
+
+@pytest.mark.asyncio
+async def test_ai_report_continues_when_recruitment_knowledge_retrieval_fails(
+    interview_report_dependencies: InterviewReportDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependency = interview_report_dependencies
+    stub = StubInterviewReportAIClient()
+
+    async def fake_retrieve(db, payload, *, actor):
+        raise RuntimeError("向量检索临时不可用")
+
+    monkeypatch.setattr(settings, "embedding_enabled", True)
+    monkeypatch.setattr(
+        "app.api.routes.interview_reports.retrieve_recruitment_knowledge",
+        fake_retrieve,
+    )
+    app.dependency_overrides[get_ai_client] = lambda: stub
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.post(
+            f"{report_path(dependency)}/ai-draft",
+            json={"idempotency_key": str(uuid.uuid4())},
+        )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["versions"][0]["generation_mode"] == "ai"
+    ai_payload = stub.calls[0]
+    assert ai_payload["enterprise_knowledge"]["status"] == "unavailable"
+    assert ai_payload["enterprise_knowledge"]["citations"] == []
+    assert "RuntimeError" in ai_payload["enterprise_knowledge"]["error"]
 
 
 @pytest.mark.asyncio

@@ -334,6 +334,126 @@ export interface PromptTemplateVersionCreateInput extends PromptTemplateContentI
   idempotencyKey?: string
 }
 
+export type RecruitmentKnowledgeCategory =
+  | 'policy'
+  | 'job_standard'
+  | 'interview'
+  | 'offer'
+  | 'compensation'
+  | 'communication'
+  | 'general'
+export type RecruitmentKnowledgeVisibilityScope =
+  | 'all_internal'
+  | 'recruiter_manager'
+  | 'recruiter_only'
+  | 'admin_only'
+
+export interface RecruitmentKnowledgeBaseRecord {
+  id: string
+  name: string
+  description: string | null
+  status: 'active' | 'inactive'
+  resource_version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface RecruitmentKnowledgeBaseListRecord {
+  items: RecruitmentKnowledgeBaseRecord[]
+}
+
+export interface RecruitmentKnowledgeDocumentRecord {
+  id: string
+  knowledge_base_id: string
+  title: string
+  summary: string | null
+  category: RecruitmentKnowledgeCategory
+  tags: string[]
+  visibility_scope: RecruitmentKnowledgeVisibilityScope
+  related_job_id: string | null
+  status: 'active' | 'archived'
+  current_version_number: number | null
+  resource_version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface RecruitmentKnowledgeVersionRecord {
+  id: string
+  document_id: string
+  version_number: number
+  status: 'draft' | 'published' | 'retired'
+  source_type: 'manual' | 'upload'
+  source_filename: string | null
+  mime_type: string | null
+  content_hash: string
+  change_note: string
+  parser_name: string | null
+  parser_version: string | null
+  chunk_count: number
+  published_at: string | null
+  created_at: string
+}
+
+export interface RecruitmentKnowledgeCreateRecord {
+  document: RecruitmentKnowledgeDocumentRecord
+  version: RecruitmentKnowledgeVersionRecord
+  chunk_count: number
+  embedding_enabled: boolean
+  index_task_id: string | null
+}
+
+export interface RecruitmentKnowledgeManualInput {
+  knowledgeBaseId?: string | null
+  title: string
+  summary?: string | null
+  category: RecruitmentKnowledgeCategory
+  tags: string[]
+  visibilityScope: RecruitmentKnowledgeVisibilityScope
+  changeNote: string
+  rawText: string
+  idempotencyKey?: string
+}
+
+export interface RecruitmentKnowledgeUploadInput {
+  knowledgeBaseId?: string | null
+  title: string
+  summary?: string | null
+  category: RecruitmentKnowledgeCategory
+  tags: string[]
+  visibilityScope: RecruitmentKnowledgeVisibilityScope
+  changeNote: string
+  file: File
+  idempotencyKey?: string
+}
+
+export interface RecruitmentKnowledgeRetrievalCitation {
+  chunk_id: string
+  document_id: string
+  document_title: string
+  version_number: number
+  category: RecruitmentKnowledgeCategory
+  heading_path: string[]
+  source_locator: string | null
+  snippet: string
+  score: number
+}
+
+export interface RecruitmentKnowledgeRetrievalRecord {
+  query_hash: string
+  returned_count: number
+  filtered_count: number
+  citations: RecruitmentKnowledgeRetrievalCitation[]
+}
+
+export interface RecruitmentKnowledgeRetrievalInput {
+  scenario: string
+  query: string
+  category?: RecruitmentKnowledgeCategory | null
+  tags?: string[]
+  limit?: number
+}
+
 export type AnalyticsInterval = 'day' | 'week'
 export type AnalyticsFunnelStage =
   | 'application_created'
@@ -2391,6 +2511,72 @@ export function publishPromptTemplateVersion(
       }),
     },
     '发布 Prompt 版本失败',
+  )
+}
+
+export function fetchRecruitmentKnowledgeBases(): Promise<RecruitmentKnowledgeBaseListRecord> {
+  return apiRequest('/api/recruitment-knowledge/bases', {}, '无法读取企业知识库')
+}
+
+export function createRecruitmentKnowledgeManual(
+  input: RecruitmentKnowledgeManualInput,
+): Promise<RecruitmentKnowledgeCreateRecord> {
+  return apiRequest(
+    '/api/recruitment-knowledge/documents/manual',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        knowledge_base_id: input.knowledgeBaseId ?? null,
+        title: input.title,
+        summary: input.summary ?? null,
+        category: input.category,
+        tags: input.tags,
+        visibility_scope: input.visibilityScope,
+        change_note: input.changeNote,
+        raw_text: input.rawText,
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '保存企业知识文档失败',
+  )
+}
+
+export function uploadRecruitmentKnowledgeDocument(
+  input: RecruitmentKnowledgeUploadInput,
+): Promise<RecruitmentKnowledgeCreateRecord> {
+  const body = new FormData()
+  body.append('idempotency_key', input.idempotencyKey ?? crypto.randomUUID())
+  body.append('title', input.title)
+  body.append('category', input.category)
+  body.append('change_note', input.changeNote)
+  body.append('visibility_scope', input.visibilityScope)
+  if (input.knowledgeBaseId) body.append('knowledge_base_id', input.knowledgeBaseId)
+  if (input.summary) body.append('summary', input.summary)
+  input.tags.forEach((tag) => body.append('tags', tag))
+  body.append('file', input.file)
+  return apiRequest(
+    '/api/recruitment-knowledge/documents/upload',
+    { method: 'POST', body },
+    '上传企业知识文档失败',
+  )
+}
+
+export function retrieveRecruitmentKnowledge(
+  input: RecruitmentKnowledgeRetrievalInput,
+): Promise<RecruitmentKnowledgeRetrievalRecord> {
+  return apiRequest(
+    '/api/recruitment-knowledge/retrieve',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        scenario: input.scenario,
+        query: input.query,
+        category: input.category ?? null,
+        tags: input.tags ?? [],
+        limit: input.limit ?? 5,
+      }),
+    },
+    '检索企业知识库失败',
   )
 }
 

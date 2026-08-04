@@ -17,6 +17,7 @@ import {
   MenuUnfoldOutlined,
   PlusOutlined,
   ProfileOutlined,
+  ReadOutlined,
   SettingOutlined,
   SolutionOutlined,
   TeamOutlined,
@@ -57,6 +58,9 @@ function pageMeta(pathname: string) {
   }
   if (pathname.startsWith('/prompt-templates')) {
     return { title: 'PromptOps', subtitle: '维护场景化 Prompt 模板、发布版本和回滚历史' }
+  }
+  if (pathname.startsWith('/recruitment-knowledge')) {
+    return { title: '企业知识库', subtitle: '维护招聘知识文档并预览 RAG 检索引用' }
   }
   if (pathname.startsWith('/recruitment-requests')) {
     return { title: '招聘需求', subtitle: '发起、审批并追踪招聘任务来源' }
@@ -160,6 +164,9 @@ export function AppLayout() {
   const canAccessCommunications = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
   )
+  const canAccessRecruitmentKnowledge = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
+  )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
   const showJobContext = ['jobs', 'screening', 'candidate-process', 'interviews'].includes(
     activeModule,
@@ -184,6 +191,16 @@ export function AppLayout() {
             label: 'PromptOps',
             icon: <BranchesOutlined />,
             path: '/prompt-templates',
+          },
+        ]
+      : []),
+    ...(canAccessRecruitmentKnowledge
+      ? [
+          {
+            key: 'recruitment-knowledge' as const,
+            label: '企业知识库',
+            icon: <ReadOutlined />,
+            path: '/recruitment-knowledge',
           },
         ]
       : []),

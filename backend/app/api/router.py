@@ -21,6 +21,7 @@ from app.api.routes.offer_portal import router as offer_portal_router
 from app.api.routes.offers import router as offers_router
 from app.api.routes.onboardings import router as onboardings_router
 from app.api.routes.prompt_templates import router as prompt_templates_router
+from app.api.routes.recruitment_knowledge import router as recruitment_knowledge_router
 from app.api.routes.recruitment_requests import router as recruitment_requests_router
 from app.api.routes.screening_results import router as screening_results_router
 from app.api.routes.talent_pool import router as talent_pool_router
@@ -62,6 +63,11 @@ api_router.include_router(
     prompt_templates_router,
     prefix="/prompt-templates",
     tags=["prompt-templates"],
+)
+api_router.include_router(
+    recruitment_knowledge_router,
+    prefix="/recruitment-knowledge",
+    tags=["recruitment-knowledge"],
 )
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(offers_router, tags=["offers"])
