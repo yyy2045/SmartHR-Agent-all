@@ -1,5 +1,5 @@
-from app.models.audit import AuditLog
 from app.models.ai_observability import AiCallLog, AiTask, AiTaskEvent
+from app.models.audit import AuditLog
 from app.models.candidate import (
     ApplicationResumeDocument,
     Candidate,
