@@ -186,8 +186,11 @@ def test_prompt_template_versions_are_immutable(
         db.add_all([template, version])
         db.commit()
 
+        version.status = "retired"
+        db.commit()
+
         version.change_note = "尝试覆盖历史版本"
-        with pytest.raises(ValueError, match="不可修改"):
+        with pytest.raises(ValueError, match="正文不可修改"):
             db.commit()
         db.rollback()
 

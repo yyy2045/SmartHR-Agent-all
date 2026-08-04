@@ -17,6 +17,7 @@ from sqlalchemy import (
     Uuid,
     event,
     func,
+    inspect,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -202,7 +203,20 @@ def _protect_prompt_template_version_update(
     _connection: object,
     _target: PromptTemplateVersion,
 ) -> None:
-    raise ValueError("Prompt 模板历史版本不可修改")
+    allowed_lifecycle_fields = {
+        "status",
+        "published_by_id",
+        "published_by_username",
+        "published_by_display_name",
+        "published_at",
+    }
+    state = inspect(_target)
+    changed_fields = {
+        attribute.key for attribute in state.attrs if attribute.history.has_changes()
+    }
+    forbidden_fields = changed_fields.difference(allowed_lifecycle_fields)
+    if forbidden_fields:
+        raise ValueError("Prompt 模板历史版本正文不可修改")
 
 
 @event.listens_for(PromptTemplateVersion, "before_delete")
