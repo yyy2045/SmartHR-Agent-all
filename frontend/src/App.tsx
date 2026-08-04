@@ -98,6 +98,9 @@ const OnboardingManagementPage = lazy(() =>
 const WorkbenchPage = lazy(() =>
   import('./pages/WorkbenchPage').then((module) => ({ default: module.WorkbenchPage })),
 )
+const AIConsolePage = lazy(() =>
+  import('./pages/AIConsolePage').then((module) => ({ default: module.AIConsolePage })),
+)
 const NotificationCenterPage = lazy(() =>
   import('./pages/NotificationCenterPage').then((module) => ({
     default: module.NotificationCenterPage,
@@ -145,6 +148,7 @@ function AppRoutes() {
                   }
                 >
                   <Route path="/workbench" element={<WorkbenchPage />} />
+                  <Route path="/ai-console" element={<AIConsolePage />} />
                   <Route path="/notifications" element={<NotificationCenterPage />} />
                   <Route path="/analytics" element={<AnalyticsPage />} />
                 </Route>
