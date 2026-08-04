@@ -157,6 +157,24 @@ async def test_hiring_manager_cannot_maintain_recruitment_knowledge(
 
 
 @pytest.mark.asyncio
+async def test_retrieve_returns_conflict_when_embedding_is_disabled(
+    recruitment_knowledge_route_dependencies: RecruitmentKnowledgeRouteDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        response = await client.post(
+            "/recruitment-knowledge/retrieve",
+            json={
+                "scenario": "candidate_qa",
+                "query": "招聘流程是什么？",
+                "limit": 3,
+            },
+        )
+        assert response.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_upload_text_knowledge_document_records_source_metadata(
     recruitment_knowledge_route_dependencies: RecruitmentKnowledgeRouteDependencies,
 ) -> None:

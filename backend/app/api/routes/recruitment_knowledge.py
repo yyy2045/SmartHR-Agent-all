@@ -14,14 +14,18 @@ from app.schemas.recruitment_knowledge import (
     RecruitmentKnowledgeDocumentResponse,
     RecruitmentKnowledgeDocumentVersionCreateRequest,
     RecruitmentKnowledgeDocumentVersionCreateResponse,
+    RecruitmentKnowledgeRetrievalRequest,
+    RecruitmentKnowledgeRetrievalResponse,
     RecruitmentKnowledgeVersionResponse,
 )
+from app.services.embedding_client import EmbeddingClientError
 from app.services.recruitment_knowledge import (
     RecruitmentKnowledgeError,
     create_manual_knowledge_version,
     ensure_default_knowledge_base,
     list_knowledge_bases,
     parse_and_store_knowledge_upload,
+    retrieve_recruitment_knowledge,
 )
 from app.workers.dispatcher import enqueue_recruitment_knowledge_index
 
@@ -68,6 +72,26 @@ def _create_response(
         embedding_enabled=settings.embedding_enabled,
         index_task_id=index_task_id,
     )
+
+
+@router.post("/retrieve", response_model=RecruitmentKnowledgeRetrievalResponse)
+async def retrieve_recruitment_knowledge_context(
+    payload: RecruitmentKnowledgeRetrievalRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> RecruitmentKnowledgeRetrievalResponse:
+    if not settings.embedding_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Embedding 功能尚未启用，无法执行知识库检索",
+        )
+    try:
+        return await retrieve_recruitment_knowledge(db, payload, actor=current_user)
+    except EmbeddingClientError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(error),
+        ) from error
 
 
 @router.get("/bases", response_model=RecruitmentKnowledgeBaseListResponse)

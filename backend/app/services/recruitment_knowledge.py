@@ -19,10 +19,14 @@ from app.models import (
     RecruitmentKnowledgeChunk,
     RecruitmentKnowledgeDocument,
     RecruitmentKnowledgeDocumentVersion,
+    RecruitmentKnowledgeRetrievalLog,
     User,
 )
 from app.schemas.recruitment_knowledge import (
     RecruitmentKnowledgeDocumentVersionCreateRequest,
+    RecruitmentKnowledgeRetrievalCitation,
+    RecruitmentKnowledgeRetrievalRequest,
+    RecruitmentKnowledgeRetrievalResponse,
 )
 from app.services.embedding_client import (
     EmbeddingClient,
@@ -574,3 +578,145 @@ def _failure_details(error: Exception) -> tuple[str, str]:
     if isinstance(error, EmbeddingUpstreamError):
         return "embedding_upstream_failed", str(error)
     return "embedding_failed", "企业招聘知识库索引失败，请稍后重试"
+
+
+def visible_knowledge_scopes(user: User) -> set[str]:
+    if user.has_role("administrator"):
+        return {"all_internal", "recruiter_manager", "recruiter_only", "admin_only"}
+    scopes = {"all_internal"}
+    if user.has_role("recruiter"):
+        scopes.update({"recruiter_manager", "recruiter_only"})
+    if user.has_role("hiring_manager"):
+        scopes.add("recruiter_manager")
+    return scopes
+
+
+def _cosine_distance(left: list[float], right: list[float]) -> float:
+    left_norm = sum(value * value for value in left) ** 0.5
+    right_norm = sum(value * value for value in right) ** 0.5
+    if left_norm == 0 or right_norm == 0:
+        return 1.0
+    similarity = sum(a * b for a, b in zip(left, right, strict=True)) / (left_norm * right_norm)
+    return 1.0 - similarity
+
+
+def _chunk_snippet(value: str, *, max_length: int = 260) -> str:
+    normalized = normalize_resume_text(value).replace("\n", " ")
+    return normalized if len(normalized) <= max_length else f"{normalized[:max_length]}..."
+
+
+def _query_hash(query: str) -> str:
+    return hashlib.sha256(normalize_resume_text(query).encode("utf-8")).hexdigest()
+
+
+async def retrieve_recruitment_knowledge(
+    db: Session,
+    payload: RecruitmentKnowledgeRetrievalRequest,
+    *,
+    actor: User,
+    embedding_client: EmbeddingClient | None = None,
+) -> RecruitmentKnowledgeRetrievalResponse:
+    client = embedding_client or get_embedding_client()
+    vectors = await client.embed([normalize_resume_text(payload.query)])
+    if len(vectors) != 1 or len(vectors[0]) != client.dimension:
+        raise EmbeddingResponseValidationError("知识库检索向量维度不正确")
+    query_vector = vectors[0]
+    scopes = visible_knowledge_scopes(actor)
+
+    base_filters = [
+        RecruitmentKnowledgeChunk.embedding_model == client.model,
+        RecruitmentKnowledgeChunk.embedding_version == client.version,
+        RecruitmentKnowledgeChunk.embedding_dimension == client.dimension,
+        RecruitmentKnowledgeChunk.status == "completed",
+        RecruitmentKnowledgeChunk.embedding.is_not(None),
+        RecruitmentKnowledgeDocument.status == "active",
+        RecruitmentKnowledgeDocument.current_version_number
+        == RecruitmentKnowledgeDocumentVersion.version_number,
+        RecruitmentKnowledgeDocumentVersion.status == "published",
+        RecruitmentKnowledgeBase.status == "active",
+    ]
+    if payload.category:
+        base_filters.append(RecruitmentKnowledgeDocument.category == payload.category)
+    all_matching = list(
+        db.scalars(
+            select(RecruitmentKnowledgeChunk)
+            .join(
+                RecruitmentKnowledgeDocument,
+                RecruitmentKnowledgeChunk.document_id == RecruitmentKnowledgeDocument.id,
+            )
+            .join(
+                RecruitmentKnowledgeDocumentVersion,
+                RecruitmentKnowledgeChunk.document_version_id
+                == RecruitmentKnowledgeDocumentVersion.id,
+            )
+            .join(
+                RecruitmentKnowledgeBase,
+                RecruitmentKnowledgeChunk.knowledge_base_id == RecruitmentKnowledgeBase.id,
+            )
+            .where(*base_filters)
+        )
+    )
+    requested_tags = set(_normalize_tags(payload.tags))
+    visible_matching = [
+        chunk
+        for chunk in all_matching
+        if chunk.document.visibility_scope in scopes
+        and chunk.document_version_id == chunk.document.current_version.id
+        and (not requested_tags or requested_tags.issubset(set(chunk.document.tags)))
+    ]
+    filtered_count = max(0, len(all_matching) - len(visible_matching))
+
+    ranked: list[tuple[RecruitmentKnowledgeChunk, float]] = []
+    for chunk in visible_matching:
+        if chunk.embedding is None:
+            continue
+        ranked.append((chunk, _cosine_distance(list(chunk.embedding), query_vector)))
+    ranked.sort(key=lambda item: (item[1], item[0].chunk_index))
+    selected = ranked[: payload.limit]
+
+    citations = [
+        RecruitmentKnowledgeRetrievalCitation(
+            chunk_id=chunk.id,
+            document_id=chunk.document_id,
+            document_title=chunk.document.title,
+            version_number=chunk.document_version.version_number,
+            category=chunk.document.category,
+            heading_path=chunk.heading_path,
+            source_locator=chunk.source_locator,
+            snippet=_chunk_snippet(chunk.chunk_text),
+            score=round(max(0.0, 1.0 - distance), 6),
+        )
+        for chunk, distance in selected
+    ]
+    query_hash = _query_hash(payload.query)
+    db.add(
+        RecruitmentKnowledgeRetrievalLog(
+            scenario=payload.scenario,
+            query_hash=query_hash,
+            query_summary=_chunk_snippet(payload.query, max_length=500),
+            invoked_by_id=actor.id,
+            resource_type=payload.resource_type,
+            resource_id=payload.resource_id,
+            job_id=payload.job_id,
+            application_id=payload.application_id,
+            embedding_model=client.model,
+            embedding_dimension=client.dimension,
+            embedding_version=client.version,
+            limit_count=payload.limit,
+            returned_count=len(citations),
+            filtered_count=filtered_count,
+            retrieved_chunk_ids=[str(citation.chunk_id) for citation in citations],
+            details={
+                "category": payload.category,
+                "tags": _normalize_tags(payload.tags),
+                "visibility_scopes": sorted(scopes),
+            },
+        )
+    )
+    db.commit()
+    return RecruitmentKnowledgeRetrievalResponse(
+        query_hash=query_hash,
+        returned_count=len(citations),
+        filtered_count=filtered_count,
+        citations=citations,
+    )

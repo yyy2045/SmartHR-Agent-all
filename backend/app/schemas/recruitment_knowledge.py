@@ -113,6 +113,18 @@ class RecruitmentKnowledgeRetrievalResponse(BaseModel):
     citations: list[RecruitmentKnowledgeRetrievalCitation]
 
 
+class RecruitmentKnowledgeRetrievalRequest(BaseModel):
+    scenario: str = Field(min_length=1, max_length=80)
+    query: str = Field(min_length=1, max_length=4000)
+    category: RecruitmentKnowledgeCategory | None = None
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    limit: int = Field(default=5, ge=1, le=20)
+    resource_type: str | None = Field(default=None, max_length=80)
+    resource_id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = None
+    application_id: uuid.UUID | None = None
+
+
 class RecruitmentKnowledgeBaseListResponse(BaseModel):
     items: list[RecruitmentKnowledgeBaseResponse]
 
