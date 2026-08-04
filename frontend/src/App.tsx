@@ -106,6 +106,9 @@ const WorkbenchPage = lazy(() =>
 const AIConsolePage = lazy(() =>
   import('./pages/AIConsolePage').then((module) => ({ default: module.AIConsolePage })),
 )
+const AIEvaluationPage = lazy(() =>
+  import('./pages/AIEvaluationPage').then((module) => ({ default: module.AIEvaluationPage })),
+)
 const PromptTemplateManagementPage = lazy(() =>
   import('./pages/PromptTemplateManagementPage').then((module) => ({
     default: module.PromptTemplateManagementPage,
@@ -164,6 +167,7 @@ function AppRoutes() {
                 >
                   <Route path="/workbench" element={<WorkbenchPage />} />
                   <Route path="/ai-console" element={<AIConsolePage />} />
+                  <Route path="/ai-evaluations" element={<AIEvaluationPage />} />
                   <Route path="/notifications" element={<NotificationCenterPage />} />
                   <Route path="/analytics" element={<AnalyticsPage />} />
                 </Route>

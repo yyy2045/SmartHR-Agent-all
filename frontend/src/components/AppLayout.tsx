@@ -9,6 +9,7 @@ import {
   CloudServerOutlined,
   ContactsOutlined,
   DatabaseOutlined,
+  ExperimentOutlined,
   FileSearchOutlined,
   FileDoneOutlined,
   LogoutOutlined,
@@ -55,6 +56,9 @@ function pageMeta(pathname: string) {
   }
   if (pathname.startsWith('/ai-console')) {
     return { title: 'AI 控制台', subtitle: '管理可观测、可追溯、可评测的 AI Agent 工程能力' }
+  }
+  if (pathname.startsWith('/ai-evaluations')) {
+    return { title: 'AI 评测', subtitle: '运行固定样本评测并沉淀错误案例库' }
   }
   if (pathname.startsWith('/prompt-templates')) {
     return { title: 'PromptOps', subtitle: '维护场景化 Prompt 模板、发布版本和回滚历史' }
@@ -184,6 +188,16 @@ export function AppLayout() {
       icon: <CloudServerOutlined />,
       path: '/ai-console',
     },
+    ...(isAdministrator
+      ? [
+          {
+            key: 'ai-evaluations' as const,
+            label: 'AI评测',
+            icon: <ExperimentOutlined />,
+            path: '/ai-evaluations',
+          },
+        ]
+      : []),
     ...(isAdministrator
       ? [
           {

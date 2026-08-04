@@ -260,6 +260,140 @@ export interface AiObservabilityFilters {
   offset?: number
 }
 
+export type AiEvaluationScenario =
+  | 'resume_analysis'
+  | 'candidate_qa'
+  | 'interview_report'
+  | 'offer_copy'
+  | 'candidate_comparison'
+export type AiEvaluationDatasetStatus = 'active' | 'archived'
+export type AiEvaluationRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type AiEvaluationResultStatus = 'passed' | 'failed' | 'error' | 'skipped'
+export type AiEvaluationErrorType =
+  | 'wrong_recommendation'
+  | 'evidence_missing'
+  | 'hallucination'
+  | 'format_error'
+  | 'risk_omission'
+  | 'timeout'
+  | 'other'
+export type AiEvaluationErrorSeverity = 'low' | 'medium' | 'high' | 'critical'
+export type AiEvaluationErrorStatus = 'open' | 'resolved' | 'ignored'
+
+export interface AiEvaluationDatasetRecord {
+  id: string
+  code: string
+  name: string
+  scenario: AiEvaluationScenario
+  description: string | null
+  version_number: number
+  status: AiEvaluationDatasetStatus
+  created_by_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AiEvaluationDatasetListRecord {
+  items: AiEvaluationDatasetRecord[]
+}
+
+export interface AiEvaluationRunRecord {
+  id: string
+  dataset_id: string
+  name: string
+  scenario: AiEvaluationScenario
+  status: AiEvaluationRunStatus
+  provider: string
+  model_name: string | null
+  prompt_template_version_id: string | null
+  prompt_version: string | null
+  run_config: Record<string, unknown>
+  metrics_summary: Record<string, unknown>
+  total_samples: number
+  completed_samples: number
+  passed_samples: number
+  failed_samples: number
+  average_score: number | null
+  duration_ms: number | null
+  failure_code: string | null
+  failure_message: string | null
+  created_by_id: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AiEvaluationRunListRecord {
+  total: number
+  items: AiEvaluationRunRecord[]
+}
+
+export interface AiEvaluationResultRecord {
+  id: string
+  run_id: string
+  sample_id: string
+  status: AiEvaluationResultStatus
+  score: number | null
+  actual_output: Record<string, unknown>
+  expected_snapshot: Record<string, unknown>
+  error_types: AiEvaluationErrorType[]
+  evidence_coverage_score: number | null
+  format_valid: boolean | null
+  recommendation_matched: boolean | null
+  ai_call_log_id: string | null
+  duration_ms: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  failure_code: string | null
+  failure_message: string | null
+  created_at: string
+}
+
+export interface AiEvaluationRunDetailRecord {
+  run: AiEvaluationRunRecord
+  results: AiEvaluationResultRecord[]
+}
+
+export interface AiEvaluationErrorCaseRecord {
+  id: string
+  result_id: string
+  dataset_id: string
+  run_id: string
+  sample_id: string
+  error_type: AiEvaluationErrorType
+  severity: AiEvaluationErrorSeverity
+  status: AiEvaluationErrorStatus
+  title: string
+  description: string | null
+  expected_behavior: string | null
+  actual_behavior: string | null
+  remediation_note: string | null
+  created_by_id: string | null
+  resolved_by_id: string | null
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AiEvaluationErrorCaseListRecord {
+  total: number
+  items: AiEvaluationErrorCaseRecord[]
+}
+
+export interface AiEvaluationRunInput {
+  modelName?: string
+  promptVersion?: string
+  forcedErrorCaseKeys?: string[]
+}
+
+export interface AiEvaluationFilters {
+  status?: string
+  limit?: number
+  offset?: number
+}
+
 export type PromptScenario =
   | 'jd_generation'
   | 'resume_analysis'
@@ -2474,6 +2608,89 @@ export function fetchAIObservabilityCalls(
     `/api/ai-observability/calls${buildAIObservabilityQuery(filters)}`,
     {},
     '无法读取 AI 调用日志',
+  )
+}
+
+function buildAIEvaluationQuery(filters: AiEvaluationFilters = {}): string {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  return query.size ? `?${query.toString()}` : ''
+}
+
+export function fetchAIEvaluationDatasets(): Promise<AiEvaluationDatasetListRecord> {
+  return apiRequest('/api/ai-evaluations/datasets', {}, '无法读取 AI 评测数据集')
+}
+
+export function createDefaultResumeEvaluationDataset(): Promise<AiEvaluationDatasetRecord> {
+  return apiRequest(
+    '/api/ai-evaluations/datasets/default-resume',
+    { method: 'POST' },
+    '初始化默认评测集失败',
+  )
+}
+
+export function runOfflineResumeEvaluation(
+  input: AiEvaluationRunInput = {},
+): Promise<AiEvaluationRunRecord> {
+  return apiRequest(
+    '/api/ai-evaluations/runs/offline-resume',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        model_name: input.modelName ?? 'deterministic-evaluator',
+        prompt_version: input.promptVersion ?? 'synthetic-baseline-v1',
+        forced_error_case_keys: input.forcedErrorCaseKeys ?? [],
+      }),
+    },
+    '启动离线评测失败',
+  )
+}
+
+export function fetchAIEvaluationRuns(
+  filters: AiEvaluationFilters = {},
+): Promise<AiEvaluationRunListRecord> {
+  return apiRequest(
+    `/api/ai-evaluations/runs${buildAIEvaluationQuery(filters)}`,
+    {},
+    '无法读取 AI 评测运行',
+  )
+}
+
+export function fetchAIEvaluationRun(runId: string): Promise<AiEvaluationRunDetailRecord> {
+  return apiRequest(
+    `/api/ai-evaluations/runs/${encodeURIComponent(runId)}`,
+    {},
+    '无法读取 AI 评测详情',
+  )
+}
+
+export function fetchAIEvaluationErrorCases(
+  filters: AiEvaluationFilters = {},
+): Promise<AiEvaluationErrorCaseListRecord> {
+  return apiRequest(
+    `/api/ai-evaluations/error-cases${buildAIEvaluationQuery(filters)}`,
+    {},
+    '无法读取 AI 错误案例',
+  )
+}
+
+export function updateAIEvaluationErrorCase(
+  caseId: string,
+  status: AiEvaluationErrorStatus,
+  remediationNote?: string,
+): Promise<AiEvaluationErrorCaseRecord> {
+  return apiRequest(
+    `/api/ai-evaluations/error-cases/${encodeURIComponent(caseId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status,
+        remediation_note: remediationNote?.trim() || null,
+      }),
+    },
+    '更新 AI 错误案例失败',
   )
 }
 

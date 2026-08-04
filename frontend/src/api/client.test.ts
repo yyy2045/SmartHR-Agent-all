@@ -5,6 +5,7 @@ import {
   AUTH_UNAUTHORIZED_EVENT,
   activateMessageTemplate,
   askCandidateAgent,
+  createDefaultResumeEvaluationDataset,
   createCandidateAgentSession,
   createOfferPortalLink,
   createMessageTemplate,
@@ -19,6 +20,10 @@ import {
   fetchAIObservabilityCalls,
   fetchAIObservabilitySummary,
   fetchAIObservabilityTasks,
+  fetchAIEvaluationDatasets,
+  fetchAIEvaluationErrorCases,
+  fetchAIEvaluationRun,
+  fetchAIEvaluationRuns,
   fetchOfferPortalStatus,
   fetchCurrentUser,
   fetchCommunicationRecord,
@@ -46,8 +51,10 @@ import {
   recordCommunicationCopyAudit,
   respondToOfferPortal,
   retryResumeParsing,
+  runOfflineResumeEvaluation,
   uploadRecruitmentKnowledgeDocument,
   updateCandidatePhone,
+  updateAIEvaluationErrorCase,
   verifyOfferPortal,
 } from './client'
 
@@ -278,6 +285,49 @@ describe('API client', () => {
     expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
       question: '这个候选人的风险是什么？',
       idempotency_key: 'agent-key-1',
+    })
+  })
+
+  it('builds AI evaluation requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ items: [], total: 0, id: 'run-1', run: {}, results: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchAIEvaluationDatasets()
+    await createDefaultResumeEvaluationDataset()
+    await runOfflineResumeEvaluation({
+      modelName: 'deterministic-evaluator',
+      promptVersion: 'synthetic-test-v1',
+      forcedErrorCaseKeys: ['BE-01'],
+    })
+    await fetchAIEvaluationRuns({ status: 'failed', limit: 20, offset: 0 })
+    await fetchAIEvaluationRun('run-1')
+    await fetchAIEvaluationErrorCases({ status: 'open', limit: 50, offset: 10 })
+    await updateAIEvaluationErrorCase('case-1', 'resolved', '已复盘')
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/ai-evaluations/datasets')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/ai-evaluations/datasets/default-resume')
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/ai-evaluations/runs/offline-resume')
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
+      model_name: 'deterministic-evaluator',
+      prompt_version: 'synthetic-test-v1',
+      forced_error_case_keys: ['BE-01'],
+    })
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/ai-evaluations/runs?status=failed&limit=20&offset=0')
+    expect(fetchMock.mock.calls[4][0]).toBe('/api/ai-evaluations/runs/run-1')
+    expect(fetchMock.mock.calls[5][0]).toBe(
+      '/api/ai-evaluations/error-cases?status=open&limit=50&offset=10',
+    )
+    expect(fetchMock.mock.calls[6][0]).toBe('/api/ai-evaluations/error-cases/case-1')
+    expect(JSON.parse(fetchMock.mock.calls[6][1]?.body as string)).toEqual({
+      status: 'resolved',
+      remediation_note: '已复盘',
     })
   })
 
