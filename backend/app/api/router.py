@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.routes.ai_observability import router as ai_observability_router
 from app.api.routes.analytics import router as analytics_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.batches import router as batches_router
@@ -31,6 +32,11 @@ api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(health_router, prefix="/health", tags=["health"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(workbench_router, prefix="/workbench", tags=["workbench"])
+api_router.include_router(
+    ai_observability_router,
+    prefix="/ai-observability",
+    tags=["ai-observability"],
+)
 api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(candidates_router, prefix="/candidates", tags=["candidates"])
 api_router.include_router(

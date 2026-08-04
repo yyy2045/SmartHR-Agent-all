@@ -9,6 +9,9 @@ import {
   createMessageTemplateVersion,
   createScreeningBatch,
   deactivateMessageTemplate,
+  fetchAIObservabilityCalls,
+  fetchAIObservabilitySummary,
+  fetchAIObservabilityTasks,
   fetchOfferPortalStatus,
   fetchCurrentUser,
   fetchCommunicationRecord,
@@ -186,6 +189,40 @@ describe('API client', () => {
     expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
     expect(fetchMock.mock.calls[3][0]).toBe('/api/notifications/read-all')
     expect(fetchMock.mock.calls[3][1]).toMatchObject({ method: 'POST' })
+  })
+
+  it('builds AI observability summary, task and call requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ items: [], total: 0, limit: 20, offset: 0 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchAIObservabilitySummary()
+    await fetchAIObservabilityTasks({
+      status: 'failed',
+      scenario: 'resume_analysis',
+      limit: 20,
+      offset: 40,
+    })
+    await fetchAIObservabilityCalls({
+      status: 'succeeded',
+      scenario: 'jd_generation',
+      limit: 10,
+      offset: 0,
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/ai-observability/summary')
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      '/api/ai-observability/tasks?status=failed&scenario=resume_analysis&limit=20&offset=40',
+    )
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      '/api/ai-observability/calls?status=succeeded&scenario=jd_generation&limit=10&offset=0',
+    )
   })
 
   it('builds message template and communication requests', async () => {

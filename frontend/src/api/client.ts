@@ -167,6 +167,98 @@ export interface InternalNotificationReadAllRecord {
   read_at: string
 }
 
+export type AiTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'retrying' | 'cancelled'
+export type AiCallStatus = 'succeeded' | 'failed'
+
+export interface AiObservabilityCountRecord {
+  key: string
+  count: number
+}
+
+export interface AiObservabilitySummaryRecord {
+  task_total: number
+  call_total: number
+  failed_task_count: number
+  failed_call_count: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  avg_task_duration_ms: number | null
+  avg_call_duration_ms: number | null
+  task_status_counts: AiObservabilityCountRecord[]
+  call_status_counts: AiObservabilityCountRecord[]
+  call_scenario_counts: AiObservabilityCountRecord[]
+}
+
+export interface AiTaskRecord {
+  id: string
+  celery_task_id: string | null
+  task_name: string
+  scenario: string
+  status: AiTaskStatus
+  attempt_count: number
+  max_retries: number
+  resource_type: string | null
+  resource_id: string | null
+  job_id: string | null
+  batch_id: string | null
+  document_id: string | null
+  application_id: string | null
+  candidate_profile_id: string | null
+  failure_code: string | null
+  failure_message: string | null
+  duration_ms: number | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+}
+
+export interface AiTaskListRecord {
+  items: AiTaskRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AiCallLogRecord {
+  id: string
+  task_id: string | null
+  scenario: string
+  status: AiCallStatus
+  model_name: string | null
+  prompt_version: string | null
+  provider: string
+  retry_count: number
+  duration_ms: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  resource_type: string | null
+  resource_id: string | null
+  job_id: string | null
+  batch_id: string | null
+  document_id: string | null
+  application_id: string | null
+  candidate_profile_id: string | null
+  failure_code: string | null
+  failure_message: string | null
+  created_at: string
+}
+
+export interface AiCallLogListRecord {
+  items: AiCallLogRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AiObservabilityFilters {
+  status?: string
+  scenario?: string
+  limit?: number
+  offset?: number
+}
+
 export type AnalyticsInterval = 'day' | 'week'
 export type AnalyticsFunnelStage =
   | 'application_created'
@@ -2111,6 +2203,39 @@ export function markAllInternalNotificationsRead(): Promise<InternalNotification
     '/api/notifications/read-all',
     { method: 'POST' },
     '全部标记已读失败',
+  )
+}
+
+export function fetchAIObservabilitySummary(): Promise<AiObservabilitySummaryRecord> {
+  return apiRequest('/api/ai-observability/summary', {}, '无法读取 AI 可观测摘要')
+}
+
+function buildAIObservabilityQuery(filters: AiObservabilityFilters = {}): string {
+  const query = new URLSearchParams()
+  if (filters.status) query.set('status', filters.status)
+  if (filters.scenario?.trim()) query.set('scenario', filters.scenario.trim())
+  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
+  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
+  return query.size ? `?${query.toString()}` : ''
+}
+
+export function fetchAIObservabilityTasks(
+  filters: AiObservabilityFilters = {},
+): Promise<AiTaskListRecord> {
+  return apiRequest(
+    `/api/ai-observability/tasks${buildAIObservabilityQuery(filters)}`,
+    {},
+    '无法读取 AI 任务中心',
+  )
+}
+
+export function fetchAIObservabilityCalls(
+  filters: AiObservabilityFilters = {},
+): Promise<AiCallLogListRecord> {
+  return apiRequest(
+    `/api/ai-observability/calls${buildAIObservabilityQuery(filters)}`,
+    {},
+    '无法读取 AI 调用日志',
   )
 }
 
