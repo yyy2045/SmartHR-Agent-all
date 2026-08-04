@@ -1,13 +1,26 @@
 import {
   ApiOutlined,
   BranchesOutlined,
+  ClockCircleOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
   FileSearchOutlined,
+  ReloadOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
-import { Button, Card, Space, Tag, Typography } from 'antd'
+import { useQuery } from '@tanstack/react-query'
+import { Alert, Button, Card, Empty, Space, Table, Tabs, Tag, Typography } from 'antd'
 import type { ReactNode } from 'react'
+
+import {
+  fetchAIObservabilityCalls,
+  fetchAIObservabilitySummary,
+  fetchAIObservabilityTasks,
+  type AiCallLogRecord,
+  type AiCallStatus,
+  type AiTaskRecord,
+  type AiTaskStatus,
+} from '../api/client'
 
 const { Text, Title } = Typography
 
@@ -24,8 +37,34 @@ interface AiCapability {
 
 const statusMeta: Record<AiCapabilityStatus, { label: string; color: string }> = {
   ready: { label: '入口已就绪', color: 'success' },
-  next: { label: '下一步开发', color: 'processing' },
+  next: { label: '当前开发', color: 'processing' },
   planned: { label: '计划中', color: 'default' },
+}
+
+const taskStatusMeta: Record<AiTaskStatus, { label: string; color: string }> = {
+  queued: { label: '排队中', color: 'default' },
+  running: { label: '处理中', color: 'processing' },
+  succeeded: { label: '成功', color: 'success' },
+  failed: { label: '失败', color: 'error' },
+  retrying: { label: '重试中', color: 'warning' },
+  cancelled: { label: '已取消', color: 'default' },
+}
+
+const callStatusMeta: Record<AiCallStatus, { label: string; color: string }> = {
+  succeeded: { label: '成功', color: 'success' },
+  failed: { label: '失败', color: 'error' },
+}
+
+const scenarioLabels: Record<string, string> = {
+  jd_generation: 'JD 结构化',
+  resume_parse: '简历解析',
+  resume_analysis: '简历评分',
+  resume_analysis_repair: '简历评分修复',
+  interview_report: '面试报告',
+  knowledge_indexing: '知识入库',
+  talent_recommendation: '人才推荐',
+  talent_recommendation_rescoring: '推荐重评',
+  talent_recommendation_repair: '推荐修复',
 }
 
 const capabilities: AiCapability[] = [
@@ -71,73 +110,313 @@ const capabilities: AiCapability[] = [
   },
 ]
 
+function formatDateTime(value: string | null) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function formatDuration(value: number | null) {
+  if (value === null) return '—'
+  if (value < 1000) return `${value}ms`
+  return `${(value / 1000).toFixed(1)}s`
+}
+
+function scenarioLabel(value: string) {
+  return scenarioLabels[value] ?? value
+}
+
+function resourceLabel(record: Pick<AiTaskRecord | AiCallLogRecord, 'resource_type' | 'resource_id'>) {
+  if (!record.resource_type || !record.resource_id) return '—'
+  return `${record.resource_type} / ${record.resource_id.slice(0, 8)}`
+}
+
 export function AIConsolePage() {
+  const summary = useQuery({
+    queryKey: ['ai-observability', 'summary'],
+    queryFn: fetchAIObservabilitySummary,
+    staleTime: 15_000,
+  })
+  const tasks = useQuery({
+    queryKey: ['ai-observability', 'tasks'],
+    queryFn: () => fetchAIObservabilityTasks({ limit: 20, offset: 0 }),
+    staleTime: 15_000,
+  })
+  const calls = useQuery({
+    queryKey: ['ai-observability', 'calls'],
+    queryFn: () => fetchAIObservabilityCalls({ limit: 20, offset: 0 }),
+    staleTime: 15_000,
+  })
+
+  function refreshAll() {
+    void summary.refetch()
+    void tasks.refetch()
+    void calls.refetch()
+  }
+
+  const overview = summary.data
+
   return (
     <div className="ai-console-page">
       <section className="page-heading ai-console-heading">
         <div>
           <Title level={2}>AI Agent 工程化专项</Title>
           <Text type="secondary">
-            招聘闭环作为业务载体，重点展示 AI 可观测、PromptOps、RAG、Agent 和评测治理。
+            招聘闭环是业务载体，重点展示 AI 可观测、PromptOps、RAG、Agent 和评测治理。
           </Text>
         </div>
-        <Space size="small" wrap>
-          <Tag color="blue">AI-00</Tag>
-          <Tag color="success">导航骨架</Tag>
-        </Space>
+        <Button icon={<ReloadOutlined />} onClick={refreshAll} loading={summary.isFetching}>
+          刷新
+        </Button>
       </section>
+
+      {summary.isError && (
+        <Alert
+          type="error"
+          showIcon
+          className="page-alert"
+          message="无法读取 AI 控制台数据"
+          description={summary.error.message}
+          action={<Button onClick={() => void summary.refetch()}>重试</Button>}
+        />
+      )}
 
       <section className="ai-console-overview" aria-label="AI 工程化概览">
         <div>
-          <Text type="secondary">当前专项</Text>
-          <strong>5</strong>
-          <span>项核心 AI 工程能力</span>
+          <Text type="secondary">AI 任务</Text>
+          <strong>{overview?.task_total ?? 0}</strong>
+          <span>失败 {overview?.failed_task_count ?? 0} 个</span>
         </div>
         <div>
-          <Text type="secondary">当前阶段</Text>
-          <strong>AI-00</strong>
-          <span>入口与项目定位已建立</span>
+          <Text type="secondary">模型调用</Text>
+          <strong>{overview?.call_total ?? 0}</strong>
+          <span>失败 {overview?.failed_call_count ?? 0} 次</span>
         </div>
         <div>
-          <Text type="secondary">下一小功能</Text>
-          <strong>AI-01</strong>
-          <span>调用日志与任务中心</span>
+          <Text type="secondary">Token 消耗</Text>
+          <strong>{overview?.total_tokens ?? 0}</strong>
+          <span>
+            输入 {overview?.total_input_tokens ?? 0} / 输出 {overview?.total_output_tokens ?? 0}
+          </span>
+        </div>
+        <div>
+          <Text type="secondary">平均耗时</Text>
+          <strong>{formatDuration(overview?.avg_call_duration_ms ?? null)}</strong>
+          <span>任务 {formatDuration(overview?.avg_task_duration_ms ?? null)}</span>
         </div>
       </section>
 
-      <section className="ai-capability-grid" aria-label="AI 专项能力">
-        {capabilities.map((item) => {
-          const status = statusMeta[item.status]
-          return (
-            <Card
-              key={item.key}
-              className={`ai-capability-card ai-capability-card--${item.status}`}
-              title={
-                <Space size="small">
-                  <span className="ai-capability-icon" aria-hidden="true">
-                    {item.icon}
-                  </span>
-                  <span>{item.title}</span>
-                </Space>
-              }
-              extra={<Tag color={status.color}>{status.label}</Tag>}
-            >
-              <Text type="secondary">{item.description}</Text>
-              <ul>
-                {item.checkpoints.map((checkpoint) => (
-                  <li key={checkpoint}>
-                    <FileSearchOutlined />
-                    <span>{checkpoint}</span>
-                  </li>
-                ))}
-              </ul>
-              <Button disabled block>
-                待接入
-              </Button>
-            </Card>
-          )
-        })}
-      </section>
+      <Tabs
+        className="ai-console-tabs"
+        items={[
+          {
+            key: 'tasks',
+            label: '任务中心',
+            children: (
+              <section className="panel-card ai-console-table-panel">
+                <Table<AiTaskRecord>
+                  rowKey="id"
+                  loading={tasks.isPending}
+                  dataSource={tasks.data?.items ?? []}
+                  pagination={false}
+                  locale={{ emptyText: <Empty description="暂无 AI 异步任务" /> }}
+                  scroll={{ x: 1100 }}
+                  columns={[
+                    {
+                      title: '任务',
+                      key: 'task',
+                      render: (_, record) => (
+                        <Space direction="vertical" size={2}>
+                          <Text strong>{record.task_name}</Text>
+                          <Text type="secondary">{scenarioLabel(record.scenario)}</Text>
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'status',
+                      width: 110,
+                      render: (status: AiTaskStatus) => (
+                        <Tag color={taskStatusMeta[status].color}>
+                          {taskStatusMeta[status].label}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      title: '资源',
+                      key: 'resource',
+                      width: 220,
+                      render: (_, record) => resourceLabel(record),
+                    },
+                    {
+                      title: '重试',
+                      key: 'retry',
+                      width: 100,
+                      render: (_, record) => `${record.attempt_count}/${record.max_retries}`,
+                    },
+                    {
+                      title: '耗时',
+                      dataIndex: 'duration_ms',
+                      width: 100,
+                      render: formatDuration,
+                    },
+                    {
+                      title: '开始/完成',
+                      key: 'time',
+                      width: 220,
+                      render: (_, record) => (
+                        <Space direction="vertical" size={2}>
+                          <span>{formatDateTime(record.started_at)}</span>
+                          <Text type="secondary">{formatDateTime(record.completed_at)}</Text>
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: '失败原因',
+                      key: 'failure',
+                      width: 260,
+                      render: (_, record) =>
+                        record.failure_code ? (
+                          <Space direction="vertical" size={2}>
+                            <Tag color="error">{record.failure_code}</Tag>
+                            <Text type="secondary">{record.failure_message}</Text>
+                          </Space>
+                        ) : (
+                          '—'
+                        ),
+                    },
+                  ]}
+                />
+              </section>
+            ),
+          },
+          {
+            key: 'calls',
+            label: '调用日志',
+            children: (
+              <section className="panel-card ai-console-table-panel">
+                <Table<AiCallLogRecord>
+                  rowKey="id"
+                  loading={calls.isPending}
+                  dataSource={calls.data?.items ?? []}
+                  pagination={false}
+                  locale={{ emptyText: <Empty description="暂无 AI 调用日志" /> }}
+                  scroll={{ x: 1120 }}
+                  columns={[
+                    {
+                      title: '场景',
+                      dataIndex: 'scenario',
+                      render: scenarioLabel,
+                    },
+                    {
+                      title: '模型 / Prompt',
+                      key: 'model',
+                      width: 220,
+                      render: (_, record) => (
+                        <Space direction="vertical" size={2}>
+                          <Text>{record.model_name ?? '未记录模型'}</Text>
+                          <Text type="secondary">{record.prompt_version ?? '未绑定版本'}</Text>
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'status',
+                      width: 100,
+                      render: (status: AiCallStatus) => (
+                        <Tag color={callStatusMeta[status].color}>
+                          {callStatusMeta[status].label}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      title: 'Token',
+                      key: 'tokens',
+                      width: 160,
+                      render: (_, record) =>
+                        `${record.total_tokens ?? 0}（${record.input_tokens ?? 0}/${record.output_tokens ?? 0}）`,
+                    },
+                    {
+                      title: '耗时',
+                      dataIndex: 'duration_ms',
+                      width: 100,
+                      render: formatDuration,
+                    },
+                    {
+                      title: '资源',
+                      key: 'resource',
+                      width: 220,
+                      render: (_, record) => resourceLabel(record),
+                    },
+                    {
+                      title: '时间',
+                      dataIndex: 'created_at',
+                      width: 180,
+                      render: formatDateTime,
+                    },
+                    {
+                      title: '失败原因',
+                      key: 'failure',
+                      width: 240,
+                      render: (_, record) =>
+                        record.failure_code ? (
+                          <Space direction="vertical" size={2}>
+                            <Tag color="error">{record.failure_code}</Tag>
+                            <Text type="secondary">{record.failure_message}</Text>
+                          </Space>
+                        ) : (
+                          '—'
+                        ),
+                    },
+                  ]}
+                />
+              </section>
+            ),
+          },
+          {
+            key: 'roadmap',
+            label: '专项路线',
+            children: (
+              <section className="ai-capability-grid" aria-label="AI 专项能力">
+                {capabilities.map((item) => {
+                  const status = statusMeta[item.status]
+                  return (
+                    <Card
+                      key={item.key}
+                      className={`ai-capability-card ai-capability-card--${item.status}`}
+                      title={
+                        <Space size="small">
+                          <span className="ai-capability-icon" aria-hidden="true">
+                            {item.icon}
+                          </span>
+                          <span>{item.title}</span>
+                        </Space>
+                      }
+                      extra={<Tag color={status.color}>{status.label}</Tag>}
+                    >
+                      <Text type="secondary">{item.description}</Text>
+                      <ul>
+                        {item.checkpoints.map((checkpoint) => (
+                          <li key={checkpoint}>
+                            <FileSearchOutlined />
+                            <span>{checkpoint}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <Tag icon={<ClockCircleOutlined />}>按专项计划推进</Tag>
+                    </Card>
+                  )
+                })}
+              </section>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }

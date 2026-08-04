@@ -1,4 +1,5 @@
 from app.models.audit import AuditLog
+from app.models.ai_observability import AiCallLog, AiTask, AiTaskEvent
 from app.models.candidate import (
     ApplicationResumeDocument,
     Candidate,
@@ -64,6 +65,9 @@ from app.models.user import Role, User, UserRole
 
 __all__ = [
     "AuditLog",
+    "AiCallLog",
+    "AiTask",
+    "AiTaskEvent",
     "ApplicationResumeDocument",
     "Candidate",
     "CandidateDuplicateReview",

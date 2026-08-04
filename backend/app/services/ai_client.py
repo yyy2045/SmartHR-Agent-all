@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, TypeVar
 
@@ -21,6 +23,16 @@ INTERVIEW_REPORT_PROMPT_VERSION = "interview-report-v1"
 StructuredResponse = TypeVar(
     "StructuredResponse", JDAIDraft, ResumeAnalysisDraft, InterviewReportAIDraft
 )
+
+
+@dataclass(frozen=True)
+class AIRequestMetrics:
+    model_name: str
+    retry_count: int
+    duration_ms: int
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
 
 
 def _schema_instruction(
@@ -123,6 +135,20 @@ class OpenAICompatibleClient:
         raise AIResponseValidationError("模型响应内容类型无效")
 
     @staticmethod
+    def _usage_metrics(body: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
+        usage = body.get("usage")
+        if not isinstance(usage, dict):
+            return None, None, None
+        input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+        output_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
+        total_tokens = usage.get("total_tokens")
+        return (
+            input_tokens if isinstance(input_tokens, int) else None,
+            output_tokens if isinstance(output_tokens, int) else None,
+            total_tokens if isinstance(total_tokens, int) else None,
+        )
+
+    @staticmethod
     def _resume_request_payload(
         *,
         payload: dict[str, Any],
@@ -196,14 +222,15 @@ class OpenAICompatibleClient:
             "response_format": {"type": "json_object"},
         }
 
-    async def _request_structured(
+    async def _request_structured_with_metrics(
         self,
         *,
         payload: dict[str, Any],
         response_type: type[StructuredResponse],
         operation_name: str,
-    ) -> StructuredResponse:
+    ) -> tuple[StructuredResponse, AIRequestMetrics]:
         last_error: AIClientError | None = None
+        started = time.perf_counter()
 
         async with self._semaphore:
             async with httpx.AsyncClient(
@@ -221,8 +248,18 @@ class OpenAICompatibleClient:
                             json=payload,
                         )
                         response.raise_for_status()
-                        content = self._extract_content(response.json())
-                        return response_type.model_validate(content)
+                        body = response.json()
+                        content = self._extract_content(body)
+                        parsed = response_type.model_validate(content)
+                        input_tokens, output_tokens, total_tokens = self._usage_metrics(body)
+                        return parsed, AIRequestMetrics(
+                            model_name=self.model,
+                            retry_count=attempt,
+                            duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            total_tokens=total_tokens,
+                        )
                     except httpx.TimeoutException:
                         last_error = AIRequestTimeout("AI 服务响应超时")
                     except httpx.HTTPStatusError as error:
@@ -248,7 +285,31 @@ class OpenAICompatibleClient:
             raise last_error
         raise AIUpstreamError("AI 服务调用失败")
 
+    async def _request_structured(
+        self,
+        *,
+        payload: dict[str, Any],
+        response_type: type[StructuredResponse],
+        operation_name: str,
+    ) -> StructuredResponse:
+        response, _metrics = await self._request_structured_with_metrics(
+            payload=payload,
+            response_type=response_type,
+            operation_name=operation_name,
+        )
+        return response
+
     async def structure_jd(self, *, title: str, department: str, jd: str) -> JDAIDraft:
+        response, _metrics = await self.structure_jd_with_metrics(
+            title=title,
+            department=department,
+            jd=jd,
+        )
+        return response
+
+    async def structure_jd_with_metrics(
+        self, *, title: str, department: str, jd: str
+    ) -> tuple[JDAIDraft, AIRequestMetrics]:
         self._validate_configuration()
         payload = self._request_payload(
             title=title,
@@ -256,7 +317,7 @@ class OpenAICompatibleClient:
             jd=jd,
             model=self.model,
         )
-        return await self._request_structured(
+        return await self._request_structured_with_metrics(
             payload=payload,
             response_type=JDAIDraft,
             operation_name="AI 结构化 JD",
@@ -269,8 +330,22 @@ class OpenAICompatibleClient:
         validation_feedback: str | None = None,
         previous_analysis: dict[str, Any] | None = None,
     ) -> ResumeAnalysisDraft:
+        response, _metrics = await self.analyze_resume_with_metrics(
+            payload,
+            validation_feedback=validation_feedback,
+            previous_analysis=previous_analysis,
+        )
+        return response
+
+    async def analyze_resume_with_metrics(
+        self,
+        payload: dict[str, Any],
+        *,
+        validation_feedback: str | None = None,
+        previous_analysis: dict[str, Any] | None = None,
+    ) -> tuple[ResumeAnalysisDraft, AIRequestMetrics]:
         self._validate_configuration()
-        return await self._request_structured(
+        return await self._request_structured_with_metrics(
             payload=self._resume_request_payload(
                 payload=payload,
                 model=self.model,
@@ -284,8 +359,14 @@ class OpenAICompatibleClient:
     async def generate_interview_report(
         self, payload: dict[str, Any]
     ) -> InterviewReportAIDraft:
+        response, _metrics = await self.generate_interview_report_with_metrics(payload)
+        return response
+
+    async def generate_interview_report_with_metrics(
+        self, payload: dict[str, Any]
+    ) -> tuple[InterviewReportAIDraft, AIRequestMetrics]:
         self._validate_configuration()
-        return await self._request_structured(
+        return await self._request_structured_with_metrics(
             payload=self._interview_report_request_payload(
                 payload=payload,
                 model=self.model,

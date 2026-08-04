@@ -20,6 +20,7 @@ from app.models import (
 )
 from app.schemas.screening import CandidateProfileDraft, EvidenceReference, ResumeAnalysisDraft
 from app.services.ai_client import (
+    MAX_MODEL_RETRIES,
     RESUME_MATCH_PROMPT_VERSION,
     AIConfigurationError,
     AIRequestTimeout,
@@ -28,6 +29,7 @@ from app.services.ai_client import (
     OpenAICompatibleClient,
     get_ai_client,
 )
+from app.services.ai_observability import record_ai_call
 from app.services.audit import record_audit
 from app.services.model_payload import (
     ModelPayloadSecurityError,
@@ -532,6 +534,9 @@ async def _process_result(
     session_factory: SessionFactory,
 ) -> str:
     try:
+        document_id: uuid.UUID | None = None
+        profile_id: uuid.UUID | None = None
+        job_id: uuid.UUID | None = None
         with session_factory() as db:
             result = db.get(TalentRecommendationResult, result_id)
             run = db.get(TalentRecommendationRun, run_id)
@@ -548,6 +553,9 @@ async def _process_result(
                     "locked_input_missing",
                     "推荐运行锁定的简历或候选人档案不存在",
                 )
+            document_id = document.id
+            profile_id = profile.id
+            job_id = run.job_id
             payload = build_resume_analysis_payload_from_snapshot(
                 document,
                 run.criteria_snapshot,
@@ -558,7 +566,53 @@ async def _process_result(
             criteria_snapshot = dict(run.criteria_snapshot)
             ai_input_mode = run.ai_input_mode
 
-        analysis = await client.analyze_resume(payload)
+        try:
+            if hasattr(client, "analyze_resume_with_metrics"):
+                analysis, metrics = await client.analyze_resume_with_metrics(payload)
+            else:
+                analysis = await client.analyze_resume(payload)
+                metrics = None
+            record_ai_call(
+                scenario="talent_recommendation_rescore",
+                status="succeeded",
+                model_name=metrics.model_name if metrics else getattr(client, "model", None),
+                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                celery_task_id=task_id,
+                retry_count=metrics.retry_count if metrics else 0,
+                duration_ms=metrics.duration_ms if metrics else None,
+                input_tokens=metrics.input_tokens if metrics else None,
+                output_tokens=metrics.output_tokens if metrics else None,
+                total_tokens=metrics.total_tokens if metrics else None,
+                resource_type="talent_recommendation_result",
+                resource_id=result_id,
+                job_id=job_id,
+                document_id=document_id,
+                candidate_profile_id=profile_id,
+                session_factory=session_factory,
+            )
+        except (
+            AIConfigurationError,
+            AIRequestTimeout,
+            AIResponseValidationError,
+            AIUpstreamError,
+        ) as error:
+            record_ai_call(
+                scenario="talent_recommendation_rescore",
+                status="failed",
+                model_name=getattr(client, "model", None),
+                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                celery_task_id=task_id,
+                retry_count=0 if isinstance(error, AIConfigurationError) else MAX_MODEL_RETRIES,
+                resource_type="talent_recommendation_result",
+                resource_id=result_id,
+                job_id=job_id,
+                document_id=document_id,
+                candidate_profile_id=profile_id,
+                failure_code=error.__class__.__name__,
+                failure_message=str(error),
+                session_factory=session_factory,
+            )
+            raise
         try:
             with session_factory() as db:
                 document = _load_document(db, result.document_id)
@@ -581,11 +635,69 @@ async def _process_result(
                 run_id,
                 result_id,
             )
-            analysis = await client.analyze_resume(
-                payload,
-                validation_feedback=str(error),
-                previous_analysis=analysis.model_dump(mode="json"),
-            )
+            try:
+                if hasattr(client, "analyze_resume_with_metrics"):
+                    analysis, repair_metrics = await client.analyze_resume_with_metrics(
+                        payload,
+                        validation_feedback=str(error),
+                        previous_analysis=analysis.model_dump(mode="json"),
+                    )
+                else:
+                    analysis = await client.analyze_resume(
+                        payload,
+                        validation_feedback=str(error),
+                        previous_analysis=analysis.model_dump(mode="json"),
+                    )
+                    repair_metrics = None
+                record_ai_call(
+                    scenario="talent_recommendation_repair",
+                    status="succeeded",
+                    model_name=(
+                        repair_metrics.model_name
+                        if repair_metrics
+                        else getattr(client, "model", None)
+                    ),
+                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    celery_task_id=task_id,
+                    retry_count=repair_metrics.retry_count if repair_metrics else 0,
+                    duration_ms=repair_metrics.duration_ms if repair_metrics else None,
+                    input_tokens=repair_metrics.input_tokens if repair_metrics else None,
+                    output_tokens=repair_metrics.output_tokens if repair_metrics else None,
+                    total_tokens=repair_metrics.total_tokens if repair_metrics else None,
+                    resource_type="talent_recommendation_result",
+                    resource_id=result_id,
+                    job_id=job_id,
+                    document_id=document_id,
+                    candidate_profile_id=profile_id,
+                    session_factory=session_factory,
+                )
+            except (
+                AIConfigurationError,
+                AIRequestTimeout,
+                AIResponseValidationError,
+                AIUpstreamError,
+            ) as repair_error:
+                record_ai_call(
+                    scenario="talent_recommendation_repair",
+                    status="failed",
+                    model_name=getattr(client, "model", None),
+                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    celery_task_id=task_id,
+                    retry_count=(
+                        0
+                        if isinstance(repair_error, AIConfigurationError)
+                        else MAX_MODEL_RETRIES
+                    ),
+                    resource_type="talent_recommendation_result",
+                    resource_id=result_id,
+                    job_id=job_id,
+                    document_id=document_id,
+                    candidate_profile_id=profile_id,
+                    failure_code=repair_error.__class__.__name__,
+                    failure_message=str(repair_error),
+                    session_factory=session_factory,
+                )
+                raise
 
         with session_factory() as db:
             current = db.get(TalentRecommendationResult, result_id)
