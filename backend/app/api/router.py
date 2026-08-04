@@ -4,6 +4,7 @@ from app.api.routes.ai_observability import router as ai_observability_router
 from app.api.routes.analytics import router as analytics_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.batches import router as batches_router
+from app.api.routes.candidate_agent import router as candidate_agent_router
 from app.api.routes.candidate_processes import router as candidate_processes_router
 from app.api.routes.candidate_versions import router as candidate_versions_router
 from app.api.routes.candidates import router as candidates_router
@@ -103,6 +104,11 @@ api_router.include_router(
     tags=["interview-schedules"],
 )
 api_router.include_router(batches_router, prefix="/jobs", tags=["batches"])
+api_router.include_router(
+    candidate_agent_router,
+    prefix="/jobs",
+    tags=["candidate-agent"],
+)
 api_router.include_router(
     candidate_versions_router,
     prefix="/jobs",

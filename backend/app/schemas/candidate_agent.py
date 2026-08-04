@@ -8,6 +8,10 @@ CandidateAgentSessionStatus = Literal["active", "archived"]
 CandidateAgentExchangeStatus = Literal["pending", "succeeded", "failed", "manual_fallback"]
 
 
+class CandidateAgentSessionCreateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+
+
 class CandidateAgentSessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
