@@ -9,6 +9,7 @@ import {
   createMessageTemplateVersion,
   createPromptTemplate,
   createPromptTemplateVersion,
+  createRecruitmentKnowledgeManual,
   createScreeningBatch,
   deactivateMessageTemplate,
   fetchAIObservabilityCalls,
@@ -23,6 +24,7 @@ import {
   fetchMessageTemplates,
   fetchPromptTemplate,
   fetchPromptTemplates,
+  fetchRecruitmentKnowledgeBases,
   fetchInternalNotifications,
   fetchJobs,
   fetchLiveHealth,
@@ -36,9 +38,11 @@ import {
   markInternalNotificationRead,
   previewCommunication,
   publishPromptTemplateVersion,
+  retrieveRecruitmentKnowledge,
   recordCommunicationCopyAudit,
   respondToOfferPortal,
   retryResumeParsing,
+  uploadRecruitmentKnowledgeDocument,
   updateCandidatePhone,
   verifyOfferPortal,
 } from './client'
@@ -299,6 +303,71 @@ describe('API client', () => {
       version_id: 'version-2',
       expected_version: 3,
       idempotency_key: 'publish-prompt-key',
+    })
+  })
+
+  it('builds recruitment knowledge RAG requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ items: [], citations: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchRecruitmentKnowledgeBases()
+    await createRecruitmentKnowledgeManual({
+      title: '后端面试评分标准',
+      summary: '统一评分口径',
+      category: 'interview',
+      tags: ['后端', '面试'],
+      visibilityScope: 'recruiter_manager',
+      changeNote: '初始化',
+      rawText: '# 接口设计\n需要说明幂等策略。',
+      idempotencyKey: 'knowledge-manual-key',
+    })
+    await uploadRecruitmentKnowledgeDocument({
+      title: 'Offer 沟通话术',
+      category: 'communication',
+      tags: ['Offer'],
+      visibilityScope: 'recruiter_only',
+      changeNote: '上传话术',
+      file: new File(['hello'], 'offer.md', { type: 'text/markdown' }),
+      idempotencyKey: 'knowledge-upload-key',
+    })
+    await retrieveRecruitmentKnowledge({
+      scenario: 'knowledge_preview',
+      query: 'Offer 前需要确认什么？',
+      category: 'offer',
+      tags: ['审批'],
+      limit: 3,
+    })
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/recruitment-knowledge/bases')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/recruitment-knowledge/documents/manual')
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+      knowledge_base_id: null,
+      title: '后端面试评分标准',
+      summary: '统一评分口径',
+      category: 'interview',
+      tags: ['后端', '面试'],
+      visibility_scope: 'recruiter_manager',
+      change_note: '初始化',
+      raw_text: '# 接口设计\n需要说明幂等策略。',
+      idempotency_key: 'knowledge-manual-key',
+    })
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/recruitment-knowledge/documents/upload')
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
+    expect(fetchMock.mock.calls[2][1]?.body).toBeInstanceOf(FormData)
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/recruitment-knowledge/retrieve')
+    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
+      scenario: 'knowledge_preview',
+      query: 'Offer 前需要确认什么？',
+      category: 'offer',
+      tags: ['审批'],
+      limit: 3,
     })
   })
 
