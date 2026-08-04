@@ -2021,6 +2021,78 @@ input {
   flex: 1;
 }
 
+.candidate-agent-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.candidate-agent-sessions,
+.candidate-agent-chat {
+  min-height: 360px;
+}
+
+.candidate-agent-session {
+  cursor: pointer;
+  border-radius: 12px;
+  padding-inline: 12px;
+}
+
+.candidate-agent-session--active {
+  background: #eef4ff;
+}
+
+.candidate-agent-exchanges {
+  width: 100%;
+}
+
+.candidate-agent-exchange {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #edf0f7;
+  border-radius: 16px;
+  background: #fbfcff;
+}
+
+.candidate-agent-question {
+  padding: 12px;
+  border-radius: 12px;
+  background: #f5f7fb;
+}
+
+.candidate-agent-answer {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.candidate-agent-evidence {
+  display: grid;
+  gap: 8px;
+}
+
+.candidate-agent-evidence blockquote {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #5b8cff;
+  border-radius: 10px;
+  background: #f7faff;
+}
+
+.candidate-agent-input {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.candidate-agent-input .ant-btn {
+  justify-self: end;
+}
+
 .candidate-stage-form,
 .candidate-stage-select {
   width: 100%;
@@ -2308,6 +2380,10 @@ input {
 }
 
 @media (max-width: 900px) {
+  .candidate-agent-layout {
+    grid-template-columns: 1fr;
+  }
+
   .report-workbench {
     grid-template-columns: 1fr;
   }

@@ -6,6 +6,7 @@ from app.models.candidate import (
     CandidateDuplicateReview,
     JobApplication,
 )
+from app.models.candidate_agent import CandidateAgentExchange, CandidateAgentSession
 from app.models.candidate_process import CandidateProcess, CandidateProcessEvent
 from app.models.interview import (
     CandidateInterviewRound,
@@ -78,6 +79,8 @@ __all__ = [
     "AiTaskEvent",
     "ApplicationResumeDocument",
     "Candidate",
+    "CandidateAgentExchange",
+    "CandidateAgentSession",
     "CandidateDuplicateReview",
     "CandidateProfile",
     "CandidateInterviewRound",
