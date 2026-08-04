@@ -7,6 +7,8 @@ import {
   createOfferPortalLink,
   createMessageTemplate,
   createMessageTemplateVersion,
+  createPromptTemplate,
+  createPromptTemplateVersion,
   createScreeningBatch,
   deactivateMessageTemplate,
   fetchAIObservabilityCalls,
@@ -19,6 +21,8 @@ import {
   fetchInternalNotificationUnreadCount,
   fetchMessageTemplate,
   fetchMessageTemplates,
+  fetchPromptTemplate,
+  fetchPromptTemplates,
   fetchInternalNotifications,
   fetchJobs,
   fetchLiveHealth,
@@ -31,6 +35,7 @@ import {
   markAllInternalNotificationsRead,
   markInternalNotificationRead,
   previewCommunication,
+  publishPromptTemplateVersion,
   recordCommunicationCopyAudit,
   respondToOfferPortal,
   retryResumeParsing,
@@ -223,6 +228,78 @@ describe('API client', () => {
     expect(fetchMock.mock.calls[2][0]).toBe(
       '/api/ai-observability/calls?status=succeeded&scenario=jd_generation&limit=10&offset=0',
     )
+  })
+
+  it('builds PromptOps template management requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ id: 'template-1', items: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchPromptTemplates()
+    await fetchPromptTemplate('template-1')
+    await createPromptTemplate({
+      scenario: 'resume_analysis',
+      name: '简历评分 Prompt',
+      description: '用于简历初筛',
+      changeNote: '初始化',
+      systemPrompt: '你是招聘助手',
+      userPromptTemplate: '简历：{{resume}}',
+      variables: ['resume'],
+      outputSchema: { type: 'object' },
+      modelParameters: { temperature: 0 },
+      idempotencyKey: 'create-prompt-key',
+    })
+    await createPromptTemplateVersion('template-1', {
+      sourceVersionId: 'version-1',
+      changeNote: '补充证据要求',
+      systemPrompt: '你是招聘助手，必须引用证据',
+      userPromptTemplate: '简历：{{resume}}',
+      variables: ['resume'],
+      outputSchema: { type: 'object', required: ['summary'] },
+      modelParameters: { temperature: 0 },
+      idempotencyKey: 'version-prompt-key',
+    })
+    await publishPromptTemplateVersion('template-1', 'version-2', 3, 'publish-prompt-key')
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/prompt-templates')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/prompt-templates/template-1')
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/prompt-templates')
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
+      scenario: 'resume_analysis',
+      name: '简历评分 Prompt',
+      description: '用于简历初筛',
+      change_note: '初始化',
+      system_prompt: '你是招聘助手',
+      user_prompt_template: '简历：{{resume}}',
+      variables: ['resume'],
+      output_schema: { type: 'object' },
+      model_parameters: { temperature: 0 },
+      idempotency_key: 'create-prompt-key',
+    })
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/prompt-templates/template-1/versions')
+    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
+      source_version_id: 'version-1',
+      change_note: '补充证据要求',
+      system_prompt: '你是招聘助手，必须引用证据',
+      user_prompt_template: '简历：{{resume}}',
+      variables: ['resume'],
+      output_schema: { type: 'object', required: ['summary'] },
+      model_parameters: { temperature: 0 },
+      idempotency_key: 'version-prompt-key',
+    })
+    expect(fetchMock.mock.calls[4][0]).toBe('/api/prompt-templates/template-1/publish')
+    expect(JSON.parse(fetchMock.mock.calls[4][1]?.body as string)).toEqual({
+      version_id: 'version-2',
+      expected_version: 3,
+      idempotency_key: 'publish-prompt-key',
+    })
   })
 
   it('builds message template and communication requests', async () => {

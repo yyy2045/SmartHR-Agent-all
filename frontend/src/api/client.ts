@@ -260,6 +260,80 @@ export interface AiObservabilityFilters {
   offset?: number
 }
 
+export type PromptScenario =
+  | 'jd_generation'
+  | 'resume_analysis'
+  | 'resume_analysis_repair'
+  | 'interview_report'
+  | 'offer_copy'
+  | 'candidate_comparison'
+  | 'candidate_qa'
+export type PromptTemplateStatus = 'active' | 'inactive'
+export type PromptVersionStatus = 'draft' | 'published' | 'retired'
+
+export interface PromptTemplateVersionRecord {
+  id: string
+  template_id: string
+  version_number: number
+  status: PromptVersionStatus
+  source_version_id: string | null
+  change_note: string
+  system_prompt: string
+  user_prompt_template: string
+  variables: string[]
+  output_schema: Record<string, unknown> | null
+  model_parameters: Record<string, unknown>
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  published_by_id: string | null
+  published_by_username: string | null
+  published_by_display_name: string | null
+  published_at: string | null
+  created_at: string
+}
+
+export interface PromptTemplateRecord {
+  id: string
+  scenario: PromptScenario
+  name: string
+  description: string | null
+  status: PromptTemplateStatus
+  current_version_number: number | null
+  resource_version: number
+  created_by_id: string | null
+  created_by_username: string
+  created_by_display_name: string
+  created_at: string
+  updated_at: string
+  versions: PromptTemplateVersionRecord[]
+}
+
+export interface PromptTemplateListRecord {
+  items: PromptTemplateRecord[]
+}
+
+export interface PromptTemplateContentInput {
+  changeNote: string
+  systemPrompt: string
+  userPromptTemplate: string
+  variables: string[]
+  outputSchema?: Record<string, unknown> | null
+  modelParameters?: Record<string, unknown>
+}
+
+export interface PromptTemplateCreateInput extends PromptTemplateContentInput {
+  scenario: PromptScenario
+  name: string
+  description?: string | null
+  idempotencyKey?: string
+}
+
+export interface PromptTemplateVersionCreateInput extends PromptTemplateContentInput {
+  sourceVersionId?: string | null
+  idempotencyKey?: string
+}
+
 export type AnalyticsInterval = 'day' | 'week'
 export type AnalyticsFunnelStage =
   | 'application_created'
@@ -2237,6 +2311,86 @@ export function fetchAIObservabilityCalls(
     `/api/ai-observability/calls${buildAIObservabilityQuery(filters)}`,
     {},
     '无法读取 AI 调用日志',
+  )
+}
+
+export function fetchPromptTemplates(): Promise<PromptTemplateListRecord> {
+  return apiRequest('/api/prompt-templates', {}, '无法读取 Prompt 模板')
+}
+
+export function fetchPromptTemplate(templateId: string): Promise<PromptTemplateRecord> {
+  return apiRequest(
+    `/api/prompt-templates/${encodeURIComponent(templateId)}`,
+    {},
+    '无法读取 Prompt 模板详情',
+  )
+}
+
+function promptContentBody(input: PromptTemplateContentInput) {
+  return {
+    change_note: input.changeNote,
+    system_prompt: input.systemPrompt,
+    user_prompt_template: input.userPromptTemplate,
+    variables: input.variables,
+    output_schema: input.outputSchema ?? null,
+    model_parameters: input.modelParameters ?? {},
+  }
+}
+
+export function createPromptTemplate(
+  input: PromptTemplateCreateInput,
+): Promise<PromptTemplateRecord> {
+  return apiRequest(
+    '/api/prompt-templates',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        scenario: input.scenario,
+        name: input.name,
+        description: input.description ?? null,
+        ...promptContentBody(input),
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '创建 Prompt 模板失败',
+  )
+}
+
+export function createPromptTemplateVersion(
+  templateId: string,
+  input: PromptTemplateVersionCreateInput,
+): Promise<PromptTemplateRecord> {
+  return apiRequest(
+    `/api/prompt-templates/${encodeURIComponent(templateId)}/versions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        source_version_id: input.sourceVersionId ?? null,
+        ...promptContentBody(input),
+        idempotency_key: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    },
+    '保存 Prompt 新版本失败',
+  )
+}
+
+export function publishPromptTemplateVersion(
+  templateId: string,
+  versionId: string,
+  expectedVersion: number,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<PromptTemplateRecord> {
+  return apiRequest(
+    `/api/prompt-templates/${encodeURIComponent(templateId)}/publish`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        version_id: versionId,
+        expected_version: expectedVersion,
+        idempotency_key: idempotencyKey,
+      }),
+    },
+    '发布 Prompt 版本失败',
   )
 }
 

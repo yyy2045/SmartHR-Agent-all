@@ -4,6 +4,7 @@ import {
   AuditOutlined,
   BarChartOutlined,
   BellOutlined,
+  BranchesOutlined,
   CalendarOutlined,
   CloudServerOutlined,
   ContactsOutlined,
@@ -53,6 +54,9 @@ function pageMeta(pathname: string) {
   }
   if (pathname.startsWith('/ai-console')) {
     return { title: 'AI 控制台', subtitle: '管理可观测、可追溯、可评测的 AI Agent 工程能力' }
+  }
+  if (pathname.startsWith('/prompt-templates')) {
+    return { title: 'PromptOps', subtitle: '维护场景化 Prompt 模板、发布版本和回滚历史' }
   }
   if (pathname.startsWith('/recruitment-requests')) {
     return { title: '招聘需求', subtitle: '发起、审批并追踪招聘任务来源' }
@@ -173,6 +177,16 @@ export function AppLayout() {
       icon: <CloudServerOutlined />,
       path: '/ai-console',
     },
+    ...(isAdministrator
+      ? [
+          {
+            key: 'prompt-templates' as const,
+            label: 'PromptOps',
+            icon: <BranchesOutlined />,
+            path: '/prompt-templates',
+          },
+        ]
+      : []),
     ...(canAccessRequests
       ? [
           {

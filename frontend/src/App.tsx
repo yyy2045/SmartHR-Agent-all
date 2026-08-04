@@ -101,6 +101,11 @@ const WorkbenchPage = lazy(() =>
 const AIConsolePage = lazy(() =>
   import('./pages/AIConsolePage').then((module) => ({ default: module.AIConsolePage })),
 )
+const PromptTemplateManagementPage = lazy(() =>
+  import('./pages/PromptTemplateManagementPage').then((module) => ({
+    default: module.PromptTemplateManagementPage,
+  })),
+)
 const NotificationCenterPage = lazy(() =>
   import('./pages/NotificationCenterPage').then((module) => ({
     default: module.NotificationCenterPage,
@@ -225,6 +230,7 @@ function AppRoutes() {
                 </Route>
                 <Route element={<RoleRoute roles={['administrator']} />}>
                   <Route path="/settings/users" element={<UserManagementPage />} />
+                  <Route path="/prompt-templates" element={<PromptTemplateManagementPage />} />
                 </Route>
               </Route>
             </Route>
