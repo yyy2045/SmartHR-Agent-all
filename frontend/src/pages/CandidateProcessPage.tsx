@@ -4,6 +4,7 @@ import {
   EyeOutlined,
   FileDoneOutlined,
   HistoryOutlined,
+  MessageOutlined,
   MoreOutlined,
   PhoneOutlined,
   ReloadOutlined,
@@ -508,6 +509,19 @@ export function CandidateProcessPage() {
                       >
                         面试安排
                       </Button>
+                      {canManageRecruitment(auth.user) && (
+                        <Button
+                          size="small"
+                          icon={<MessageOutlined />}
+                          onClick={() =>
+                            navigate(
+                              `/jobs/${jobId}/applications/${candidate.application_id}/candidate-agent`,
+                            )
+                          }
+                        >
+                          AI 助手
+                        </Button>
+                      )}
                       {candidate.onboarding && (
                         <Button
                           size="small"

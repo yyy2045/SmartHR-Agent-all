@@ -1807,6 +1807,49 @@ export interface CandidateProcessTimelineEventRecord {
   created_at: string
 }
 
+export type CandidateAgentSessionStatus = 'active' | 'archived'
+export type CandidateAgentExchangeStatus =
+  | 'pending'
+  | 'succeeded'
+  | 'failed'
+  | 'manual_fallback'
+
+export interface CandidateAgentSessionRecord {
+  id: string
+  job_id: string
+  application_id: string
+  title: string | null
+  status: CandidateAgentSessionStatus
+  created_by_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CandidateAgentExchangeRecord {
+  id: string
+  session_id: string
+  sequence_number: number
+  idempotency_key: string
+  status: CandidateAgentExchangeStatus
+  question: string
+  answer: string | null
+  evidence_snapshot: Record<string, unknown>
+  evidence_references: Array<Record<string, unknown>>
+  knowledge_citations: Array<Record<string, unknown>>
+  ai_call_log_id: string | null
+  prompt_template_version_id: string | null
+  model_name: string | null
+  prompt_version: string | null
+  failure_code: string | null
+  failure_message: string | null
+  created_by_id: string | null
+  created_at: string
+}
+
+export interface CandidateAgentSessionDetailRecord extends CandidateAgentSessionRecord {
+  exchanges: CandidateAgentExchangeRecord[]
+}
+
 export interface CandidateStageUpdateRecord {
   process_id: string
   document_id: string
@@ -4105,6 +4148,64 @@ export function fetchCandidateProcessTimeline(
     `/api/jobs/${jobId}/applications/${applicationId}/timeline`,
     {},
     '无法读取候选人流程记录',
+  )
+}
+
+export function fetchCandidateAgentSessions(
+  jobId: string,
+  applicationId: string,
+): Promise<CandidateAgentSessionRecord[]> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/candidate-agent/sessions`,
+    {},
+    '无法读取候选人 AI 助手会话',
+  )
+}
+
+export function createCandidateAgentSession(
+  jobId: string,
+  applicationId: string,
+  title?: string,
+): Promise<CandidateAgentSessionDetailRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/candidate-agent/sessions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ title: title?.trim() || null }),
+    },
+    '创建候选人 AI 助手会话失败',
+  )
+}
+
+export function fetchCandidateAgentSession(
+  jobId: string,
+  applicationId: string,
+  sessionId: string,
+): Promise<CandidateAgentSessionDetailRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/candidate-agent/sessions/${sessionId}`,
+    {},
+    '无法读取候选人 AI 助手详情',
+  )
+}
+
+export function askCandidateAgent(
+  jobId: string,
+  applicationId: string,
+  sessionId: string,
+  question: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<CandidateAgentExchangeRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/candidate-agent/sessions/${sessionId}/ask`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        question,
+        idempotency_key: idempotencyKey,
+      }),
+    },
+    '候选人 AI 助手回答失败',
   )
 }
 

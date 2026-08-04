@@ -4,6 +4,8 @@ import {
   ApiError,
   AUTH_UNAUTHORIZED_EVENT,
   activateMessageTemplate,
+  askCandidateAgent,
+  createCandidateAgentSession,
   createOfferPortalLink,
   createMessageTemplate,
   createMessageTemplateVersion,
@@ -12,6 +14,8 @@ import {
   createRecruitmentKnowledgeManual,
   createScreeningBatch,
   deactivateMessageTemplate,
+  fetchCandidateAgentSession,
+  fetchCandidateAgentSessions,
   fetchAIObservabilityCalls,
   fetchAIObservabilitySummary,
   fetchAIObservabilityTasks,
@@ -232,6 +236,49 @@ describe('API client', () => {
     expect(fetchMock.mock.calls[2][0]).toBe(
       '/api/ai-observability/calls?status=succeeded&scenario=jd_generation&limit=10&offset=0',
     )
+  })
+
+  it('builds candidate Agent session and ask requests', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ items: [], exchanges: [], id: 'session-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchCandidateAgentSessions('job-1', 'application-1')
+    await createCandidateAgentSession('job-1', 'application-1', '风险分析')
+    await fetchCandidateAgentSession('job-1', 'application-1', 'session-1')
+    await askCandidateAgent(
+      'job-1',
+      'application-1',
+      'session-1',
+      '这个候选人的风险是什么？',
+      'agent-key-1',
+    )
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/jobs/job-1/applications/application-1/candidate-agent/sessions',
+    )
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      '/api/jobs/job-1/applications/application-1/candidate-agent/sessions',
+    )
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+      title: '风险分析',
+    })
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      '/api/jobs/job-1/applications/application-1/candidate-agent/sessions/session-1',
+    )
+    expect(fetchMock.mock.calls[3][0]).toBe(
+      '/api/jobs/job-1/applications/application-1/candidate-agent/sessions/session-1/ask',
+    )
+    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
+      question: '这个候选人的风险是什么？',
+      idempotency_key: 'agent-key-1',
+    })
   })
 
   it('builds PromptOps template management requests', async () => {

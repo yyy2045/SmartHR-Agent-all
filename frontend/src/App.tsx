@@ -40,6 +40,11 @@ const CandidateProcessPage = lazy(() =>
     default: module.CandidateProcessPage,
   })),
 )
+const CandidateAgentPage = lazy(() =>
+  import('./pages/CandidateAgentPage').then((module) => ({
+    default: module.CandidateAgentPage,
+  })),
+)
 const InterviewPlanPage = lazy(() =>
   import('./pages/InterviewPlanPage').then((module) => ({
     default: module.InterviewPlanPage,
@@ -217,6 +222,10 @@ function AppRoutes() {
                 <Route element={<RoleRoute roles={['administrator', 'recruiter']} />}>
                   <Route path="/jobs/new" element={<JobFormPage />} />
                   <Route path="/candidates" element={<CandidateCenterPage />} />
+                  <Route
+                    path="/jobs/:jobId/applications/:applicationId/candidate-agent"
+                    element={<CandidateAgentPage />}
+                  />
                   <Route path="/message-templates" element={<MessageTemplateManagementPage />} />
                 </Route>
                 <Route
