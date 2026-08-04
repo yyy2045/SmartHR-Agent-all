@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.prompt import PromptTemplateVersion
     from app.models.user import User
 
 
@@ -180,6 +181,9 @@ class AiCallLog(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     model_name: Mapped[str | None] = mapped_column(String(200))
     prompt_version: Mapped[str | None] = mapped_column(String(120))
+    prompt_template_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("prompt_template_versions.id", ondelete="SET NULL"), index=True
+    )
     provider: Mapped[str] = mapped_column(
         String(60), nullable=False, default="openai_compatible", server_default="openai_compatible"
     )
@@ -205,4 +209,7 @@ class AiCallLog(Base):
     )
 
     task: Mapped[AiTask | None] = relationship(back_populates="calls")
+    prompt_template_version: Mapped[PromptTemplateVersion | None] = relationship(
+        back_populates="ai_call_logs"
+    )
     invoked_by: Mapped[User | None] = relationship(foreign_keys=[invoked_by_id])

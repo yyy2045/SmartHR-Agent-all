@@ -227,6 +227,7 @@ export interface AiCallLogRecord {
   status: AiCallStatus
   model_name: string | null
   prompt_version: string | null
+  prompt_template_version_id: string | null
   provider: string
   retry_count: number
   duration_ms: number | null

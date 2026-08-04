@@ -87,6 +87,7 @@ describe('AI 控制台页面', () => {
               status: 'succeeded',
               model_name: 'qwen-plus',
               prompt_version: 'jd-structure-v1',
+              prompt_template_version_id: null,
               provider: 'openai_compatible',
               retry_count: 0,
               duration_ms: 800,

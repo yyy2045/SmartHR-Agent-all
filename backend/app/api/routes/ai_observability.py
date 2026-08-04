@@ -94,6 +94,7 @@ def _call_response(call: AiCallLog) -> AiCallLogRecord:
         status=call.status,
         model_name=call.model_name,
         prompt_version=call.prompt_version,
+        prompt_template_version_id=call.prompt_template_version_id,
         provider=call.provider,
         retry_count=call.retry_count,
         duration_ms=call.duration_ms,
