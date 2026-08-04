@@ -28,6 +28,7 @@ from app.schemas.job import (
     JobUpdate,
 )
 from app.services.ai_client import (
+    MAX_MODEL_RETRIES,
     AIConfigurationError,
     AIRequestTimeout,
     AIResponseValidationError,
@@ -35,6 +36,7 @@ from app.services.ai_client import (
     OpenAICompatibleClient,
     get_ai_client,
 )
+from app.services.ai_observability import record_ai_call_in_session
 from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job, job_scope_clause
 from app.services.talent_recommendation import mark_runs_stale_for_new_criteria
@@ -270,22 +272,93 @@ async def generate_ai_criteria_draft(
     ensure_job_writable(job, current_user)
     ensure_job_active(job)
     try:
-        return await ai_client.structure_jd(
-            title=job.title,
-            department=job.department,
-            jd=job.original_jd,
+        if hasattr(ai_client, "structure_jd_with_metrics"):
+            draft, metrics = await ai_client.structure_jd_with_metrics(
+                title=job.title,
+                department=job.department,
+                jd=job.original_jd,
+            )
+        else:
+            draft = await ai_client.structure_jd(
+                title=job.title,
+                department=job.department,
+                jd=job.original_jd,
+            )
+            metrics = None
+        record_ai_call_in_session(
+            db,
+            scenario="jd_generation",
+            status="succeeded",
+            model_name=metrics.model_name if metrics else getattr(ai_client, "model", None),
+            prompt_version="jd-structure-v1",
+            retry_count=metrics.retry_count if metrics else 0,
+            duration_ms=metrics.duration_ms if metrics else None,
+            input_tokens=metrics.input_tokens if metrics else None,
+            output_tokens=metrics.output_tokens if metrics else None,
+            total_tokens=metrics.total_tokens if metrics else None,
+            invoked_by_id=current_user.id,
+            resource_type="job",
+            resource_id=job.id,
+            job_id=job.id,
         )
+        db.commit()
+        return draft
     except AIConfigurationError as error:
+        record_ai_call_in_session(
+            db,
+            scenario="jd_generation",
+            status="failed",
+            model_name=getattr(ai_client, "model", None),
+            prompt_version="jd-structure-v1",
+            retry_count=0,
+            invoked_by_id=current_user.id,
+            resource_type="job",
+            resource_id=job.id,
+            job_id=job.id,
+            failure_code=error.__class__.__name__,
+            failure_message=str(error),
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(error),
         ) from error
     except AIRequestTimeout as error:
+        record_ai_call_in_session(
+            db,
+            scenario="jd_generation",
+            status="failed",
+            model_name=getattr(ai_client, "model", None),
+            prompt_version="jd-structure-v1",
+            retry_count=MAX_MODEL_RETRIES,
+            invoked_by_id=current_user.id,
+            resource_type="job",
+            resource_id=job.id,
+            job_id=job.id,
+            failure_code=error.__class__.__name__,
+            failure_message=str(error),
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=str(error),
         ) from error
     except (AIResponseValidationError, AIUpstreamError) as error:
+        record_ai_call_in_session(
+            db,
+            scenario="jd_generation",
+            status="failed",
+            model_name=getattr(ai_client, "model", None),
+            prompt_version="jd-structure-v1",
+            retry_count=MAX_MODEL_RETRIES,
+            invoked_by_id=current_user.id,
+            resource_type="job",
+            resource_id=job.id,
+            job_id=job.id,
+            failure_code=error.__class__.__name__,
+            failure_message=str(error),
+        )
+        db.commit()
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
 

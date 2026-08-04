@@ -25,6 +25,7 @@ from app.models import (
 )
 from app.schemas.screening import CandidateProfileDraft, EvidenceReference, ResumeAnalysisDraft
 from app.services.ai_client import (
+    MAX_MODEL_RETRIES,
     RESUME_MATCH_PROMPT_VERSION,
     AIConfigurationError,
     AIRequestTimeout,
@@ -33,6 +34,7 @@ from app.services.ai_client import (
     OpenAICompatibleClient,
     get_ai_client,
 )
+from app.services.ai_observability import record_ai_call
 from app.services.audit import record_audit
 from app.services.candidate_duplicates import detect_candidate_duplicates
 from app.services.model_payload import (
@@ -346,8 +348,11 @@ async def analyze_resume_document(
     analysis_version: int | None = None,
     session_factory: SessionFactory = SessionLocal,
     ai_client: OpenAICompatibleClient | None = None,
+    task_id: str | None = None,
 ) -> dict[str, str | float | int]:
     client = ai_client or get_ai_client()
+    resolved_job_id: uuid.UUID | None = None
+    resolved_batch_id: uuid.UUID | None = None
     with session_factory() as db:
         document = _load_document(db, document_id)
         if document is None:
@@ -460,6 +465,8 @@ async def analyze_resume_document(
         result_id = result.id
         resolved_criteria_id = criteria.id
         resolved_profile_id = profile.id if profile is not None else None
+        resolved_job_id = criteria.job_id
+        resolved_batch_id = document.batch_id
 
     try:
         with session_factory() as db:
@@ -479,7 +486,57 @@ async def analyze_resume_document(
                 criteria,
                 profile,
             )
-        analysis = await client.analyze_resume(payload)
+        try:
+            if hasattr(client, "analyze_resume_with_metrics"):
+                analysis, metrics = await client.analyze_resume_with_metrics(payload)
+            else:
+                analysis = await client.analyze_resume(payload)
+                metrics = None
+            record_ai_call(
+                scenario="resume_analysis",
+                status="succeeded",
+                model_name=metrics.model_name if metrics else getattr(client, "model", None),
+                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                celery_task_id=task_id,
+                retry_count=metrics.retry_count if metrics else 0,
+                duration_ms=metrics.duration_ms if metrics else None,
+                input_tokens=metrics.input_tokens if metrics else None,
+                output_tokens=metrics.output_tokens if metrics else None,
+                total_tokens=metrics.total_tokens if metrics else None,
+                resource_type="resume_document",
+                resource_id=document_id,
+                job_id=resolved_job_id,
+                batch_id=resolved_batch_id,
+                document_id=document_id,
+                application_id=resolved_application_id,
+                candidate_profile_id=resolved_profile_id,
+                session_factory=session_factory,
+            )
+        except (
+            AIConfigurationError,
+            AIRequestTimeout,
+            AIResponseValidationError,
+            AIUpstreamError,
+        ) as error:
+            record_ai_call(
+                scenario="resume_analysis",
+                status="failed",
+                model_name=getattr(client, "model", None),
+                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                celery_task_id=task_id,
+                retry_count=0 if isinstance(error, AIConfigurationError) else MAX_MODEL_RETRIES,
+                resource_type="resume_document",
+                resource_id=document_id,
+                job_id=resolved_job_id,
+                batch_id=resolved_batch_id,
+                document_id=document_id,
+                application_id=resolved_application_id,
+                candidate_profile_id=resolved_profile_id,
+                failure_code=error.__class__.__name__,
+                failure_message=str(error),
+                session_factory=session_factory,
+            )
+            raise
         try:
             with session_factory() as db:
                 validation_document = _load_document(db, document_id)
@@ -511,11 +568,73 @@ async def analyze_resume_document(
                 "AI 简历分析合同校验失败，准备执行一次纠正重试，document_id=%s",
                 document_id,
             )
-            analysis = await client.analyze_resume(
-                payload,
-                validation_feedback=str(error),
-                previous_analysis=analysis.model_dump(mode="json"),
-            )
+            try:
+                if hasattr(client, "analyze_resume_with_metrics"):
+                    analysis, repair_metrics = await client.analyze_resume_with_metrics(
+                        payload,
+                        validation_feedback=str(error),
+                        previous_analysis=analysis.model_dump(mode="json"),
+                    )
+                else:
+                    analysis = await client.analyze_resume(
+                        payload,
+                        validation_feedback=str(error),
+                        previous_analysis=analysis.model_dump(mode="json"),
+                    )
+                    repair_metrics = None
+                record_ai_call(
+                    scenario="resume_analysis_repair",
+                    status="succeeded",
+                    model_name=(
+                        repair_metrics.model_name
+                        if repair_metrics
+                        else getattr(client, "model", None)
+                    ),
+                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    celery_task_id=task_id,
+                    retry_count=repair_metrics.retry_count if repair_metrics else 0,
+                    duration_ms=repair_metrics.duration_ms if repair_metrics else None,
+                    input_tokens=repair_metrics.input_tokens if repair_metrics else None,
+                    output_tokens=repair_metrics.output_tokens if repair_metrics else None,
+                    total_tokens=repair_metrics.total_tokens if repair_metrics else None,
+                    resource_type="resume_document",
+                    resource_id=document_id,
+                    job_id=resolved_job_id,
+                    batch_id=resolved_batch_id,
+                    document_id=document_id,
+                    application_id=resolved_application_id,
+                    candidate_profile_id=resolved_profile_id,
+                    session_factory=session_factory,
+                )
+            except (
+                AIConfigurationError,
+                AIRequestTimeout,
+                AIResponseValidationError,
+                AIUpstreamError,
+            ) as repair_error:
+                record_ai_call(
+                    scenario="resume_analysis_repair",
+                    status="failed",
+                    model_name=getattr(client, "model", None),
+                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    celery_task_id=task_id,
+                    retry_count=(
+                        0
+                        if isinstance(repair_error, AIConfigurationError)
+                        else MAX_MODEL_RETRIES
+                    ),
+                    resource_type="resume_document",
+                    resource_id=document_id,
+                    job_id=resolved_job_id,
+                    batch_id=resolved_batch_id,
+                    document_id=document_id,
+                    application_id=resolved_application_id,
+                    candidate_profile_id=resolved_profile_id,
+                    failure_code=repair_error.__class__.__name__,
+                    failure_message=str(repair_error),
+                    session_factory=session_factory,
+                )
+                raise
         with session_factory() as db:
             document = _load_document(db, document_id)
             result = db.get(ScreeningResult, result_id)

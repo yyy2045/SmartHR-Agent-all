@@ -3,13 +3,14 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import AiCallLog, AiTask, AiTaskEvent
+from app.services.ai_observability import record_ai_call, record_task_finished, record_task_started
 
 
 @pytest.fixture
@@ -152,3 +153,57 @@ def test_task_event_constraints_reject_invalid_values(
         db.add(task)
         with pytest.raises(IntegrityError):
             db.commit()
+
+
+def test_observability_service_records_task_and_call_without_content_snapshots(
+    ai_observability_session_factory: sessionmaker[Session],
+) -> None:
+    document_id = uuid.uuid4()
+
+    task_id = record_task_started(
+        celery_task_id="celery-observed",
+        task_name="resume.analyze",
+        scenario="resume_analysis",
+        resource_type="resume_document",
+        resource_id=document_id,
+        document_id=document_id,
+        attempt_count=1,
+        session_factory=ai_observability_session_factory,
+    )
+    call_id = record_ai_call(
+        scenario="resume_analysis",
+        status="succeeded",
+        model_name="test-model",
+        prompt_version="resume-match-v2",
+        celery_task_id="celery-observed",
+        retry_count=1,
+        duration_ms=42,
+        input_tokens=10,
+        output_tokens=20,
+        total_tokens=30,
+        resource_type="resume_document",
+        resource_id=document_id,
+        document_id=document_id,
+        session_factory=ai_observability_session_factory,
+    )
+    record_task_finished(
+        celery_task_id="celery-observed",
+        succeeded=True,
+        session_factory=ai_observability_session_factory,
+    )
+
+    with ai_observability_session_factory() as db:
+        task = db.get(AiTask, task_id)
+        call = db.get(AiCallLog, call_id)
+        assert task is not None
+        assert task.status == "succeeded"
+        assert [event.event_type for event in task.events] == ["started", "succeeded"]
+        assert call is not None
+        assert call.task_id == task.id
+        assert call.total_tokens == 30
+
+    call_columns = {column.key for column in inspect(AiCallLog).columns}
+    task_columns = {column.key for column in inspect(AiTask).columns}
+    forbidden = {"prompt_text", "raw_response", "input_summary", "output_summary"}
+    assert call_columns.isdisjoint(forbidden)
+    assert task_columns.isdisjoint(forbidden)

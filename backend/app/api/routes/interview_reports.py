@@ -42,6 +42,7 @@ from app.schemas.interview_report import (
 )
 from app.services.ai_client import (
     INTERVIEW_REPORT_PROMPT_VERSION,
+    MAX_MODEL_RETRIES,
     AIClientError,
     AIConfigurationError,
     AIRequestTimeout,
@@ -50,6 +51,7 @@ from app.services.ai_client import (
     OpenAICompatibleClient,
     get_ai_client,
 )
+from app.services.ai_observability import record_ai_call_in_session
 from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job
 
@@ -733,12 +735,48 @@ async def generate_ai_interview_report(
     failure_code: str | None = None
     failure_message: str | None = None
     try:
-        content: InterviewReportContent = await ai_client.generate_interview_report(
-            _ai_request_payload(context)
+        if hasattr(ai_client, "generate_interview_report_with_metrics"):
+            content, metrics = await ai_client.generate_interview_report_with_metrics(
+                _ai_request_payload(context)
+            )
+        else:
+            content = await ai_client.generate_interview_report(_ai_request_payload(context))
+            metrics = None
+        record_ai_call_in_session(
+            db,
+            scenario="interview_report",
+            status="succeeded",
+            model_name=metrics.model_name if metrics else getattr(ai_client, "model", None),
+            prompt_version=INTERVIEW_REPORT_PROMPT_VERSION,
+            retry_count=metrics.retry_count if metrics else 0,
+            duration_ms=metrics.duration_ms if metrics else None,
+            input_tokens=metrics.input_tokens if metrics else None,
+            output_tokens=metrics.output_tokens if metrics else None,
+            total_tokens=metrics.total_tokens if metrics else None,
+            invoked_by_id=current_user.id,
+            resource_type="job_application",
+            resource_id=application.id,
+            job_id=job.id,
+            application_id=application.id,
         )
     except AIClientError as error:
         generation_mode = "manual"
         failure_code, failure_message = _ai_failure(error)
+        record_ai_call_in_session(
+            db,
+            scenario="interview_report",
+            status="failed",
+            model_name=getattr(ai_client, "model", None),
+            prompt_version=INTERVIEW_REPORT_PROMPT_VERSION,
+            retry_count=0 if isinstance(error, AIConfigurationError) else MAX_MODEL_RETRIES,
+            invoked_by_id=current_user.id,
+            resource_type="job_application",
+            resource_id=application.id,
+            job_id=job.id,
+            application_id=application.id,
+            failure_code=error.__class__.__name__,
+            failure_message=str(error),
+        )
         content = InterviewReportContent()
 
     report = _create_report(application, current_user)

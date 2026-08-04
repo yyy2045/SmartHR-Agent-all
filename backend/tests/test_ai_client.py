@@ -144,6 +144,38 @@ def valid_interview_report() -> dict[str, object]:
 
 
 @pytest.mark.asyncio
+async def test_openai_client_returns_observability_metrics_from_usage() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps(valid_draft(), ensure_ascii=False)}}
+                ],
+                "usage": {
+                    "prompt_tokens": 120,
+                    "completion_tokens": 40,
+                    "total_tokens": 160,
+                },
+            },
+        )
+
+    draft, metrics = await make_client(httpx.MockTransport(handler)).structure_jd_with_metrics(
+        title="后端工程师",
+        department="研发中心",
+        jd="负责 Python 与 FastAPI 服务开发。",
+    )
+
+    assert draft.suggested_title == "高级后端工程师"
+    assert metrics.model_name == "test-model"
+    assert metrics.retry_count == 0
+    assert metrics.input_tokens == 120
+    assert metrics.output_tokens == 40
+    assert metrics.total_tokens == 160
+    assert metrics.duration_ms >= 0
+
+
+@pytest.mark.asyncio
 async def test_openai_client_sends_json_object_with_schema_and_validates_draft() -> None:
     requests: list[httpx.Request] = []
 
