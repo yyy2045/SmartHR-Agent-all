@@ -1,6 +1,7 @@
 export type BusinessModule =
   | 'workbench'
   | 'ai-console'
+  | 'ai-evaluations'
   | 'prompt-templates'
   | 'recruitment-knowledge'
   | 'requests'
@@ -19,6 +20,7 @@ export type BusinessModule =
 export function businessModuleForPath(pathname: string): BusinessModule {
   if (pathname === '/workbench' || pathname.startsWith('/workbench/')) return 'workbench'
   if (pathname === '/ai-console' || pathname.startsWith('/ai-console/')) return 'ai-console'
+  if (pathname.startsWith('/ai-evaluations')) return 'ai-evaluations'
   if (pathname.startsWith('/prompt-templates')) return 'prompt-templates'
   if (pathname.startsWith('/recruitment-knowledge')) return 'recruitment-knowledge'
   if (pathname.startsWith('/recruitment-requests')) return 'requests'

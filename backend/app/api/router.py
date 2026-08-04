@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.routes.ai_evaluations import router as ai_evaluations_router
 from app.api.routes.ai_observability import router as ai_observability_router
 from app.api.routes.analytics import router as analytics_router
 from app.api.routes.auth import router as auth_router
@@ -39,6 +40,11 @@ api_router.include_router(
     ai_observability_router,
     prefix="/ai-observability",
     tags=["ai-observability"],
+)
+api_router.include_router(
+    ai_evaluations_router,
+    prefix="/ai-evaluations",
+    tags=["ai-evaluations"],
 )
 api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(candidates_router, prefix="/candidates", tags=["candidates"])

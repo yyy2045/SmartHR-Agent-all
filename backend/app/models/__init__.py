@@ -1,3 +1,10 @@
+from app.models.ai_evaluation import (
+    AiEvaluationDataset,
+    AiEvaluationErrorCase,
+    AiEvaluationResult,
+    AiEvaluationRun,
+    AiEvaluationSample,
+)
 from app.models.ai_observability import AiCallLog, AiTask, AiTaskEvent
 from app.models.audit import AuditLog
 from app.models.candidate import (
@@ -75,6 +82,11 @@ from app.models.user import Role, User, UserRole
 __all__ = [
     "AuditLog",
     "AiCallLog",
+    "AiEvaluationDataset",
+    "AiEvaluationErrorCase",
+    "AiEvaluationResult",
+    "AiEvaluationRun",
+    "AiEvaluationSample",
     "AiTask",
     "AiTaskEvent",
     "ApplicationResumeDocument",
