@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     file_storage_root: Path = Path("data/local/uploads")
     max_resume_file_size_mb: int = 20
+    max_knowledge_file_size_mb: int = 10
     max_batch_file_count: int = Field(default=50, ge=1, le=50)
 
     ai_base_url: str = "https://api.example.com/v1"

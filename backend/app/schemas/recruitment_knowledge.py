@@ -111,3 +111,28 @@ class RecruitmentKnowledgeRetrievalResponse(BaseModel):
     returned_count: int
     filtered_count: int
     citations: list[RecruitmentKnowledgeRetrievalCitation]
+
+
+class RecruitmentKnowledgeBaseListResponse(BaseModel):
+    items: list[RecruitmentKnowledgeBaseResponse]
+
+
+class RecruitmentKnowledgeDocumentVersionCreateRequest(BaseModel):
+    knowledge_base_id: uuid.UUID | None = None
+    title: str = Field(min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=1000)
+    category: RecruitmentKnowledgeCategory
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    visibility_scope: RecruitmentKnowledgeVisibilityScope = "all_internal"
+    related_job_id: uuid.UUID | None = None
+    change_note: str = Field(min_length=1, max_length=500)
+    raw_text: str = Field(min_length=1, max_length=200000)
+    idempotency_key: uuid.UUID
+
+
+class RecruitmentKnowledgeDocumentVersionCreateResponse(BaseModel):
+    document: RecruitmentKnowledgeDocumentResponse
+    version: RecruitmentKnowledgeVersionResponse
+    chunk_count: int
+    embedding_enabled: bool
+    index_task_id: str | None
