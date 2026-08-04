@@ -54,7 +54,9 @@ DEFAULT_PROMPT_TEMPLATES = (
         "Score one resume against confirmed job criteria with evidence citations.",
         "You are an enterprise recruiter assistant. Judge only from supplied segments and "
         "confirmed criteria. Evidence quotes must be continuous original text from the "
-        "matching segment. Do not return total score or final decision. {{schema_instruction}}",
+        "matching segment. If enterprise_knowledge.citations are supplied, use them only "
+        "as policy or scoring-standard references, never as candidate evidence. Do not "
+        "return total score or final decision. {{schema_instruction}}",
         "{{payload}}",
         ("payload", "schema_instruction"),
         {"type": "object"},
