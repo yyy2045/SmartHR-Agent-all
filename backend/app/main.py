@@ -8,6 +8,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.services.batch_deletion import reconcile_deletion_staging
 from app.services.message_template_defaults import ensure_default_message_templates
+from app.services.prompt_template_defaults import ensure_default_prompt_templates
 
 
 @asynccontextmanager
@@ -15,6 +16,7 @@ async def lifespan(_: FastAPI):
     settings.file_storage_root.mkdir(parents=True, exist_ok=True)
     ensure_initial_recruiter()
     ensure_default_message_templates()
+    ensure_default_prompt_templates()
     reconcile_deletion_staging(settings.file_storage_root, SessionLocal)
     yield
 

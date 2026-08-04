@@ -41,6 +41,7 @@ from app.services.model_payload import (
     ModelPayloadSecurityError,
     build_resume_analysis_payload,
 )
+from app.services.prompt_templates import get_published_prompt_snapshot
 
 logger = logging.getLogger(__name__)
 SessionFactory = sessionmaker[Session]
@@ -353,6 +354,9 @@ async def analyze_resume_document(
     client = ai_client or get_ai_client()
     resolved_job_id: uuid.UUID | None = None
     resolved_batch_id: uuid.UUID | None = None
+    prompt_template = None
+    prompt_version = RESUME_MATCH_PROMPT_VERSION
+    prompt_template_version_id: uuid.UUID | None = None
     with session_factory() as db:
         document = _load_document(db, document_id)
         if document is None:
@@ -407,6 +411,10 @@ async def analyze_resume_document(
             application_id=application.id,
             criteria_version_id=criteria.id,
         )
+        prompt_template = get_published_prompt_snapshot(db, "resume_analysis")
+        if prompt_template is not None:
+            prompt_version = prompt_template.prompt_version
+            prompt_template_version_id = prompt_template.version_id
         result = db.scalar(
             select(ScreeningResult).where(
                 ScreeningResult.application_id == application.id,
@@ -449,7 +457,7 @@ async def analyze_resume_document(
                 missing_items=[],
                 interview_questions=[],
                 model_name=client.model or "unconfigured",
-                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                prompt_version=prompt_version,
                 started_at=datetime.now(UTC),
             )
             db.add(result)
@@ -461,6 +469,8 @@ async def analyze_resume_document(
             result.failure_message = None
             result.completed_at = None
             result.started_at = datetime.now(UTC)
+            result.model_name = client.model or "unconfigured"
+            result.prompt_version = prompt_version
         db.commit()
         result_id = result.id
         resolved_criteria_id = criteria.id
@@ -488,7 +498,10 @@ async def analyze_resume_document(
             )
         try:
             if hasattr(client, "analyze_resume_with_metrics"):
-                analysis, metrics = await client.analyze_resume_with_metrics(payload)
+                analysis, metrics = await client.analyze_resume_with_metrics(
+                    payload,
+                    prompt_template=prompt_template,
+                )
             else:
                 analysis = await client.analyze_resume(payload)
                 metrics = None
@@ -496,7 +509,8 @@ async def analyze_resume_document(
                 scenario="resume_analysis",
                 status="succeeded",
                 model_name=metrics.model_name if metrics else getattr(client, "model", None),
-                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                prompt_version=prompt_version,
+                prompt_template_version_id=prompt_template_version_id,
                 celery_task_id=task_id,
                 retry_count=metrics.retry_count if metrics else 0,
                 duration_ms=metrics.duration_ms if metrics else None,
@@ -522,7 +536,8 @@ async def analyze_resume_document(
                 scenario="resume_analysis",
                 status="failed",
                 model_name=getattr(client, "model", None),
-                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                prompt_version=prompt_version,
+                prompt_template_version_id=prompt_template_version_id,
                 celery_task_id=task_id,
                 retry_count=0 if isinstance(error, AIConfigurationError) else MAX_MODEL_RETRIES,
                 resource_type="resume_document",
@@ -569,11 +584,27 @@ async def analyze_resume_document(
                 document_id,
             )
             try:
+                with session_factory() as db:
+                    repair_prompt_template = get_published_prompt_snapshot(
+                        db,
+                        "resume_analysis_repair",
+                    )
+                repair_prompt_version = (
+                    repair_prompt_template.prompt_version
+                    if repair_prompt_template is not None
+                    else RESUME_MATCH_PROMPT_VERSION
+                )
+                repair_prompt_template_version_id = (
+                    repair_prompt_template.version_id
+                    if repair_prompt_template is not None
+                    else None
+                )
                 if hasattr(client, "analyze_resume_with_metrics"):
                     analysis, repair_metrics = await client.analyze_resume_with_metrics(
                         payload,
                         validation_feedback=str(error),
                         previous_analysis=analysis.model_dump(mode="json"),
+                        prompt_template=repair_prompt_template,
                     )
                 else:
                     analysis = await client.analyze_resume(
@@ -590,7 +621,8 @@ async def analyze_resume_document(
                         if repair_metrics
                         else getattr(client, "model", None)
                     ),
-                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    prompt_version=repair_prompt_version,
+                    prompt_template_version_id=repair_prompt_template_version_id,
                     celery_task_id=task_id,
                     retry_count=repair_metrics.retry_count if repair_metrics else 0,
                     duration_ms=repair_metrics.duration_ms if repair_metrics else None,
@@ -616,7 +648,8 @@ async def analyze_resume_document(
                     scenario="resume_analysis_repair",
                     status="failed",
                     model_name=getattr(client, "model", None),
-                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    prompt_version=repair_prompt_version,
+                    prompt_template_version_id=repair_prompt_template_version_id,
                     celery_task_id=task_id,
                     retry_count=(
                         0
@@ -658,7 +691,7 @@ async def analyze_resume_document(
                     version_number=_latest_profile_version(db, document.id),
                     source="ai",
                     model_name=client.model,
-                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    prompt_version=prompt_version,
                     education=[
                         item.model_dump(mode="json") for item in profile_data.education
                     ],

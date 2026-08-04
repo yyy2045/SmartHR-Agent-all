@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.services.ai_client import RESUME_MATCH_PROMPT_VERSION
 from app.services.audit import record_audit
+from app.services.prompt_templates import get_published_prompt_snapshot
 
 ACTIVE_RUN_STATUSES = ("queued", "retrieving", "rescoring")
 
@@ -411,6 +412,12 @@ def create_recommendation_run(
         job_id=job.id,
     )
     scope_candidate_count = len(candidate_snapshots)
+    prompt_template = get_published_prompt_snapshot(db, "resume_analysis")
+    prompt_version = (
+        prompt_template.prompt_version
+        if prompt_template is not None
+        else RESUME_MATCH_PROMPT_VERSION
+    )
     run = TalentRecommendationRun(
         job=job,
         criteria_version=criteria,
@@ -423,7 +430,7 @@ def create_recommendation_run(
         criteria_snapshot=_criteria_snapshot(criteria),
         embedding_model_snapshot=settings.embedding_model or "unconfigured",
         ai_model_snapshot=settings.ai_model or "unconfigured",
-        prompt_version_snapshot=RESUME_MATCH_PROMPT_VERSION,
+        prompt_version_snapshot=prompt_version,
         scope_candidate_count=scope_candidate_count,
         excluded_count=excluded_count,
         group_snapshots=[

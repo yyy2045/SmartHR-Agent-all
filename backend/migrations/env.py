@@ -29,6 +29,8 @@ from app.models import (  # noqa: F401
     OfferVersion,
     Onboarding,
     OnboardingEvent,
+    PromptTemplate,
+    PromptTemplateVersion,
     RecruitmentRequest,
     RecruitmentRequestApproval,
     RecruitmentRequestVersion,

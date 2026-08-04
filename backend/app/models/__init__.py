@@ -33,6 +33,7 @@ from app.models.offer import (
     OfferVersion,
 )
 from app.models.onboarding import Onboarding, OnboardingEvent
+from app.models.prompt import PromptTemplate, PromptTemplateVersion
 from app.models.recruitment_request import (
     RecruitmentRequest,
     RecruitmentRequestApproval,
@@ -104,6 +105,8 @@ __all__ = [
     "OfferVersion",
     "Onboarding",
     "OnboardingEvent",
+    "PromptTemplate",
+    "PromptTemplateVersion",
     "RecruiterDecision",
     "RecruitmentRequest",
     "RecruitmentRequestApproval",

@@ -65,6 +65,7 @@ class AiCallLogRecord(BaseModel):
     status: AiCallStatus
     model_name: str | None
     prompt_version: str | None
+    prompt_template_version_id: uuid.UUID | None
     provider: str
     retry_count: int
     duration_ms: int | None
