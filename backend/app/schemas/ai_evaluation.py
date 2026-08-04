@@ -137,3 +137,33 @@ class AiEvaluationErrorCaseResponse(BaseModel):
     resolved_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class AiEvaluationDatasetListResponse(BaseModel):
+    items: list[AiEvaluationDatasetResponse]
+
+
+class AiEvaluationRunCreateRequest(BaseModel):
+    model_name: str = Field(default="deterministic-evaluator", min_length=1, max_length=200)
+    prompt_version: str = Field(default="synthetic-baseline-v1", min_length=1, max_length=120)
+    forced_error_case_keys: list[str] = Field(default_factory=list, max_length=20)
+
+
+class AiEvaluationRunListResponse(BaseModel):
+    total: int
+    items: list[AiEvaluationRunResponse]
+
+
+class AiEvaluationRunDetailResponse(BaseModel):
+    run: AiEvaluationRunResponse
+    results: list[AiEvaluationResultResponse]
+
+
+class AiEvaluationErrorCaseListResponse(BaseModel):
+    total: int
+    items: list[AiEvaluationErrorCaseResponse]
+
+
+class AiEvaluationErrorCaseUpdateRequest(BaseModel):
+    status: AiEvaluationErrorStatus
+    remediation_note: str | None = Field(default=None, max_length=4000)
