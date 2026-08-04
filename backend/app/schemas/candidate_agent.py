@@ -68,3 +68,17 @@ class CandidateAgentSessionDetailResponse(CandidateAgentSessionResponse):
 class CandidateAgentAskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     idempotency_key: uuid.UUID
+
+
+class CandidateAgentAnswerDraft(BaseModel):
+    answer: str = Field(min_length=1, max_length=8000)
+    evidence_references: list[CandidateAgentEvidenceReference] = Field(
+        default_factory=list,
+        max_length=12,
+    )
+    knowledge_citations: list[CandidateAgentKnowledgeCitation] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    limitations: list[str] = Field(default_factory=list, max_length=8)
+    suggested_follow_up_questions: list[str] = Field(default_factory=list, max_length=6)

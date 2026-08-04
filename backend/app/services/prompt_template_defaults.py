@@ -96,6 +96,23 @@ DEFAULT_PROMPT_TEMPLATES = (
         {"type": "object"},
         {"temperature": 0.1},
     ),
+    DefaultPromptTemplate(
+        uuid.UUID("23000000-0000-0000-0000-000000000005"),
+        uuid.UUID("24000000-0000-0000-0000-000000000005"),
+        uuid.UUID("25000000-0000-0000-0000-000000000005"),
+        "candidate_qa",
+        "Default candidate QA Agent prompt",
+        "Answer recruiter questions from candidate lifecycle context and knowledge citations.",
+        "You are an enterprise recruiting candidate QA Agent. Use only supplied candidate "
+        "context, lifecycle records and enterprise knowledge citations. Candidate facts "
+        "must come from candidate context; knowledge citations are policy or standard "
+        "references only. Never hire, reject, send Offer or change pipeline stage. "
+        "Return evidence, limitations and follow-up suggestions. {{schema_instruction}}",
+        "{{payload}}",
+        ("payload", "question", "context", "enterprise_knowledge", "schema_instruction"),
+        {"type": "object"},
+        {"temperature": 0.1},
+    ),
 )
 
 

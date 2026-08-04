@@ -163,6 +163,42 @@ def valid_interview_report() -> dict[str, object]:
     }
 
 
+def candidate_agent_payload() -> dict[str, object]:
+    return {
+        "question": "这个候选人的主要风险是什么？",
+        "context": {
+            "job": {"title": "后端工程师"},
+            "candidate": {"full_name": "候选人A", "contacts_visible": True},
+            "latest_screening": {
+                "ai_group": "passed",
+                "evidence_citations": [
+                    {"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "quote": "负责核心系统重构"}
+                ],
+            },
+        },
+        "enterprise_knowledge": {"available": False, "citations": []},
+        "decision_boundary": {"ai_must_not": ["自动录用或淘汰候选人"]},
+    }
+
+
+def valid_candidate_agent_answer() -> dict[str, object]:
+    return {
+        "answer": "候选人具备系统重构经验，但团队规模信息不足，建议在下一轮核实。",
+        "evidence_references": [
+            {
+                "source_type": "latest_screening",
+                "source_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "source_label": "AI 初筛证据",
+                "quote": "负责核心系统重构",
+                "metadata": {"subject_key": "system_design"},
+            }
+        ],
+        "knowledge_citations": [],
+        "limitations": ["团队规模未明确"],
+        "suggested_follow_up_questions": ["请说明最近一次系统重构中的团队规模和个人职责。"],
+    }
+
+
 @pytest.mark.asyncio
 async def test_openai_client_returns_observability_metrics_from_usage() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
@@ -354,6 +390,46 @@ async def test_invalid_interview_report_retries_twice() -> None:
         ).generate_interview_report(interview_report_payload())
 
     assert attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_openai_client_answers_candidate_agent_question_with_evidence_contract() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                valid_candidate_agent_answer(), ensure_ascii=False
+                            )
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 180,
+                    "completion_tokens": 90,
+                    "total_tokens": 270,
+                },
+            },
+        )
+
+    result, metrics = await make_client(
+        httpx.MockTransport(handler)
+    ).answer_candidate_question_with_metrics(candidate_agent_payload())
+
+    assert "系统重构经验" in result.answer
+    assert result.evidence_references[0].source_type == "latest_screening"
+    assert metrics.total_tokens == 270
+    request_body = json.loads(requests[0].content)
+    assert request_body["response_format"] == {"type": "json_object"}
+    assert '"evidence_references"' in request_body["messages"][0]["content"]
+    assert '"suggested_follow_up_questions"' in request_body["messages"][0]["content"]
+    assert json.loads(request_body["messages"][1]["content"]) == candidate_agent_payload()
 
 
 @pytest.mark.asyncio

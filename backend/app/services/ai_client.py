@@ -13,6 +13,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.config import settings
+from app.schemas.candidate_agent import CandidateAgentAnswerDraft
 from app.schemas.interview_report import InterviewReportAIDraft
 from app.schemas.job import JDAIDraft
 from app.schemas.screening import ResumeAnalysisDraft
@@ -23,7 +24,11 @@ MAX_MODEL_RETRIES = 2
 RESUME_MATCH_PROMPT_VERSION = "resume-match-v2"
 INTERVIEW_REPORT_PROMPT_VERSION = "interview-report-v1"
 StructuredResponse = TypeVar(
-    "StructuredResponse", JDAIDraft, ResumeAnalysisDraft, InterviewReportAIDraft
+    "StructuredResponse",
+    JDAIDraft,
+    ResumeAnalysisDraft,
+    InterviewReportAIDraft,
+    CandidateAgentAnswerDraft,
 )
 
 
@@ -83,7 +88,8 @@ def _render_prompt_pair(
 def _schema_instruction(
     response_type: type[JDAIDraft]
     | type[ResumeAnalysisDraft]
-    | type[InterviewReportAIDraft],
+    | type[InterviewReportAIDraft]
+    | type[CandidateAgentAnswerDraft],
 ) -> str:
     schema = json.dumps(
         response_type.model_json_schema(),
@@ -304,6 +310,46 @@ class OpenAICompatibleClient:
             "response_format": {"type": "json_object"},
         }
 
+    @staticmethod
+    def _candidate_agent_request_payload(
+        *,
+        payload: dict[str, Any],
+        model: str,
+        prompt_template: PublishedPromptSnapshot | None = None,
+    ) -> dict[str, Any]:
+        system_prompt = (
+            "你是企业招聘场景中的候选人问答 Agent，服务对象是招聘专员。"
+            "你只能基于输入中的候选人上下文、业务记录和企业知识库引用回答，"
+            "不得编造不存在的经历、评价、Offer 或入职事实。"
+            "候选人事实必须来自候选人上下文；企业知识库只能作为制度、流程、"
+            "岗位标准或沟通规范引用，不能替代候选人证据。"
+            "你可以分析匹配点、风险点、矛盾点和下一步建议，但不得自动录用、"
+            "自动淘汰、发送 Offer 或改变候选人阶段。"
+            "回答必须给出证据引用；证据不足时要明确说明限制。"
+            f"{_schema_instruction(CandidateAgentAnswerDraft)}"
+        )
+        user_prompt = json.dumps(payload, ensure_ascii=False)
+        if prompt_template is not None:
+            system_prompt, user_prompt = _render_prompt_pair(
+                prompt_template,
+                {
+                    "payload": user_prompt,
+                    "question": payload.get("question", ""),
+                    "context": payload.get("context", {}),
+                    "enterprise_knowledge": payload.get("enterprise_knowledge", {}),
+                    "schema_instruction": _schema_instruction(CandidateAgentAnswerDraft),
+                },
+            )
+        return {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": _model_temperature(prompt_template, 0.1),
+            "response_format": {"type": "json_object"},
+        }
+
     async def _request_structured_with_metrics(
         self,
         *,
@@ -483,6 +529,36 @@ class OpenAICompatibleClient:
             ),
             response_type=InterviewReportAIDraft,
             operation_name="AI 面试报告",
+        )
+
+
+    async def answer_candidate_question(
+        self,
+        payload: dict[str, Any],
+        *,
+        prompt_template: PublishedPromptSnapshot | None = None,
+    ) -> CandidateAgentAnswerDraft:
+        response, _metrics = await self.answer_candidate_question_with_metrics(
+            payload,
+            prompt_template=prompt_template,
+        )
+        return response
+
+    async def answer_candidate_question_with_metrics(
+        self,
+        payload: dict[str, Any],
+        *,
+        prompt_template: PublishedPromptSnapshot | None = None,
+    ) -> tuple[CandidateAgentAnswerDraft, AIRequestMetrics]:
+        self._validate_configuration()
+        return await self._request_structured_with_metrics(
+            payload=self._candidate_agent_request_payload(
+                payload=payload,
+                model=self.model,
+                prompt_template=prompt_template,
+            ),
+            response_type=CandidateAgentAnswerDraft,
+            operation_name="AI 候选人问答 Agent",
         )
 
 
