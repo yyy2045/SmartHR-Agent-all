@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import AiCallLog, PromptTemplate, PromptTemplateVersion, Role, User, UserRole
+from app.services.prompt_templates import get_published_prompt_snapshot
 from app.services.security import hash_password
 
 
@@ -110,6 +111,33 @@ def test_prompt_template_version_tracks_schema_and_ai_call_binding(
         assert stored.current_version.output_schema == {"type": "object", "required": ["summary"]}
         assert stored.current_version.variables == ["criteria", "resume"]
         assert stored.current_version.ai_call_logs[0].total_tokens == 120
+
+
+def test_get_published_prompt_snapshot_returns_active_current_version(
+    prompt_session_factory: sessionmaker[Session],
+) -> None:
+    with prompt_session_factory() as db:
+        user = _user(db)
+        template = _template(user)
+        template.scenario = "jd_generation"
+        first = _version(template, user, status="retired")
+        second = _version(template, user, version_number=2)
+        second.change_note = "publish second version"
+        second.system_prompt = "System {{title}}"
+        second.user_prompt_template = "User {{jd}}"
+        second.variables = ["title", "jd"]
+        second.model_parameters = {"temperature": 0.2}
+        template.current_version_number = 2
+        db.add_all([template, first, second])
+        db.commit()
+
+        snapshot = get_published_prompt_snapshot(db, "jd_generation")
+
+        assert snapshot is not None
+        assert snapshot.version_id == second.id
+        assert snapshot.prompt_version == "jd_generation-v2"
+        assert snapshot.system_prompt == "System {{title}}"
+        assert snapshot.model_parameters == {"temperature": 0.2}
 
 
 @pytest.mark.parametrize(

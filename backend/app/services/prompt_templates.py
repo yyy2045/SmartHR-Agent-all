@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
@@ -16,6 +17,20 @@ from app.schemas.prompt import (
     PromptTemplateVersionCreateRequest,
     PromptTemplateVersionResponse,
 )
+
+
+@dataclass(frozen=True)
+class PublishedPromptSnapshot:
+    version_id: uuid.UUID
+    scenario: str
+    version_number: int
+    system_prompt: str
+    user_prompt_template: str
+    model_parameters: dict[str, object]
+
+    @property
+    def prompt_version(self) -> str:
+        return f"{self.scenario}-v{self.version_number}"
 
 
 def _actor_snapshot(user: User) -> dict[str, object]:
@@ -97,6 +112,32 @@ def list_templates(db: Session) -> list[PromptTemplate]:
             .options(selectinload(PromptTemplate.versions))
             .order_by(PromptTemplate.scenario)
         )
+    )
+
+
+def get_published_prompt_snapshot(
+    db: Session,
+    scenario: str,
+) -> PublishedPromptSnapshot | None:
+    version = db.scalar(
+        select(PromptTemplateVersion)
+        .join(PromptTemplate, PromptTemplate.id == PromptTemplateVersion.template_id)
+        .where(
+            PromptTemplate.scenario == scenario,
+            PromptTemplate.status == "active",
+            PromptTemplate.current_version_number == PromptTemplateVersion.version_number,
+            PromptTemplateVersion.status == "published",
+        )
+    )
+    if version is None:
+        return None
+    return PublishedPromptSnapshot(
+        version_id=version.id,
+        scenario=scenario,
+        version_number=version.version_number,
+        system_prompt=version.system_prompt,
+        user_prompt_template=version.user_prompt_template,
+        model_parameters=version.model_parameters or {},
     )
 
 

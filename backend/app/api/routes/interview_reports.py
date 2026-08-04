@@ -54,6 +54,7 @@ from app.services.ai_client import (
 from app.services.ai_observability import record_ai_call_in_session
 from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job
+from app.services.prompt_templates import get_published_prompt_snapshot
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -734,10 +735,18 @@ async def generate_ai_interview_report(
     generation_mode = "ai"
     failure_code: str | None = None
     failure_message: str | None = None
+    prompt_template = get_published_prompt_snapshot(db, "interview_report")
+    prompt_version = (
+        prompt_template.prompt_version
+        if prompt_template is not None
+        else INTERVIEW_REPORT_PROMPT_VERSION
+    )
+    prompt_template_version_id = prompt_template.version_id if prompt_template else None
     try:
         if hasattr(ai_client, "generate_interview_report_with_metrics"):
             content, metrics = await ai_client.generate_interview_report_with_metrics(
-                _ai_request_payload(context)
+                _ai_request_payload(context),
+                prompt_template=prompt_template,
             )
         else:
             content = await ai_client.generate_interview_report(_ai_request_payload(context))
@@ -747,7 +756,8 @@ async def generate_ai_interview_report(
             scenario="interview_report",
             status="succeeded",
             model_name=metrics.model_name if metrics else getattr(ai_client, "model", None),
-            prompt_version=INTERVIEW_REPORT_PROMPT_VERSION,
+            prompt_version=prompt_version,
+            prompt_template_version_id=prompt_template_version_id,
             retry_count=metrics.retry_count if metrics else 0,
             duration_ms=metrics.duration_ms if metrics else None,
             input_tokens=metrics.input_tokens if metrics else None,
@@ -767,7 +777,8 @@ async def generate_ai_interview_report(
             scenario="interview_report",
             status="failed",
             model_name=getattr(ai_client, "model", None),
-            prompt_version=INTERVIEW_REPORT_PROMPT_VERSION,
+            prompt_version=prompt_version,
+            prompt_template_version_id=prompt_template_version_id,
             retry_count=0 if isinstance(error, AIConfigurationError) else MAX_MODEL_RETRIES,
             invoked_by_id=current_user.id,
             resource_type="job_application",
@@ -788,7 +799,7 @@ async def generate_ai_interview_report(
             idempotency_key=payload.idempotency_key,
             generation_mode=generation_mode,
             model_name=ai_client.model or None,
-            prompt_version=INTERVIEW_REPORT_PROMPT_VERSION,
+            prompt_version=prompt_version,
             ai_failure_code=failure_code,
             ai_failure_message=failure_message,
         )

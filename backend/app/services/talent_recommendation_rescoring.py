@@ -35,6 +35,7 @@ from app.services.model_payload import (
     ModelPayloadSecurityError,
     build_resume_analysis_payload_from_snapshot,
 )
+from app.services.prompt_templates import get_published_prompt_snapshot
 from app.services.resume_analysis import (
     AnalysisContractError,
     _find_source_quote,
@@ -340,7 +341,13 @@ def _prepare_results(
                 "ai_configuration_changed",
                 "AI 模型配置与推荐运行快照不一致，请创建新的推荐任务",
             )
-        if run.prompt_version_snapshot != RESUME_MATCH_PROMPT_VERSION:
+        prompt_template = get_published_prompt_snapshot(db, "resume_analysis")
+        current_prompt_version = (
+            prompt_template.prompt_version
+            if prompt_template is not None
+            else RESUME_MATCH_PROMPT_VERSION
+        )
+        if run.prompt_version_snapshot != current_prompt_version:
             raise TalentRecommendationRescoringError(
                 "prompt_configuration_changed",
                 "AI Prompt 版本与推荐运行快照不一致，请创建新的推荐任务",
@@ -546,6 +553,18 @@ async def _process_result(
                 return "superseded"
             if run.status == "cancelled":
                 return "cancelled"
+            prompt_template = get_published_prompt_snapshot(db, "resume_analysis")
+            current_prompt_version = (
+                prompt_template.prompt_version
+                if prompt_template is not None
+                else RESUME_MATCH_PROMPT_VERSION
+            )
+            prompt_template_version_id = prompt_template.version_id if prompt_template else None
+            if run.prompt_version_snapshot != current_prompt_version:
+                raise TalentRecommendationRescoringError(
+                    "prompt_configuration_changed",
+                    "AI Prompt version changed, please create a new recommendation run",
+                )
             document = _load_document(db, result.document_id)
             profile = db.get(CandidateProfile, result.candidate_profile_id)
             if document is None or profile is None:
@@ -568,7 +587,10 @@ async def _process_result(
 
         try:
             if hasattr(client, "analyze_resume_with_metrics"):
-                analysis, metrics = await client.analyze_resume_with_metrics(payload)
+                analysis, metrics = await client.analyze_resume_with_metrics(
+                    payload,
+                    prompt_template=prompt_template,
+                )
             else:
                 analysis = await client.analyze_resume(payload)
                 metrics = None
@@ -576,7 +598,8 @@ async def _process_result(
                 scenario="talent_recommendation_rescore",
                 status="succeeded",
                 model_name=metrics.model_name if metrics else getattr(client, "model", None),
-                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                prompt_version=current_prompt_version,
+                prompt_template_version_id=prompt_template_version_id,
                 celery_task_id=task_id,
                 retry_count=metrics.retry_count if metrics else 0,
                 duration_ms=metrics.duration_ms if metrics else None,
@@ -600,7 +623,8 @@ async def _process_result(
                 scenario="talent_recommendation_rescore",
                 status="failed",
                 model_name=getattr(client, "model", None),
-                prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                prompt_version=current_prompt_version,
+                prompt_template_version_id=prompt_template_version_id,
                 celery_task_id=task_id,
                 retry_count=0 if isinstance(error, AIConfigurationError) else MAX_MODEL_RETRIES,
                 resource_type="talent_recommendation_result",
@@ -636,11 +660,27 @@ async def _process_result(
                 result_id,
             )
             try:
+                with session_factory() as db:
+                    repair_prompt_template = get_published_prompt_snapshot(
+                        db,
+                        "resume_analysis_repair",
+                    )
+                repair_prompt_version = (
+                    repair_prompt_template.prompt_version
+                    if repair_prompt_template is not None
+                    else RESUME_MATCH_PROMPT_VERSION
+                )
+                repair_prompt_template_version_id = (
+                    repair_prompt_template.version_id
+                    if repair_prompt_template is not None
+                    else None
+                )
                 if hasattr(client, "analyze_resume_with_metrics"):
                     analysis, repair_metrics = await client.analyze_resume_with_metrics(
                         payload,
                         validation_feedback=str(error),
                         previous_analysis=analysis.model_dump(mode="json"),
+                        prompt_template=repair_prompt_template,
                     )
                 else:
                     analysis = await client.analyze_resume(
@@ -657,7 +697,8 @@ async def _process_result(
                         if repair_metrics
                         else getattr(client, "model", None)
                     ),
-                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    prompt_version=repair_prompt_version,
+                    prompt_template_version_id=repair_prompt_template_version_id,
                     celery_task_id=task_id,
                     retry_count=repair_metrics.retry_count if repair_metrics else 0,
                     duration_ms=repair_metrics.duration_ms if repair_metrics else None,
@@ -681,7 +722,8 @@ async def _process_result(
                     scenario="talent_recommendation_repair",
                     status="failed",
                     model_name=getattr(client, "model", None),
-                    prompt_version=RESUME_MATCH_PROMPT_VERSION,
+                    prompt_version=repair_prompt_version,
+                    prompt_template_version_id=repair_prompt_template_version_id,
                     celery_task_id=task_id,
                     retry_count=(
                         0

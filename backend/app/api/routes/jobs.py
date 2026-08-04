@@ -39,6 +39,7 @@ from app.services.ai_client import (
 from app.services.ai_observability import record_ai_call_in_session
 from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job, job_scope_clause
+from app.services.prompt_templates import get_published_prompt_snapshot
 from app.services.talent_recommendation import mark_runs_stale_for_new_criteria
 
 router = APIRouter()
@@ -271,12 +272,16 @@ async def generate_ai_criteria_draft(
     job = get_visible_job(db, job_id, current_user)
     ensure_job_writable(job, current_user)
     ensure_job_active(job)
+    prompt_template = get_published_prompt_snapshot(db, "jd_generation")
+    prompt_version = prompt_template.prompt_version if prompt_template else "jd-structure-v1"
+    prompt_template_version_id = prompt_template.version_id if prompt_template else None
     try:
         if hasattr(ai_client, "structure_jd_with_metrics"):
             draft, metrics = await ai_client.structure_jd_with_metrics(
                 title=job.title,
                 department=job.department,
                 jd=job.original_jd,
+                prompt_template=prompt_template,
             )
         else:
             draft = await ai_client.structure_jd(
@@ -290,7 +295,8 @@ async def generate_ai_criteria_draft(
             scenario="jd_generation",
             status="succeeded",
             model_name=metrics.model_name if metrics else getattr(ai_client, "model", None),
-            prompt_version="jd-structure-v1",
+            prompt_version=prompt_version,
+            prompt_template_version_id=prompt_template_version_id,
             retry_count=metrics.retry_count if metrics else 0,
             duration_ms=metrics.duration_ms if metrics else None,
             input_tokens=metrics.input_tokens if metrics else None,
@@ -309,7 +315,8 @@ async def generate_ai_criteria_draft(
             scenario="jd_generation",
             status="failed",
             model_name=getattr(ai_client, "model", None),
-            prompt_version="jd-structure-v1",
+            prompt_version=prompt_version,
+            prompt_template_version_id=prompt_template_version_id,
             retry_count=0,
             invoked_by_id=current_user.id,
             resource_type="job",
@@ -329,7 +336,8 @@ async def generate_ai_criteria_draft(
             scenario="jd_generation",
             status="failed",
             model_name=getattr(ai_client, "model", None),
-            prompt_version="jd-structure-v1",
+            prompt_version=prompt_version,
+            prompt_template_version_id=prompt_template_version_id,
             retry_count=MAX_MODEL_RETRIES,
             invoked_by_id=current_user.id,
             resource_type="job",
@@ -349,7 +357,8 @@ async def generate_ai_criteria_draft(
             scenario="jd_generation",
             status="failed",
             model_name=getattr(ai_client, "model", None),
-            prompt_version="jd-structure-v1",
+            prompt_version=prompt_version,
+            prompt_template_version_id=prompt_template_version_id,
             retry_count=MAX_MODEL_RETRIES,
             invoked_by_id=current_user.id,
             resource_type="job",

@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 
 import httpx
 import pytest
@@ -11,6 +12,7 @@ from app.services.ai_client import (
     AIUpstreamError,
     OpenAICompatibleClient,
 )
+from app.services.prompt_templates import PublishedPromptSnapshot
 
 
 def valid_draft() -> dict[str, object]:
@@ -53,6 +55,24 @@ def make_client(transport: httpx.AsyncBaseTransport) -> OpenAICompatibleClient:
         timeout_seconds=10,
         max_concurrency=2,
         transport=transport,
+    )
+
+
+def prompt_snapshot(
+    *,
+    scenario: str = "jd_generation",
+    version_number: int = 2,
+    system_prompt: str = "自定义系统 Prompt：{{title}}",
+    user_prompt_template: str = "自定义用户 Prompt：{{jd}}",
+    temperature: float = 0.7,
+) -> PublishedPromptSnapshot:
+    return PublishedPromptSnapshot(
+        version_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        scenario=scenario,
+        version_number=version_number,
+        system_prompt=system_prompt,
+        user_prompt_template=user_prompt_template,
+        model_parameters={"temperature": temperature},
     )
 
 
@@ -207,6 +227,35 @@ async def test_openai_client_sends_json_object_with_schema_and_validates_draft()
     assert '"scoring_dimensions"' in system_prompt
     assert "负责 Python 与 FastAPI 服务开发" in request_body["messages"][1]["content"]
     assert requests[0].headers["authorization"] == "Bearer test-api-key"
+
+
+@pytest.mark.asyncio
+async def test_openai_client_renders_published_prompt_snapshot_and_keeps_schema_guard() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps(valid_draft(), ensure_ascii=False)}}
+                ]
+            },
+        )
+
+    await make_client(httpx.MockTransport(handler)).structure_jd(
+        title="后端工程师",
+        department="研发",
+        jd="负责 FastAPI 服务",
+        prompt_template=prompt_snapshot(),
+    )
+
+    request_body = json.loads(requests[0].content)
+    assert request_body["temperature"] == 0.7
+    assert request_body["messages"][0]["content"].startswith("自定义系统 Prompt：后端工程师")
+    assert '"suggested_title"' in request_body["messages"][0]["content"]
+    assert request_body["messages"][1]["content"] == "自定义用户 Prompt：负责 FastAPI 服务"
 
 
 @pytest.mark.asyncio

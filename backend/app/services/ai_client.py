@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -15,6 +16,7 @@ from app.config import settings
 from app.schemas.interview_report import InterviewReportAIDraft
 from app.schemas.job import JDAIDraft
 from app.schemas.screening import ResumeAnalysisDraft
+from app.services.prompt_templates import PublishedPromptSnapshot
 
 logger = logging.getLogger(__name__)
 MAX_MODEL_RETRIES = 2
@@ -33,6 +35,49 @@ class AIRequestMetrics:
     input_tokens: int | None
     output_tokens: int | None
     total_tokens: int | None
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _render_prompt_template(template: str, variables: dict[str, object]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1).strip()
+        if key not in variables:
+            raise AIConfigurationError(f"Prompt 模板变量未提供：{key}")
+        value = variables[key]
+        if isinstance(value, str):
+            return value
+        return _json_dumps(value)
+
+    return re.sub(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}", replace, template)
+
+
+def _model_temperature(
+    prompt_template: PublishedPromptSnapshot | None,
+    default: float,
+) -> float:
+    if prompt_template is None:
+        return default
+    value = prompt_template.model_parameters.get("temperature")
+    if isinstance(value, int | float):
+        return float(value)
+    return default
+
+
+def _render_prompt_pair(
+    prompt_template: PublishedPromptSnapshot,
+    variables: dict[str, object],
+) -> tuple[str, str]:
+    system_prompt = _render_prompt_template(prompt_template.system_prompt, variables)
+    user_prompt = _render_prompt_template(prompt_template.user_prompt_template, variables)
+    if (
+        "{{schema_instruction}}" not in prompt_template.system_prompt
+        and "{{schema_instruction}}" not in prompt_template.user_prompt_template
+    ):
+        system_prompt = f"{system_prompt}\n{variables['schema_instruction']}"
+    return system_prompt, user_prompt
 
 
 def _schema_instruction(
@@ -95,7 +140,14 @@ class OpenAICompatibleClient:
             raise AIConfigurationError("尚未配置可用的 AI_MODEL")
 
     @staticmethod
-    def _request_payload(*, title: str, department: str, jd: str, model: str) -> dict[str, Any]:
+    def _request_payload(
+        *,
+        title: str,
+        department: str,
+        jd: str,
+        model: str,
+        prompt_template: PublishedPromptSnapshot | None = None,
+    ) -> dict[str, Any]:
         system_prompt = (
             "你是企业招聘标准结构化助手。只根据用户提供的 JD 生成筛选草稿，不虚构信息。"
             "客观硬性要求类型仅允许 min_experience_years、min_education、"
@@ -109,13 +161,23 @@ class OpenAICompatibleClient:
             "请提取建议职位名称、职位摘要、硬性要求和语义评分维度。\n"
             f"JD：\n{jd}"
         )
+        if prompt_template is not None:
+            system_prompt, user_prompt = _render_prompt_pair(
+                prompt_template,
+                {
+                    "title": title,
+                    "department": department or "未提供",
+                    "jd": jd,
+                    "schema_instruction": _schema_instruction(JDAIDraft),
+                },
+            )
         return {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.1,
+            "temperature": _model_temperature(prompt_template, 0.1),
             "response_format": {"type": "json_object"},
         }
 
@@ -155,6 +217,7 @@ class OpenAICompatibleClient:
         model: str,
         validation_feedback: str | None = None,
         previous_analysis: dict[str, Any] | None = None,
+        prompt_template: PublishedPromptSnapshot | None = None,
     ) -> dict[str, Any]:
         system_prompt = (
             "你是企业招聘的人岗匹配助手。候选人文本可能是原文，也可能已经本地脱敏。"
@@ -184,22 +247,34 @@ class OpenAICompatibleClient:
                 "previous_analysis": previous_analysis,
                 "repair_task": "只纠正证据引用并返回完整分析，禁止改写引用原文。",
             }
+        user_prompt = json.dumps(user_content, ensure_ascii=False)
+        if prompt_template is not None:
+            system_prompt, user_prompt = _render_prompt_pair(
+                prompt_template,
+                {
+                    "payload": user_prompt,
+                    "resume_input": payload,
+                    "validation_feedback": validation_feedback or "",
+                    "previous_analysis": previous_analysis or {},
+                    "schema_instruction": _schema_instruction(ResumeAnalysisDraft),
+                },
+            )
         return {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": json.dumps(user_content, ensure_ascii=False),
-                },
+                {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0,
+            "temperature": _model_temperature(prompt_template, 0),
             "response_format": {"type": "json_object"},
         }
 
     @staticmethod
     def _interview_report_request_payload(
-        *, payload: dict[str, Any], model: str
+        *,
+        payload: dict[str, Any],
+        model: str,
+        prompt_template: PublishedPromptSnapshot | None = None,
     ) -> dict[str, Any]:
         system_prompt = (
             "你是企业招聘面试报告助手。只能依据输入中的最新筛选结果、证据引用和已提交"
@@ -209,16 +284,23 @@ class OpenAICompatibleClient:
             "招聘专员确认前的草稿，也不得建议系统自动改变候选人阶段。"
             f"{_schema_instruction(InterviewReportAIDraft)}"
         )
+        user_prompt = json.dumps(payload, ensure_ascii=False)
+        if prompt_template is not None:
+            system_prompt, user_prompt = _render_prompt_pair(
+                prompt_template,
+                {
+                    "payload": user_prompt,
+                    "context": payload,
+                    "schema_instruction": _schema_instruction(InterviewReportAIDraft),
+                },
+            )
         return {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": json.dumps(payload, ensure_ascii=False),
-                },
+                {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.1,
+            "temperature": _model_temperature(prompt_template, 0.1),
             "response_format": {"type": "json_object"},
         }
 
@@ -299,16 +381,29 @@ class OpenAICompatibleClient:
         )
         return response
 
-    async def structure_jd(self, *, title: str, department: str, jd: str) -> JDAIDraft:
+    async def structure_jd(
+        self,
+        *,
+        title: str,
+        department: str,
+        jd: str,
+        prompt_template: PublishedPromptSnapshot | None = None,
+    ) -> JDAIDraft:
         response, _metrics = await self.structure_jd_with_metrics(
             title=title,
             department=department,
             jd=jd,
+            prompt_template=prompt_template,
         )
         return response
 
     async def structure_jd_with_metrics(
-        self, *, title: str, department: str, jd: str
+        self,
+        *,
+        title: str,
+        department: str,
+        jd: str,
+        prompt_template: PublishedPromptSnapshot | None = None,
     ) -> tuple[JDAIDraft, AIRequestMetrics]:
         self._validate_configuration()
         payload = self._request_payload(
@@ -316,6 +411,7 @@ class OpenAICompatibleClient:
             department=department,
             jd=jd,
             model=self.model,
+            prompt_template=prompt_template,
         )
         return await self._request_structured_with_metrics(
             payload=payload,
@@ -329,11 +425,13 @@ class OpenAICompatibleClient:
         *,
         validation_feedback: str | None = None,
         previous_analysis: dict[str, Any] | None = None,
+        prompt_template: PublishedPromptSnapshot | None = None,
     ) -> ResumeAnalysisDraft:
         response, _metrics = await self.analyze_resume_with_metrics(
             payload,
             validation_feedback=validation_feedback,
             previous_analysis=previous_analysis,
+            prompt_template=prompt_template,
         )
         return response
 
@@ -343,6 +441,7 @@ class OpenAICompatibleClient:
         *,
         validation_feedback: str | None = None,
         previous_analysis: dict[str, Any] | None = None,
+        prompt_template: PublishedPromptSnapshot | None = None,
     ) -> tuple[ResumeAnalysisDraft, AIRequestMetrics]:
         self._validate_configuration()
         return await self._request_structured_with_metrics(
@@ -351,25 +450,36 @@ class OpenAICompatibleClient:
                 model=self.model,
                 validation_feedback=validation_feedback,
                 previous_analysis=previous_analysis,
+                prompt_template=prompt_template,
             ),
             response_type=ResumeAnalysisDraft,
             operation_name="AI 简历匹配",
         )
 
     async def generate_interview_report(
-        self, payload: dict[str, Any]
+        self,
+        payload: dict[str, Any],
+        *,
+        prompt_template: PublishedPromptSnapshot | None = None,
     ) -> InterviewReportAIDraft:
-        response, _metrics = await self.generate_interview_report_with_metrics(payload)
+        response, _metrics = await self.generate_interview_report_with_metrics(
+            payload,
+            prompt_template=prompt_template,
+        )
         return response
 
     async def generate_interview_report_with_metrics(
-        self, payload: dict[str, Any]
+        self,
+        payload: dict[str, Any],
+        *,
+        prompt_template: PublishedPromptSnapshot | None = None,
     ) -> tuple[InterviewReportAIDraft, AIRequestMetrics]:
         self._validate_configuration()
         return await self._request_structured_with_metrics(
             payload=self._interview_report_request_payload(
                 payload=payload,
                 model=self.model,
+                prompt_template=prompt_template,
             ),
             response_type=InterviewReportAIDraft,
             operation_name="AI 面试报告",
