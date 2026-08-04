@@ -201,9 +201,23 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: /面试管理/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /录用管理/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /工作台/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /AI 控制台/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /人才库/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /数据分析/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /系统设置/ })).toBeDisabled()
+  })
+
+  it('将 AI 控制台归入全局模块且不显示岗位上下文', () => {
+    expect(businessModuleForPath('/ai-console')).toBe('ai-console')
+    expect(jobIdFromPath('/ai-console')).toBeNull()
+    mockApi()
+    renderLayout('/ai-console')
+    expect(screen.getByRole('button', { name: 'AI 控制台' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
+    expect(screen.getByText('管理可观测、可追溯、可评测的 AI Agent 工程能力')).toBeInTheDocument()
   })
 
   it('将工作台归入独立全局模块且不绑定岗位', () => {

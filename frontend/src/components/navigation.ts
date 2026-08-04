@@ -1,5 +1,6 @@
 export type BusinessModule =
   | 'workbench'
+  | 'ai-console'
   | 'requests'
   | 'jobs'
   | 'screening'
@@ -15,6 +16,7 @@ export type BusinessModule =
 
 export function businessModuleForPath(pathname: string): BusinessModule {
   if (pathname === '/workbench' || pathname.startsWith('/workbench/')) return 'workbench'
+  if (pathname === '/ai-console' || pathname.startsWith('/ai-console/')) return 'ai-console'
   if (pathname.startsWith('/recruitment-requests')) return 'requests'
   if (pathname.startsWith('/candidates')) return 'candidates'
   if (pathname.startsWith('/talent')) return 'talent'

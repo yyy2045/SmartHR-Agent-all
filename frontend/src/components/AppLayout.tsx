@@ -5,6 +5,7 @@ import {
   BarChartOutlined,
   BellOutlined,
   CalendarOutlined,
+  CloudServerOutlined,
   ContactsOutlined,
   DatabaseOutlined,
   FileSearchOutlined,
@@ -49,6 +50,9 @@ interface NavigationItem {
 function pageMeta(pathname: string) {
   if (pathname.startsWith('/workbench')) {
     return { title: '招聘工作台', subtitle: '聚合当前需要处理、等待回应与风险事项' }
+  }
+  if (pathname.startsWith('/ai-console')) {
+    return { title: 'AI 控制台', subtitle: '管理可观测、可追溯、可评测的 AI Agent 工程能力' }
   }
   if (pathname.startsWith('/recruitment-requests')) {
     return { title: '招聘需求', subtitle: '发起、审批并追踪招聘任务来源' }
@@ -162,6 +166,12 @@ export function AppLayout() {
       label: '工作台',
       icon: <AppstoreOutlined />,
       path: '/workbench',
+    },
+    {
+      key: 'ai-console',
+      label: 'AI 控制台',
+      icon: <CloudServerOutlined />,
+      path: '/ai-console',
     },
     ...(canAccessRequests
       ? [
