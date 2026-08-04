@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.dependencies.auth import CurrentUser
+from app.config import settings
 from app.database import get_db
 from app.models import (
     CandidateInterviewRound,
@@ -40,6 +41,10 @@ from app.schemas.interview_report import (
     ReportScreeningEvidenceResponse,
     ReportSubmittedEvaluationResponse,
 )
+from app.schemas.recruitment_knowledge import (
+    RecruitmentKnowledgeRetrievalCitation,
+    RecruitmentKnowledgeRetrievalRequest,
+)
 from app.services.ai_client import (
     INTERVIEW_REPORT_PROMPT_VERSION,
     MAX_MODEL_RETRIES,
@@ -54,7 +59,9 @@ from app.services.ai_client import (
 from app.services.ai_observability import record_ai_call_in_session
 from app.services.audit import record_audit
 from app.services.authorization import ensure_job_writable, get_visible_job
+from app.services.embedding_client import EmbeddingClientError
 from app.services.prompt_templates import get_published_prompt_snapshot
+from app.services.recruitment_knowledge import retrieve_recruitment_knowledge
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
@@ -530,8 +537,50 @@ def _create_report(
     )
 
 
-def _ai_request_payload(context: InterviewReportContextResponse) -> dict[str, object]:
-    return {
+def _interview_report_rag_query(
+    context: InterviewReportContextResponse,
+) -> str:
+    lines = [
+        f"Job title: {context.job_title}",
+        "Scenario: generate interview report based on screening result "
+        "and submitted interview evaluations.",
+    ]
+    if context.latest_screening is not None:
+        lines.extend(
+            [
+                f"Screening group: {context.latest_screening.ai_group or 'unknown'}",
+                f"Screening score: {context.latest_screening.total_score}",
+                "Screening strengths: "
+                + "；".join(context.latest_screening.strengths[:5]),
+                "Screening gaps: " + "；".join(context.latest_screening.gaps[:5]),
+            ]
+        )
+    for evaluation in context.submitted_evaluations[:5]:
+        lines.append(
+            "Interview evaluation: "
+            f"{evaluation.round_name} {evaluation.overall_recommendation} "
+            f"{evaluation.overall_comment or ''}"
+        )
+        for rating in evaluation.dimension_ratings[:5]:
+            lines.append(
+                f"Dimension {rating.dimension_name}: "
+                f"score={rating.score}, evidence={rating.evidence}"
+            )
+    if context.missing_rounds:
+        lines.append(
+            "Missing rounds: "
+            + "；".join(f"{item.round_name}:{item.reason}" for item in context.missing_rounds)
+        )
+    return "\n".join(line for line in lines if line).strip()[:4_000]
+
+
+def _ai_request_payload(
+    context: InterviewReportContextResponse,
+    *,
+    knowledge_citations: list[RecruitmentKnowledgeRetrievalCitation] | None = None,
+    knowledge_error: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
         "job": {"title": context.job_title},
         "latest_screening": (
             context.latest_screening.model_dump(mode="json")
@@ -545,6 +594,48 @@ def _ai_request_payload(context: InterviewReportContextResponse) -> dict[str, ob
             item.model_dump(mode="json") for item in context.missing_rounds
         ],
     }
+    if knowledge_citations is not None or knowledge_error is not None:
+        payload["enterprise_knowledge"] = {
+            "status": "available" if knowledge_error is None else "unavailable",
+            "citations": [
+                item.model_dump(mode="json") for item in (knowledge_citations or [])
+            ],
+            "error": knowledge_error,
+            "usage_instruction": (
+                "Use enterprise knowledge only as policy, standard or process context. "
+                "Do not treat it as candidate evidence, do not invent citations, and do not "
+                "override screening evidence or submitted interview evaluations."
+            ),
+        }
+    return payload
+
+
+async def _retrieve_interview_report_knowledge(
+    db: Session,
+    context: InterviewReportContextResponse,
+    *,
+    actor: User,
+) -> tuple[list[RecruitmentKnowledgeRetrievalCitation] | None, str | None]:
+    if not settings.embedding_enabled:
+        return None, None
+    try:
+        response = await retrieve_recruitment_knowledge(
+            db,
+            RecruitmentKnowledgeRetrievalRequest(
+                scenario="interview_report",
+                query=_interview_report_rag_query(context),
+                limit=5,
+                resource_type="job_application",
+                resource_id=context.application_id,
+                job_id=context.job_id,
+                application_id=context.application_id,
+            ),
+            actor=actor,
+        )
+    except (EmbeddingClientError, RuntimeError) as error:
+        db.rollback()
+        return [], f"{error.__class__.__name__}: {str(error)[:500]}"
+    return response.citations, None
 
 
 def _ai_failure(error: AIClientError) -> tuple[str, str]:
@@ -732,6 +823,16 @@ async def generate_ai_interview_report(
         return _report_response(report)
 
     context = _context_response(db, job, application)
+    knowledge_citations, knowledge_error = await _retrieve_interview_report_knowledge(
+        db,
+        context,
+        actor=current_user,
+    )
+    ai_payload = _ai_request_payload(
+        context,
+        knowledge_citations=knowledge_citations,
+        knowledge_error=knowledge_error,
+    )
     generation_mode = "ai"
     failure_code: str | None = None
     failure_message: str | None = None
@@ -745,11 +846,11 @@ async def generate_ai_interview_report(
     try:
         if hasattr(ai_client, "generate_interview_report_with_metrics"):
             content, metrics = await ai_client.generate_interview_report_with_metrics(
-                _ai_request_payload(context),
+                ai_payload,
                 prompt_template=prompt_template,
             )
         else:
-            content = await ai_client.generate_interview_report(_ai_request_payload(context))
+            content = await ai_client.generate_interview_report(ai_payload)
             metrics = None
         record_ai_call_in_session(
             db,

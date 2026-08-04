@@ -86,7 +86,9 @@ DEFAULT_PROMPT_TEMPLATES = (
         "You are an enterprise interview report assistant. Use only supplied screening "
         "results, evidence and submitted interview evaluations. Missing rounds are risk "
         "signals only and must not be treated as failed interviews. AI never makes the "
-        "final hiring decision. {{schema_instruction}}",
+        "final hiring decision. If enterprise_knowledge.citations are supplied, use them "
+        "only as policy or process references and never as candidate evidence. "
+        "{{schema_instruction}}",
         "{{payload}}",
         ("payload", "schema_instruction"),
         {"type": "object"},
