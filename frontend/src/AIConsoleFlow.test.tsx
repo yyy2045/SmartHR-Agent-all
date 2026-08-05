@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AIConsolePage } from './pages/AIConsolePage'
@@ -130,5 +130,39 @@ describe('AI 控制台页面', () => {
     expect(screen.getByText('调用日志')).toBeInTheDocument()
     expect(screen.getByText('专项路线')).toBeInTheDocument()
     expect(screen.getByText('150')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('专项路线'))
+
+    expect(screen.queryByText('计划中')).not.toBeInTheDocument()
+    expect(screen.queryByText('当前开发')).not.toBeInTheDocument()
+    expect(screen.getAllByText('已完成')).toHaveLength(5)
+    expect(screen.getAllByText('功能已落地')).toHaveLength(5)
+
+    const promptCard = screen
+      .getByText('Prompt 模板管理与版本化')
+      .closest('.ai-capability-card') as HTMLElement | null
+    expect(promptCard).not.toBeNull()
+    expect(within(promptCard!).getByRole('link', { name: '进入 PromptOps' })).toHaveAttribute(
+      'href',
+      '/prompt-templates',
+    )
+
+    const knowledgeCard = screen
+      .getByText('企业招聘知识库 RAG')
+      .closest('.ai-capability-card') as HTMLElement | null
+    expect(knowledgeCard).not.toBeNull()
+    expect(within(knowledgeCard!).getByRole('link', { name: '进入企业知识库' })).toHaveAttribute(
+      'href',
+      '/recruitment-knowledge',
+    )
+
+    const evaluationCard = screen
+      .getByText('AI 评测与错误案例库')
+      .closest('.ai-capability-card') as HTMLElement | null
+    expect(evaluationCard).not.toBeNull()
+    expect(within(evaluationCard!).getByRole('link', { name: '进入 AI 评测' })).toHaveAttribute(
+      'href',
+      '/ai-evaluations',
+    )
   })
 })

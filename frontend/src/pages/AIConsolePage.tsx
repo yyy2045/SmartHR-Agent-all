@@ -1,7 +1,7 @@
 import {
   ApiOutlined,
   BranchesOutlined,
-  ClockCircleOutlined,
+  CheckCircleOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
   FileSearchOutlined,
@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Card, Empty, Space, Table, Tabs, Tag, Typography } from 'antd'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 
 import {
@@ -24,7 +25,9 @@ import {
 
 const { Text, Title } = Typography
 
-type AiCapabilityStatus = 'ready' | 'next' | 'planned'
+type AiConsoleTabKey = 'tasks' | 'calls' | 'roadmap'
+
+type AiCapabilityStatus = 'ready'
 
 interface AiCapability {
   key: string
@@ -33,12 +36,14 @@ interface AiCapability {
   icon: ReactNode
   description: string
   checkpoints: string[]
+  actionLabel: string
+  actionPath?: string
+  actionTab?: AiConsoleTabKey
+  note?: string
 }
 
 const statusMeta: Record<AiCapabilityStatus, { label: string; color: string }> = {
-  ready: { label: '入口已就绪', color: 'success' },
-  next: { label: '当前开发', color: 'processing' },
-  planned: { label: '计划中', color: 'default' },
+  ready: { label: '已完成', color: 'success' },
 }
 
 const taskStatusMeta: Record<AiTaskStatus, { label: string; color: string }> = {
@@ -71,42 +76,55 @@ const capabilities: AiCapability[] = [
   {
     key: 'ai-observability',
     title: 'AI 调用日志与任务中心',
-    status: 'next',
+    status: 'ready',
     icon: <ApiOutlined />,
     description: '统一记录 AI 与异步任务的运行状态、耗时、Token、失败原因和重试轨迹。',
     checkpoints: ['OCR、解析、Embedding 与 AI 调用纳入同一任务视图', '失败可追踪，可人工降级'],
+    actionLabel: '查看任务中心',
+    actionTab: 'tasks',
   },
   {
     key: 'promptops',
     title: 'Prompt 模板管理与版本化',
-    status: 'planned',
+    status: 'ready',
     icon: <BranchesOutlined />,
-    description: '把硬编码 Prompt 迁移为可发布、可回滚、可审计的业务模板。',
+    description: '集中管理可发布、可回滚、可审计的业务 Prompt 模板和结构化输出约束。',
     checkpoints: ['场景化模板', '不可变版本', 'JSON Schema 输出约束'],
+    actionLabel: '进入 PromptOps',
+    actionPath: '/prompt-templates',
+    note: '仅管理员可管理 Prompt 版本。',
   },
   {
     key: 'enterprise-rag',
     title: '企业招聘知识库 RAG',
-    status: 'planned',
+    status: 'ready',
     icon: <DatabaseOutlined />,
-    description: '上传企业招聘制度、岗位标准和沟通话术，供 Agent 检索并引用来源。',
+    description: '上传企业招聘制度、岗位标准和沟通话术，供 AI 检索并返回引用来源。',
     checkpoints: ['文档分块与 Embedding', '标签分类', '权限过滤与引用快照'],
+    actionLabel: '进入企业知识库',
+    actionPath: '/recruitment-knowledge',
   },
   {
     key: 'candidate-agent',
     title: '候选人问答 Agent',
-    status: 'planned',
+    status: 'ready',
     icon: <RobotOutlined />,
     description: '在候选人详情中提问，由 Agent 汇总简历、筛选、面试、Offer 和知识库证据。',
     checkpoints: ['异步会话', '证据化回答', '不自动推进招聘决策'],
+    actionLabel: '先选岗位再使用',
+    actionPath: '/jobs',
+    note: '入口位于岗位候选人流程中的候选人卡片。',
   },
   {
     key: 'ai-evaluation',
     title: 'AI 评测与错误案例库',
-    status: 'planned',
+    status: 'ready',
     icon: <ExperimentOutlined />,
     description: '用固定合成样本比较模型和 Prompt 版本，沉淀误判、幻觉和证据不足案例。',
     checkpoints: ['离线批量评测', '错误类型标记', '质量、Token 和耗时看板'],
+    actionLabel: '进入 AI 评测',
+    actionPath: '/ai-evaluations',
+    note: '仅管理员可运行离线评测和处理错误案例。',
   },
 ]
 
@@ -137,6 +155,7 @@ function resourceLabel(record: Pick<AiTaskRecord | AiCallLogRecord, 'resource_ty
 }
 
 export function AIConsolePage() {
+  const [activeTab, setActiveTab] = useState<AiConsoleTabKey>('tasks')
   const summary = useQuery({
     queryKey: ['ai-observability', 'summary'],
     queryFn: fetchAIObservabilitySummary,
@@ -213,6 +232,8 @@ export function AIConsolePage() {
 
       <Tabs
         className="ai-console-tabs"
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as AiConsoleTabKey)}
         items={[
           {
             key: 'tasks',
@@ -408,7 +429,21 @@ export function AIConsolePage() {
                           </li>
                         ))}
                       </ul>
-                      <Tag icon={<ClockCircleOutlined />}>按专项计划推进</Tag>
+                      <Space className="ai-capability-actions" wrap>
+                        {item.actionTab ? (
+                          <Button type="primary" onClick={() => setActiveTab(item.actionTab!)}>
+                            {item.actionLabel}
+                          </Button>
+                        ) : (
+                          <Button type="primary" href={item.actionPath}>
+                            {item.actionLabel}
+                          </Button>
+                        )}
+                        <Tag icon={<CheckCircleOutlined />} color="success">
+                          功能已落地
+                        </Tag>
+                      </Space>
+                      {item.note && <Text type="secondary">{item.note}</Text>}
                     </Card>
                   )
                 })}
