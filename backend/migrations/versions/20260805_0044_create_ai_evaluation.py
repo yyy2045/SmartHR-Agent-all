@@ -128,7 +128,7 @@ def upgrade() -> None:
         ["dataset_id", "is_active"],
     )
     op.create_index("ix_ai_evaluation_samples_scenario", "ai_evaluation_samples", ["scenario"])
-    for column in ("created_at", "dataset_id", "scenario"):
+    for column in ("created_at", "dataset_id"):
         op.create_index(
             op.f(f"ix_ai_evaluation_samples_{column}"),
             "ai_evaluation_samples",
@@ -456,7 +456,7 @@ def downgrade() -> None:
     op.drop_index("ix_ai_evaluation_runs_dataset_created", table_name="ai_evaluation_runs")
     op.drop_table("ai_evaluation_runs")
 
-    for column in ("scenario", "dataset_id", "created_at"):
+    for column in ("dataset_id", "created_at"):
         op.drop_index(
             op.f(f"ix_ai_evaluation_samples_{column}"),
             table_name="ai_evaluation_samples",
