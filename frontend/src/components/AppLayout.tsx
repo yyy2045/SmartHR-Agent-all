@@ -48,6 +48,7 @@ interface NavigationItem {
   icon: ReactNode
   path?: string
   badge?: string
+  level?: 1 | 2
 }
 
 function pageMeta(pathname: string) {
@@ -243,6 +244,7 @@ export function AppLayout() {
           { key: 'jobs' as const, label: '岗位管理', icon: <ProfileOutlined />, path: '/jobs' },
           {
             key: 'screening' as const,
+            level: 2,
             label: '智能筛选',
             icon: <FileSearchOutlined />,
             path: jobId ? `/jobs/${jobId}/batches` : undefined,
@@ -250,6 +252,7 @@ export function AppLayout() {
           },
           {
             key: 'candidate-process' as const,
+            level: 2,
             label: '候选人流程',
             icon: <TeamOutlined />,
             path: jobId ? `/jobs/${jobId}/pipeline` : undefined,
@@ -267,6 +270,7 @@ export function AppLayout() {
             : []),
           {
             key: 'interviews' as const,
+            level: 2,
             label: '面试管理',
             icon: <CalendarOutlined />,
             path: jobId ? `/jobs/${jobId}/interview-plan` : undefined,
@@ -381,11 +385,12 @@ export function AppLayout() {
           <Text className="nav-caption">业务模块</Text>
           {navigationItems.map((item) => {
             const active = activeModule === item.key
+            const isChild = item.level === 2
             return (
               <button
                 key={item.key}
                 type="button"
-                className={`nav-item${active ? ' is-active' : ''}`}
+                className={`nav-item${isChild ? ' nav-item-child' : ''}${active ? ' is-active' : ''}`}
                 aria-label={item.label}
                 aria-current={active ? 'page' : undefined}
                 disabled={!item.path}

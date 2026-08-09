@@ -539,6 +539,23 @@ input {
   transition: 160ms ease;
 }
 
+.nav-item.nav-item-child {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-height: 38px;
+  margin-left: 12px;
+  padding-left: 18px;
+  color: #8ea0b6;
+  background: rgb(255 255 255 / 2%);
+}
+
+.nav-item.nav-item-child > .anticon {
+  font-size: 15px;
+}
+
+.nav-item.nav-item-child:not(:disabled):hover {
+  background: rgb(255 255 255 / 7%);
+}
+
 .nav-item > .anticon {
   font-size: 17px;
 }
