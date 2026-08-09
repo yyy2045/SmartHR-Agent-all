@@ -16,6 +16,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
   background: #f6f8fb;
 }
 
@@ -469,7 +470,9 @@ input {
 
 /* 认证后框架 */
 .app-shell {
+  width: 100%;
   min-height: 100vh;
+  overflow-x: hidden;
   background: #f6f8fb;
 }
 
@@ -513,6 +516,13 @@ input {
   min-height: 0;
   padding: 24px 14px;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .nav-caption {
@@ -527,6 +537,7 @@ input {
   grid-template-columns: 22px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
+  min-width: 0;
   width: 100%;
   min-height: 44px;
   padding: 0 14px;
@@ -537,6 +548,13 @@ input {
   border-radius: 10px;
   cursor: pointer;
   transition: 160ms ease;
+}
+
+.nav-item > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-item.nav-item-child {
@@ -4976,6 +4994,49 @@ input {
 
 .notification-pagination {
   justify-self: end;
+}
+
+.notification-drawer-list {
+  display: grid;
+  gap: 10px;
+}
+
+.notification-drawer-item {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 14px;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid #e6ebf2;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.notification-drawer-item:hover {
+  border-color: #9bc4ff;
+  box-shadow: 0 10px 24px rgb(36 104 190 / 10%);
+}
+
+.notification-drawer-item.is-unread {
+  background: #f4f8ff;
+  border-color: #bfd8ff;
+}
+
+.notification-drawer-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notification-drawer-summary {
+  line-height: 1.6;
+}
+
+.notification-drawer-time {
+  font-size: 12px;
 }
 
 @media (max-width: 720px) {

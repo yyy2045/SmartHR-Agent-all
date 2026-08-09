@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AuthContext, type AuthContextValue } from '../auth/context'
 import { AppLayout } from './AppLayout'
-import { businessModuleForPath, defaultPathForModule, jobIdFromPath } from './navigation'
+import { businessModuleForPath, jobIdFromPath } from './navigation'
 
 const auth: AuthContextValue = {
   user: {
@@ -51,33 +51,6 @@ function LocationProbe() {
   return <div data-testid="current-path">{location.pathname}</div>
 }
 
-const jobs = [
-  {
-    id: 'job-1',
-    recruiter_id: 'user-1',
-    hiring_manager_id: null,
-    title: '后端工程师',
-    department: '技术平台部',
-    original_jd: '负责平台研发',
-    status: 'active' as const,
-    archived_at: null,
-    created_at: '2026-07-26T08:00:00Z',
-    updated_at: '2026-07-26T08:00:00Z',
-  },
-  {
-    id: 'job-2',
-    recruiter_id: 'user-1',
-    hiring_manager_id: null,
-    title: '产品经理',
-    department: '企业产品部',
-    original_jd: '负责招聘产品',
-    status: 'archived' as const,
-    archived_at: '2026-07-26T09:00:00Z',
-    created_at: '2026-07-26T08:00:00Z',
-    updated_at: '2026-07-26T09:00:00Z',
-  },
-]
-
 describe('招聘业务导航', () => {
   afterEach(() => vi.unstubAllGlobals())
 
@@ -87,9 +60,28 @@ describe('招聘业务导航', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const path = input.toString()
         let body: unknown = { status: 'ok' }
-        if (path === '/api/jobs?include_archived=true') body = jobs
-        if (path === '/api/jobs/job-1') body = { ...jobs[0], criteria_versions: [] }
-        if (path === '/api/jobs/job-2') body = { ...jobs[1], criteria_versions: [] }
+        if (path === '/api/notifications/unread-count') body = { unread_count: 1 }
+        if (path.startsWith('/api/notifications?')) {
+          body = {
+            items: [
+              {
+                id: 'notification-1',
+                notification_type: 'offer_approved',
+                title: 'Offer 审批通过',
+                summary: '请继续处理候选人的 Offer。',
+                resource_type: 'offer',
+                resource_id: 'offer-1',
+                route_path: '/offers',
+                read_at: null,
+                created_at: '2026-08-05T10:00:00Z',
+              },
+            ],
+            total: 1,
+            unread_count: 1,
+            limit: 8,
+            offset: 0,
+          }
+        }
         return new Response(JSON.stringify(body), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -204,7 +196,7 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('button', { name: /AI 控制台/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /人才库/ })).toBeEnabled()
     expect(screen.getByRole('button', { name: /数据分析/ })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /系统设置/ })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /系统设置/ })).not.toBeInTheDocument()
   })
 
   it('将 AI 控制台归入全局模块且不显示岗位上下文', () => {
@@ -245,47 +237,36 @@ describe('招聘业务导航', () => {
     expect(screen.queryByRole('button', { name: '返回工作台' })).not.toBeInTheDocument()
   })
 
-  it('管理员可进入系统设置并保持菜单高亮', () => {
-    mockApi()
-    renderLayout('/settings/users', {
-      ...auth,
-      user: { ...auth.user!, roles: ['administrator'] },
-    })
-
-    expect(screen.getByRole('button', { name: '系统设置' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '系统设置' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
-  })
-
   it('新建岗位页没有错误的岗位上下文', () => {
     expect(jobIdFromPath('/jobs/new')).toBeNull()
   })
 
-  it('按当前业务模块生成岗位切换后的安全默认页', () => {
-    expect(defaultPathForModule('jobs', 'job-2')).toBe('/jobs/job-2')
-    expect(defaultPathForModule('screening', 'job-2')).toBe('/jobs/job-2/batches')
-    expect(defaultPathForModule('candidate-process', 'job-2')).toBe('/jobs/job-2/pipeline')
-    expect(defaultPathForModule('interviews', 'job-2')).toBe('/jobs/job-2/interview-plan')
+  it('将岗位依赖功能作为岗位管理的连续二级菜单展示', () => {
+    mockApi()
+    renderLayout('/jobs/job-1/batches')
+
+    const labels = within(screen.getByRole('navigation', { name: '主导航' }))
+      .getAllByRole('button')
+      .map((item) => item.getAttribute('aria-label'))
+    const jobIndex = labels.indexOf('岗位管理')
+
+    expect(labels.slice(jobIndex, jobIndex + 4)).toEqual([
+      '岗位管理',
+      '智能筛选',
+      '候选人流程',
+      '面试管理',
+    ])
+    expect(screen.queryByRole('combobox', { name: '切换当前岗位' })).not.toBeInTheDocument()
   })
 
-  it('展示当前岗位信息，并在切换岗位后保持候选人流程模块', async () => {
+  it('点击消息中心在当前页面打开通知抽屉', async () => {
     mockApi()
-    renderLayout('/jobs/job-1/pipeline')
+    renderLayout('/workbench')
 
-    expect(await screen.findByText('技术平台部')).toBeInTheDocument()
-    expect(screen.getByText('招聘中')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '消息中心' }))
 
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '切换当前岗位' }))
-    fireEvent.click(await screen.findByText('产品经理（已归档）'))
-
-    await waitFor(() =>
-      expect(screen.getByTestId('current-path')).toHaveTextContent('/jobs/job-2/pipeline'),
-    )
-    expect(screen.getByRole('button', { name: '候选人流程' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    expect(screen.getByRole('dialog', { name: '消息通知' })).toBeInTheDocument()
+    expect(await screen.findByText('Offer 审批通过')).toBeInTheDocument()
+    expect(screen.getByTestId('current-path')).toHaveTextContent('/workbench')
   })
 })

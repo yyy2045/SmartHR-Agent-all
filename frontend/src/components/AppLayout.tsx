@@ -19,21 +19,26 @@ import {
   PlusOutlined,
   ProfileOutlined,
   ReadOutlined,
-  SettingOutlined,
   SolutionOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { useQuery } from '@tanstack/react-query'
-import { Alert, Badge, Button, Layout, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Alert, Badge, Button, Drawer, Empty, Layout, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import { useState, type ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
-import { fetchInternalNotificationUnreadCount, fetchJob, fetchJobs, fetchLiveHealth } from '../api/client'
+import {
+  fetchInternalNotificationUnreadCount,
+  fetchInternalNotifications,
+  fetchLiveHealth,
+  markAllInternalNotificationsRead,
+  markInternalNotificationRead,
+  type InternalNotificationRecord,
+} from '../api/client'
 import { useAuth } from '../auth/context'
 import {
   businessModuleForPath,
-  defaultPathForModule,
   jobIdFromPath,
   safeWorkbenchReturnPath,
   type BusinessModule,
@@ -133,12 +138,23 @@ function pageMeta(pathname: string) {
   return { title: '职位管理', subtitle: '管理招聘职位与版本化筛选标准' }
 }
 
+function formatNotificationTime(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
 export function AppLayout() {
   const auth = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [logoutError, setLogoutError] = useState<string | null>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [notificationDrawerOpen, setNotificationDrawerOpen] = useState(false)
   const meta = pageMeta(location.pathname)
   const activeModule = businessModuleForPath(location.pathname)
   const jobId = jobIdFromPath(location.pathname)
@@ -173,9 +189,6 @@ export function AppLayout() {
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
   )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
-  const showJobContext = ['jobs', 'screening', 'candidate-process', 'interviews'].includes(
-    activeModule,
-  )
   const navigationItems: NavigationItem[] = [
     {
       key: 'workbench',
@@ -244,7 +257,7 @@ export function AppLayout() {
           { key: 'jobs' as const, label: '岗位管理', icon: <ProfileOutlined />, path: '/jobs' },
           {
             key: 'screening' as const,
-            level: 2,
+            level: 2 as const,
             label: '智能筛选',
             icon: <FileSearchOutlined />,
             path: jobId ? `/jobs/${jobId}/batches` : undefined,
@@ -252,10 +265,18 @@ export function AppLayout() {
           },
           {
             key: 'candidate-process' as const,
-            level: 2,
+            level: 2 as const,
             label: '候选人流程',
             icon: <TeamOutlined />,
             path: jobId ? `/jobs/${jobId}/pipeline` : undefined,
+            badge: jobId ? undefined : '先选岗位',
+          },
+          {
+            key: 'interviews' as const,
+            level: 2 as const,
+            label: '面试管理',
+            icon: <CalendarOutlined />,
+            path: jobId ? `/jobs/${jobId}/interview-plan` : undefined,
             badge: jobId ? undefined : '先选岗位',
           },
           ...(canAccessCandidateCenter
@@ -268,14 +289,6 @@ export function AppLayout() {
                 },
               ]
             : []),
-          {
-            key: 'interviews' as const,
-            level: 2,
-            label: '面试管理',
-            icon: <CalendarOutlined />,
-            path: jobId ? `/jobs/${jobId}/interview-plan` : undefined,
-            badge: jobId ? undefined : '先选岗位',
-          },
           ...(canAccessTalentPool
             ? [
                 {
@@ -331,19 +344,29 @@ export function AppLayout() {
     staleTime: 15_000,
     refetchInterval: 60_000,
   })
-  const jobs = useQuery({
-    queryKey: ['jobs', { includeArchived: true }],
-    queryFn: () => fetchJobs(true),
-    enabled: Boolean(canAccessJobs),
-    staleTime: 30_000,
+  const notificationPreview = useQuery({
+    queryKey: ['notifications', 'drawer-preview'],
+    queryFn: () => fetchInternalNotifications({ status: 'all', limit: 8, offset: 0 }),
+    enabled: notificationDrawerOpen && Boolean(auth.user),
+    staleTime: 15_000,
   })
-  const currentJob = useQuery({
-    queryKey: ['job', jobId],
-    queryFn: () => fetchJob(jobId!),
-    enabled: Boolean(jobId),
-    staleTime: 30_000,
+
+  const refreshNotificationQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] }),
+    ])
+  }
+
+  const markNotificationRead = useMutation({
+    mutationFn: markInternalNotificationRead,
+    onSuccess: refreshNotificationQueries,
   })
-  const selectedJob = currentJob.data ?? jobs.data?.find((job) => job.id === jobId)
+
+  const markAllNotificationsRead = useMutation({
+    mutationFn: markAllInternalNotificationsRead,
+    onSuccess: refreshNotificationQueries,
+  })
 
   async function handleLogout() {
     setLogoutError(null)
@@ -355,9 +378,16 @@ export function AppLayout() {
     }
   }
 
-  function handleJobChange(nextJobId: string) {
-    navigate(defaultPathForModule(activeModule, nextJobId))
-    setMobileNavOpen(false)
+  async function openNotification(item: InternalNotificationRecord) {
+    if (!item.read_at) {
+      try {
+        await markNotificationRead.mutateAsync(item.id)
+      } catch {
+        // 跳转仍然保留，避免已读状态失败阻断业务处理。
+      }
+    }
+    setNotificationDrawerOpen(false)
+    navigate(item.route_path)
   }
 
   return (
@@ -410,21 +440,6 @@ export function AppLayout() {
         </nav>
 
         <div className="sidebar-footer">
-          <button
-            type="button"
-            className={`nav-item${activeModule === 'settings' ? ' is-active' : ''}`}
-            aria-label="系统设置"
-            aria-current={activeModule === 'settings' ? 'page' : undefined}
-            disabled={!isAdministrator}
-            onClick={() => {
-              if (!isAdministrator) return
-              navigate('/settings/users')
-              setMobileNavOpen(false)
-            }}
-          >
-            <SettingOutlined />
-            <span>系统设置</span>
-          </button>
           <div className="sidebar-service-card" aria-label="服务状态">
             <span className="service-dot" />
             <span>系统服务</span>
@@ -460,40 +475,6 @@ export function AppLayout() {
             </div>
           </div>
 
-          {showJobContext && (
-            <div className="current-job-context" aria-label="当前岗位上下文">
-              <Text className="current-job-label">当前岗位</Text>
-              <Select
-                className="current-job-select"
-                aria-label="切换当前岗位"
-                showSearch
-                value={jobId ?? undefined}
-                placeholder={jobs.isPending ? '正在读取岗位…' : '选择一个岗位'}
-                loading={jobs.isPending}
-                status={jobs.isError ? 'error' : undefined}
-                optionFilterProp="label"
-                options={(jobs.data ?? []).map((job) => ({
-                  value: job.id,
-                  label: `${job.title}${job.status === 'archived' ? '（已归档）' : ''}`,
-                }))}
-                onChange={handleJobChange}
-              />
-              <div className="current-job-meta" aria-live="polite">
-                {selectedJob ? (
-                  <>
-                    <Text ellipsis>{selectedJob.department || '未填写部门'}</Text>
-                    <Tag color={selectedJob.status === 'active' ? 'success' : 'default'}>
-                      {selectedJob.status === 'active' ? '招聘中' : '已归档'}
-                    </Tag>
-                  </>
-                ) : (
-                  <Text type={jobs.isError ? 'danger' : 'secondary'}>
-                    {jobs.isError ? '岗位列表读取失败' : '选择后进入岗位业务'}
-                  </Text>
-                )}
-              </div>
-            </div>
-          )}
 
           <Space size="middle" className="header-actions">
             {canCreateJobs && activeModule === 'jobs' && (
@@ -511,7 +492,7 @@ export function AppLayout() {
                 <Button
                   aria-label="消息中心"
                   icon={<BellOutlined />}
-                  onClick={() => navigate('/notifications')}
+                  onClick={() => setNotificationDrawerOpen(true)}
                 />
               </Badge>
             </Tooltip>
@@ -539,6 +520,70 @@ export function AppLayout() {
           <Outlet />
         </Content>
       </Layout>
+      <Drawer
+        title="消息通知"
+        placement="right"
+        width={420}
+        open={notificationDrawerOpen}
+        onClose={() => setNotificationDrawerOpen(false)}
+        extra={
+          <Space>
+            <Button
+              size="small"
+              onClick={() => void notificationPreview.refetch()}
+              loading={notificationPreview.isFetching}
+            >
+              刷新
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              disabled={!notificationUnreadCount.data?.unread_count}
+              loading={markAllNotificationsRead.isPending}
+              onClick={() => markAllNotificationsRead.mutate()}
+            >
+              全部已读
+            </Button>
+          </Space>
+        }
+      >
+        {notificationPreview.isPending && <Spin />}
+        {notificationPreview.isError && (
+          <Alert
+            type="error"
+            showIcon
+            message="无法读取消息通知"
+            description="请稍后重试，或进入业务页面继续处理。"
+            action={<Button onClick={() => void notificationPreview.refetch()}>重试</Button>}
+          />
+        )}
+        {notificationPreview.isSuccess && notificationPreview.data.items.length === 0 && (
+          <Empty description="暂无消息通知" />
+        )}
+        {notificationPreview.isSuccess && notificationPreview.data.items.length > 0 && (
+          <div className="notification-drawer-list">
+            {notificationPreview.data.items.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`notification-drawer-item${item.read_at ? '' : ' is-unread'}`}
+                onClick={() => void openNotification(item)}
+              >
+                <span className="notification-drawer-title-row">
+                  <Text strong>{item.title}</Text>
+                  {!item.read_at && <Tag color="blue">未读</Tag>}
+                </span>
+                <Text type="secondary" className="notification-drawer-summary">
+                  {item.summary || '暂无摘要'}
+                </Text>
+                <Text type="secondary" className="notification-drawer-time">
+                  {formatNotificationTime(item.created_at)}
+                </Text>
+              </button>
+            ))}
+          </div>
+        )}
+      </Drawer>
       {mobileNavOpen && (
         <button
           type="button"
