@@ -167,6 +167,10 @@ class CandidateAgentExchange(Base):
     knowledge_citations: Mapped[list[dict[str, object]]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    tool_trajectory: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    ai_call_log_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     ai_call_log_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("ai_call_logs.id", ondelete="SET NULL"), index=True
     )

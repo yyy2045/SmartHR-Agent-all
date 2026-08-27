@@ -11,6 +11,7 @@ from app.database import Base
 from app.models import (
     Candidate,
     CandidateAgentExchange,
+    CandidateAgentReport,
     CandidateAgentSession,
     Job,
     JobApplication,
@@ -160,6 +161,69 @@ def test_candidate_agent_exchange_enforces_idempotency_and_sequence(
                 evidence_snapshot={},
                 evidence_references=[],
                 knowledge_citations=[],
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+
+def test_candidate_agent_report_persists_content(
+    candidate_agent_session_factory: sessionmaker[Session],
+) -> None:
+    with candidate_agent_session_factory() as db:
+        session = _seed_session(db)
+        db.add(
+            CandidateAgentReport(
+                application_id=session.application_id,
+                job_id=session.job_id,
+                idempotency_key=uuid.uuid4(),
+                status="succeeded",
+                match_assessment="整体匹配度较高。",
+                strengths=["系统重构经验"],
+                risks=["团队规模未明确"],
+                overall_recommendation="next_round",
+                evidence_references=[
+                    {"source_type": "latest_screening", "source_label": "AI 初筛"}
+                ],
+                tool_trajectory=[
+                    {"name": "get_latest_screening", "step": 0, "status": "succeeded"}
+                ],
+                ai_call_log_ids=["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+                created_by_id=session.created_by_id,
+            )
+        )
+        db.commit()
+        db.expire_all()
+        stored = db.scalars(select(CandidateAgentReport)).one()
+
+    assert stored.status == "succeeded"
+    assert stored.match_assessment == "整体匹配度较高。"
+    assert stored.strengths == ["系统重构经验"]
+    assert stored.overall_recommendation == "next_round"
+    assert stored.tool_trajectory[0]["name"] == "get_latest_screening"
+    assert stored.ai_call_log_ids == ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
+
+
+def test_candidate_agent_report_enforces_idempotency(
+    candidate_agent_session_factory: sessionmaker[Session],
+) -> None:
+    same_key = uuid.uuid4()
+    with candidate_agent_session_factory() as db:
+        session = _seed_session(db)
+        db.add(
+            CandidateAgentReport(
+                application_id=session.application_id,
+                job_id=session.job_id,
+                idempotency_key=same_key,
+                status="pending",
+            )
+        )
+        db.add(
+            CandidateAgentReport(
+                application_id=session.application_id,
+                job_id=session.job_id,
+                idempotency_key=same_key,
+                status="pending",
             )
         )
         with pytest.raises(IntegrityError):

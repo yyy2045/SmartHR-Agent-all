@@ -14,6 +14,7 @@ from app.models.candidate import (
     JobApplication,
 )
 from app.models.candidate_agent import CandidateAgentExchange, CandidateAgentSession
+from app.models.candidate_agent_report import CandidateAgentReport
 from app.models.candidate_process import CandidateProcess, CandidateProcessEvent
 from app.models.interview import (
     CandidateInterviewRound,
@@ -92,6 +93,7 @@ __all__ = [
     "ApplicationResumeDocument",
     "Candidate",
     "CandidateAgentExchange",
+    "CandidateAgentReport",
     "CandidateAgentSession",
     "CandidateDuplicateReview",
     "CandidateProfile",

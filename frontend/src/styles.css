@@ -2165,6 +2165,29 @@ input {
   justify-self: end;
 }
 
+.candidate-agent-report {
+  margin-top: 20px;
+}
+
+.candidate-agent-report-section {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.candidate-agent-report-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.candidate-agent-report-section blockquote {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #5b8cff;
+  border-radius: 10px;
+  background: #f7faff;
+}
+
 .candidate-stage-form,
 .candidate-stage-select {
   width: 100%;

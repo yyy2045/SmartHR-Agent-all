@@ -583,3 +583,85 @@ async def test_configuration_and_non_retryable_http_errors_are_readable() -> Non
             jd="JD",
         )
     assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_complete_with_tools_sends_tools_and_parses_tool_calls() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "我先查询初筛结果。",
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "get_latest_screening",
+                                        "arguments": '{"limit": 3}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+            },
+        )
+
+    tool_calls, content_text, metrics = await make_client(
+        httpx.MockTransport(handler)
+    ).chat_complete_with_tools(
+        messages=[{"role": "user", "content": "帮我研判"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "get_latest_screening", "parameters": {}},
+            }
+        ],
+        operation_name="研判 Agent",
+    )
+
+    assert content_text == "我先查询初筛结果。"
+    assert len(tool_calls) == 1
+    assert tool_calls[0].id == "call-1"
+    assert tool_calls[0].name == "get_latest_screening"
+    assert tool_calls[0].arguments == {"limit": 3}
+    assert metrics.total_tokens == 15
+    request_body = json.loads(requests[0].content)
+    assert request_body["tool_choice"] == "auto"
+    assert request_body["tools"] == [
+        {"type": "function", "function": {"name": "get_latest_screening", "parameters": {}}}
+    ]
+    assert "response_format" not in request_body
+
+
+@pytest.mark.asyncio
+async def test_chat_complete_with_tools_returns_free_text_without_tool_calls() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "证据已足够。"}}]},
+        )
+
+    tool_calls, content_text, metrics = await make_client(
+        httpx.MockTransport(handler)
+    ).chat_complete_with_tools(
+        messages=[{"role": "user", "content": "继续"}],
+        tools=[],
+        operation_name="研判 Agent",
+    )
+
+    assert tool_calls == []
+    assert content_text == "证据已足够。"
+    assert metrics.model_name == "test-model"

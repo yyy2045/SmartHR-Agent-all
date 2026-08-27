@@ -1984,6 +1984,45 @@ export interface CandidateAgentSessionDetailRecord extends CandidateAgentSession
   exchanges: CandidateAgentExchangeRecord[]
 }
 
+export type CandidateAgentReportStatus = 'pending' | 'succeeded' | 'manual_fallback'
+export type CandidateAgentRecommendation = 'hire' | 'next_round' | 'reserve' | 'reject'
+
+export interface CandidateAgentToolResultRecord {
+  name: string
+  step: number
+  status: string
+  duration_ms: number | null
+  request_snapshot: Record<string, unknown> | null
+  result_snapshot: Record<string, unknown> | null
+  error: string | null
+}
+
+export interface CandidateAgentReportRecord {
+  id: string
+  application_id: string
+  job_id: string
+  status: CandidateAgentReportStatus
+  match_assessment: string | null
+  strengths: string[]
+  risks: string[]
+  contradictions: string[]
+  evidence_gaps: string[]
+  next_step_suggestions: string[]
+  open_questions: string[]
+  overall_recommendation: CandidateAgentRecommendation | null
+  evidence_references: Array<Record<string, unknown>>
+  knowledge_citations: Array<Record<string, unknown>>
+  tool_trajectory: CandidateAgentToolResultRecord[]
+  ai_call_log_ids: string[]
+  prompt_template_version_id: string | null
+  model_name: string | null
+  prompt_version: string | null
+  failure_code: string | null
+  failure_message: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface CandidateStageUpdateRecord {
   process_id: string
   document_id: string
@@ -4424,6 +4463,37 @@ export function askCandidateAgent(
     },
     '候选人 AI 助手回答失败',
   )
+}
+
+export function generateCandidateAgentReport(
+  jobId: string,
+  applicationId: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<CandidateAgentReportRecord> {
+  return apiRequest(
+    `/api/jobs/${jobId}/applications/${applicationId}/candidate-agent/report`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: idempotencyKey }),
+    },
+    '生成研判报告失败',
+  )
+}
+
+export async function fetchCandidateAgentReport(
+  jobId: string,
+  applicationId: string,
+): Promise<CandidateAgentReportRecord | null> {
+  try {
+    return await apiRequest(
+      `/api/jobs/${jobId}/applications/${applicationId}/candidate-agent/report`,
+      {},
+      '无法读取研判报告',
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
 }
 
 export function fetchOriginalEvidence(

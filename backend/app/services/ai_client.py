@@ -42,6 +42,13 @@ class AIRequestMetrics:
     total_tokens: int | None
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
@@ -201,6 +208,45 @@ class OpenAICompatibleClient:
         if isinstance(content, dict):
             return content
         raise AIResponseValidationError("模型响应内容类型无效")
+
+    @staticmethod
+    def _extract_tool_message(body: dict[str, Any]) -> tuple[str | None, list[ToolCall]]:
+        try:
+            message = body["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise AIResponseValidationError("模型响应缺少消息内容") from error
+        content = message.get("content")
+        content_text = content if isinstance(content, str) and content else None
+        tool_calls: list[ToolCall] = []
+        raw_tool_calls = message.get("tool_calls")
+        if isinstance(raw_tool_calls, list):
+            for item in raw_tool_calls:
+                if not isinstance(item, dict):
+                    continue
+                function = item.get("function")
+                if not isinstance(function, dict):
+                    continue
+                name = function.get("name")
+                if not isinstance(name, str):
+                    continue
+                arguments_raw = function.get("arguments") or "{}"
+                try:
+                    arguments = (
+                        json.loads(arguments_raw)
+                        if isinstance(arguments_raw, str)
+                        else arguments_raw
+                    )
+                except json.JSONDecodeError:
+                    arguments = {}
+                if isinstance(arguments, dict):
+                    tool_calls.append(
+                        ToolCall(
+                            id=str(item.get("id") or ""),
+                            name=name,
+                            arguments=arguments,
+                        )
+                    )
+        return content_text, tool_calls
 
     @staticmethod
     def _usage_metrics(body: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
@@ -560,6 +606,74 @@ class OpenAICompatibleClient:
             response_type=CandidateAgentAnswerDraft,
             operation_name="AI 候选人问答 Agent",
         )
+
+    async def chat_complete_with_tools(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        operation_name: str,
+    ) -> tuple[list[ToolCall], str | None, AIRequestMetrics]:
+        self._validate_configuration()
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+        }
+        last_error: AIClientError | None = None
+        started = time.perf_counter()
+        async with self._semaphore:
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds,
+                transport=self.transport,
+            ) as client:
+                for attempt in range(MAX_MODEL_RETRIES + 1):
+                    try:
+                        response = await client.post(
+                            f"{self.base_url}/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {self.api_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json=payload,
+                        )
+                        response.raise_for_status()
+                        body = response.json()
+                        content_text, tool_calls = self._extract_tool_message(body)
+                        input_tokens, output_tokens, total_tokens = self._usage_metrics(body)
+                        return tool_calls, content_text, AIRequestMetrics(
+                            model_name=self.model,
+                            retry_count=attempt,
+                            duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            total_tokens=total_tokens,
+                        )
+                    except httpx.TimeoutException:
+                        last_error = AIRequestTimeout("AI 服务响应超时")
+                    except httpx.HTTPStatusError as error:
+                        status_code = error.response.status_code
+                        if status_code not in {408, 429} and status_code < 500:
+                            raise AIUpstreamError(
+                                f"AI 服务请求失败（HTTP {status_code}）"
+                            ) from error
+                        last_error = AIUpstreamError("AI 服务暂时不可用")
+                    except (httpx.RequestError, json.JSONDecodeError):
+                        last_error = AIUpstreamError("无法连接 AI 服务")
+                    except AIResponseValidationError:
+                        last_error = AIResponseValidationError("AI 返回的消息内容不合法")
+
+                    if attempt < MAX_MODEL_RETRIES:
+                        logger.warning(
+                            "%s 第 %s 次调用失败，准备重试",
+                            operation_name,
+                            attempt + 1,
+                        )
+
+        if last_error is not None:
+            raise last_error
+        raise AIUpstreamError("AI 服务调用失败")
 
 
 @lru_cache

@@ -15,6 +15,7 @@ from app.models import (
     AiCallLog,
     Candidate,
     CandidateAgentExchange,
+    CandidateAgentReport,
     Job,
     JobApplication,
     Role,
@@ -22,8 +23,7 @@ from app.models import (
     UserRole,
 )
 from app.redis_client import get_session_store
-from app.schemas.candidate_agent import CandidateAgentAnswerDraft
-from app.services.ai_client import AIRequestMetrics, AIUpstreamError, get_ai_client
+from app.services.ai_client import AIRequestMetrics, AIUpstreamError, ToolCall, get_ai_client
 from app.services.security import hash_password
 from app.services.session_store import SessionStore
 
@@ -35,33 +35,50 @@ class CandidateAgentRouteDependencies:
     application_id: uuid.UUID
 
 
+def _answer_arguments() -> dict[str, object]:
+    return {
+        "answer": "候选人系统重构经验较强，但团队规模仍需核实。",
+        "evidence_references": [
+            {
+                "source_type": "latest_screening",
+                "source_label": "AI 初筛证据",
+                "quote": "负责核心系统重构",
+            }
+        ],
+        "limitations": ["团队规模未明确"],
+        "suggested_follow_up_questions": ["请核实团队规模。"],
+    }
+
+
+def _report_arguments() -> dict[str, object]:
+    return {
+        "match_assessment": "候选人系统重构经验较强，但团队规模仍需核实。",
+        "strengths": ["系统重构经验"],
+        "risks": ["团队规模未明确"],
+        "overall_recommendation": "next_round",
+    }
+
+
 class StubCandidateAgentClient:
     def __init__(self, *, failure: Exception | None = None) -> None:
         self.failure = failure
         self.calls: list[dict[str, object]] = []
 
-    async def answer_candidate_question_with_metrics(
+    async def chat_complete_with_tools(
         self,
-        payload: dict[str, object],
         *,
-        prompt_template: object | None = None,
-    ) -> tuple[CandidateAgentAnswerDraft, AIRequestMetrics]:
-        self.calls.append(payload)
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
+        operation_name: str,
+    ) -> tuple[list[ToolCall], str | None, AIRequestMetrics]:
+        self.calls.append({"operation_name": operation_name})
         if self.failure is not None:
             raise self.failure
+        terminal_name = str(tools[-1]["function"]["name"])
+        arguments = _report_arguments() if terminal_name == "submit_report" else _answer_arguments()
         return (
-            CandidateAgentAnswerDraft(
-                answer="候选人系统重构经验较强，但团队规模仍需核实。",
-                evidence_references=[
-                    {
-                        "source_type": "latest_screening",
-                        "source_label": "AI 初筛证据",
-                        "quote": "负责核心系统重构",
-                    }
-                ],
-                limitations=["团队规模未明确"],
-                suggested_follow_up_questions=["请核实团队规模。"],
-            ),
+            [ToolCall(id="call-submit", name=terminal_name, arguments=arguments)],
+            None,
             AIRequestMetrics(
                 model_name="route-test-model",
                 retry_count=0,
@@ -264,3 +281,80 @@ async def test_candidate_agent_respects_role_and_data_scope(
         response = await client.post(sessions_path(candidate_agent_route_dependencies), json={})
 
     assert response.status_code == expected_status
+
+
+def report_path(dependency: CandidateAgentRouteDependencies) -> str:
+    return (
+        f"/jobs/{dependency.job_id}/applications/{dependency.application_id}/"
+        "candidate-agent/report"
+    )
+
+
+@pytest.mark.asyncio
+async def test_candidate_agent_report_generate_and_fetch_are_idempotent(
+    candidate_agent_route_dependencies: CandidateAgentRouteDependencies,
+) -> None:
+    dependency = candidate_agent_route_dependencies
+    stub = StubCandidateAgentClient()
+    app.dependency_overrides[get_ai_client] = lambda: stub
+    key = uuid.uuid4()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        created = await client.post(
+            report_path(dependency),
+            json={"idempotency_key": str(key)},
+        )
+        replayed = await client.post(
+            report_path(dependency),
+            json={"idempotency_key": str(key)},
+        )
+        fetched = await client.get(report_path(dependency))
+
+    assert created.status_code == 201, created.text
+    assert replayed.status_code == 201
+    assert replayed.json()["id"] == created.json()["id"]
+    assert len(stub.calls) == 1
+    body = created.json()
+    assert body["status"] == "succeeded"
+    assert body["match_assessment"] == "候选人系统重构经验较强，但团队规模仍需核实。"
+    assert body["overall_recommendation"] == "next_round"
+    assert body["model_name"] == "route-test-model"
+    assert len(body["tool_trajectory"]) == 1
+    assert len(body["ai_call_log_ids"]) == 1
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == body["id"]
+    with dependency.session_factory() as db:
+        assert len(list(db.scalars(select(CandidateAgentReport)))) == 1
+        call = db.scalar(
+            select(AiCallLog).where(AiCallLog.scenario == "candidate_assessment")
+        )
+        assert call is not None
+        assert call.total_tokens == 120
+
+
+@pytest.mark.asyncio
+async def test_candidate_agent_report_ai_failure_returns_manual_fallback(
+    candidate_agent_route_dependencies: CandidateAgentRouteDependencies,
+) -> None:
+    dependency = candidate_agent_route_dependencies
+    app.dependency_overrides[get_ai_client] = lambda: StubCandidateAgentClient(
+        failure=AIUpstreamError("模型服务暂时不可用")
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await login(client)
+        response = await client.post(
+            report_path(dependency),
+            json={"idempotency_key": str(uuid.uuid4())},
+        )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["status"] == "manual_fallback"
+    assert "研判报告暂时不可用" in body["match_assessment"]
+    assert body["failure_code"] == "AIUpstreamError"
+    with dependency.session_factory() as db:
+        call = db.scalar(select(AiCallLog).where(AiCallLog.status == "failed"))
+        assert call is not None
+        assert call.failure_message == "模型服务暂时不可用"

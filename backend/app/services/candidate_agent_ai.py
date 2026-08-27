@@ -14,6 +14,7 @@ from app.services.ai_observability import record_ai_call_in_session
 from app.services.prompt_templates import get_published_prompt_snapshot
 
 CANDIDATE_AGENT_SCENARIO = "candidate_qa"
+CANDIDATE_AGENT_ASSESSMENT_SCENARIO = "candidate_assessment"
 CANDIDATE_AGENT_FALLBACK_PROMPT_VERSION = "candidate-qa-v1"
 
 

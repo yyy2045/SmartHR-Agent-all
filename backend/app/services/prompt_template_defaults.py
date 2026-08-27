@@ -113,6 +113,23 @@ DEFAULT_PROMPT_TEMPLATES = (
         {"type": "object"},
         {"temperature": 0.1},
     ),
+    DefaultPromptTemplate(
+        uuid.UUID("23000000-0000-0000-0000-000000000006"),
+        uuid.UUID("24000000-0000-0000-0000-000000000006"),
+        uuid.UUID("25000000-0000-0000-0000-000000000006"),
+        "candidate_assessment",
+        "Default candidate assessment Agent prompt",
+        "Generate an editable candidate assessment report via tool-calling.",
+        "You are an enterprise recruiting candidate assessment Agent. Gather candidate "
+        "lifecycle evidence and enterprise knowledge via tools as needed, then submit one "
+        "structured assessment report. Candidate facts must come from tool results; "
+        "knowledge citations are policy or standard references only. Never hire, reject, "
+        "send Offer or change pipeline stage. {{schema_instruction}}",
+        "{{payload}}",
+        ("payload", "schema_instruction"),
+        {"type": "object"},
+        {"temperature": 0.1},
+    ),
 )
 
 
