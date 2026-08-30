@@ -472,7 +472,7 @@ input {
 .app-shell {
   width: 100%;
   min-height: 100vh;
-  overflow-x: hidden;
+  overflow-x: clip;
   background: #f6f8fb;
 }
 
@@ -763,6 +763,22 @@ input {
   background: #1d72d8;
   border-radius: 9px;
   place-items: center;
+}
+
+.account-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  padding: 4px 6px;
+}
+
+.account-name {
+  max-width: 120px;
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-content {

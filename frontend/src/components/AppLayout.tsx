@@ -9,10 +9,14 @@ import {
   CloudServerOutlined,
   ContactsOutlined,
   DatabaseOutlined,
+  DownOutlined,
   ExperimentOutlined,
   FileSearchOutlined,
   FileDoneOutlined,
+  KeyOutlined,
   LogoutOutlined,
+  ScheduleOutlined,
+  SettingOutlined,
   MailOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -24,7 +28,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Badge, Button, Drawer, Empty, Layout, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Badge, Button, Drawer, Dropdown, Empty, Layout, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import { useState, type ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
@@ -189,6 +193,9 @@ export function AppLayout() {
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
   )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
+  const canAccessOnboardings = auth.user?.roles.some((role) =>
+    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
+  )
   const navigationItems: NavigationItem[] = [
     {
       key: 'workbench',
@@ -249,6 +256,16 @@ export function AppLayout() {
             label: '录用管理',
             icon: <FileDoneOutlined />,
             path: '/offers',
+          },
+        ]
+      : []),
+    ...(canAccessOnboardings
+      ? [
+          {
+            key: 'onboardings' as const,
+            label: '入职跟踪',
+            icon: <ScheduleOutlined />,
+            path: '/onboardings',
           },
         ]
       : []),
@@ -496,20 +513,39 @@ export function AppLayout() {
                 />
               </Badge>
             </Tooltip>
-            <div className="account-label">
-              <span className="account-avatar" aria-hidden="true">
-                <UserOutlined />
-              </span>
-              <Text>{auth.user?.display_name}</Text>
-            </div>
-            <Tooltip title="退出登录">
-              <Button
-                aria-label="退出登录"
-                icon={<LogoutOutlined />}
-                loading={auth.isLoggingOut}
-                onClick={() => void handleLogout()}
-              />
-            </Tooltip>
+            <Dropdown
+              placement="bottomRight"
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'change-password', icon: <KeyOutlined />, label: '修改密码' },
+                  ...(isAdministrator
+                    ? [
+                        {
+                          key: 'account-settings',
+                          icon: <SettingOutlined />,
+                          label: '账号管理',
+                        },
+                      ]
+                    : []),
+                  { type: 'divider' },
+                  { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'change-password') navigate('/change-password')
+                  else if (key === 'account-settings') navigate('/settings/users')
+                  else if (key === 'logout') void handleLogout()
+                },
+              }}
+            >
+              <Button type="text" className="account-trigger" aria-label="账号菜单">
+                <span className="account-avatar" aria-hidden="true">
+                  <UserOutlined />
+                </span>
+                <span className="account-name">{auth.user?.display_name}</span>
+                <DownOutlined aria-hidden="true" />
+              </Button>
+            </Dropdown>
           </Space>
         </Header>
 

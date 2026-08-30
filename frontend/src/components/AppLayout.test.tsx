@@ -127,7 +127,7 @@ describe('招聘业务导航', () => {
 
   it('将录用管理归入全局模块且不显示岗位上下文', () => {
     expect(businessModuleForPath('/offers')).toBe('hiring')
-    expect(businessModuleForPath('/onboardings')).toBe('hiring')
+    expect(businessModuleForPath('/onboardings')).toBe('onboardings')
     expect(jobIdFromPath('/offers')).toBeNull()
     mockApi()
     renderLayout('/offers')
@@ -268,5 +268,28 @@ describe('招聘业务导航', () => {
     expect(screen.getByRole('dialog', { name: '消息通知' })).toBeInTheDocument()
     expect(await screen.findByText('Offer 审批通过')).toBeInTheDocument()
     expect(screen.getByTestId('current-path')).toHaveTextContent('/workbench')
+  })
+
+  it('账号菜单包含修改密码与退出，管理员含账号管理并可跳转', async () => {
+    mockApi()
+    renderLayout('/workbench', {
+      ...auth,
+      user: { ...auth.user!, roles: ['administrator'] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '账号菜单' }))
+    expect(await screen.findByText('修改密码')).toBeInTheDocument()
+    expect(screen.getByText('退出登录')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('账号管理'))
+    await waitFor(() =>
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/settings/users'),
+    )
+  })
+
+  it('非管理员账号菜单不展示账号管理', async () => {
+    mockApi()
+    renderLayout('/workbench')
+    fireEvent.click(screen.getByRole('button', { name: '账号菜单' }))
+    expect(await screen.findByText('修改密码')).toBeInTheDocument()
+    expect(screen.queryByText('账号管理')).not.toBeInTheDocument()
   })
 })
