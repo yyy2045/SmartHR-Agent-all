@@ -51,11 +51,12 @@ def test_ensure_default_resume_evaluation_dataset_is_idempotent(
     assert sample_count == 30
 
 
-def test_run_offline_resume_evaluation_persists_passed_run(
+@pytest.mark.asyncio
+async def test_run_offline_resume_evaluation_persists_passed_run(
     ai_evaluation_service_session_factory: sessionmaker[Session],
 ) -> None:
     with ai_evaluation_service_session_factory() as db:
-        run = run_offline_resume_evaluation(db)
+        run = await run_offline_resume_evaluation(db)
 
         result_count = db.scalar(select(func.count(AiEvaluationResult.id)))
         error_case_count = db.scalar(select(func.count(AiEvaluationErrorCase.id)))
@@ -73,11 +74,12 @@ def test_run_offline_resume_evaluation_persists_passed_run(
     assert error_case_count == 0
 
 
-def test_run_offline_resume_evaluation_creates_error_cases_for_failed_samples(
+@pytest.mark.asyncio
+async def test_run_offline_resume_evaluation_creates_error_cases_for_failed_samples(
     ai_evaluation_service_session_factory: sessionmaker[Session],
 ) -> None:
     with ai_evaluation_service_session_factory() as db:
-        run = run_offline_resume_evaluation(
+        run = await run_offline_resume_evaluation(
             db,
             options=OfflineEvaluationOptions(
                 forced_error_case_keys=frozenset({"BE-01", "DA-01"})

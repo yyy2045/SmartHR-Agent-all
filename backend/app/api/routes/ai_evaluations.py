@@ -85,15 +85,16 @@ def create_default_resume_evaluation_dataset(
     response_model=AiEvaluationRunResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def run_offline_resume_evaluation_endpoint(
+async def run_offline_resume_evaluation_endpoint(
     payload: AiEvaluationRunCreateRequest,
     current_user: CurrentUser,
     db: DbSession,
 ) -> AiEvaluationRunResponse:
     _ensure_ai_evaluation_admin(current_user)
-    run = run_offline_resume_evaluation(
+    run = await run_offline_resume_evaluation(
         db,
         options=OfflineEvaluationOptions(
+            provider=payload.provider,
             model_name=payload.model_name.strip(),
             prompt_version=payload.prompt_version.strip(),
             forced_error_case_keys=frozenset(
