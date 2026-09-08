@@ -382,10 +382,13 @@ export interface AiEvaluationErrorCaseListRecord {
   items: AiEvaluationErrorCaseRecord[]
 }
 
+export type AiEvaluationProvider = 'local_deterministic' | 'live'
+
 export interface AiEvaluationRunInput {
   modelName?: string
   promptVersion?: string
   forcedErrorCaseKeys?: string[]
+  provider?: AiEvaluationProvider
 }
 
 export interface AiEvaluationFilters {
@@ -2681,6 +2684,7 @@ export function runOfflineResumeEvaluation(
         model_name: input.modelName ?? 'deterministic-evaluator',
         prompt_version: input.promptVersion ?? 'synthetic-baseline-v1',
         forced_error_case_keys: input.forcedErrorCaseKeys ?? [],
+        provider: input.provider ?? 'local_deterministic',
       }),
     },
     '启动离线评测失败',

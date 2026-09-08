@@ -151,5 +151,9 @@ describe('AIEvaluationPage', () => {
         true,
       ),
     )
+    const offlineRequest = fetchMock.mock.calls.find((call) =>
+      call[0] === '/api/ai-evaluations/runs/offline-resume',
+    )
+    expect(JSON.parse(offlineRequest?.[1]?.body as string).provider).toBe('local_deterministic')
   })
 })

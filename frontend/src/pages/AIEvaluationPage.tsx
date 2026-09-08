@@ -13,6 +13,7 @@ import {
   Form,
   Input,
   Modal,
+  Select,
   Space,
   Statistic,
   Table,
@@ -32,6 +33,7 @@ import {
   runOfflineResumeEvaluation,
   updateAIEvaluationErrorCase,
   type AiEvaluationDatasetRecord,
+  type AiEvaluationProvider,
   type AiEvaluationErrorCaseRecord,
   type AiEvaluationErrorSeverity,
   type AiEvaluationErrorStatus,
@@ -44,6 +46,7 @@ import {
 const { Text, Title } = Typography
 
 interface RunFormValues {
+  provider: AiEvaluationProvider
   modelName: string
   promptVersion: string
   forcedErrorCaseKeys?: string
@@ -159,6 +162,7 @@ export function AIEvaluationPage() {
         modelName: values.modelName,
         promptVersion: values.promptVersion,
         forcedErrorCaseKeys: parseForcedKeys(values.forcedErrorCaseKeys),
+        provider: values.provider,
       }),
     onSuccess: async (run) => {
       messageApi.success('离线评测已完成')
@@ -195,6 +199,7 @@ export function AIEvaluationPage() {
 
   function openRunModal() {
     runForm.setFieldsValue({
+      provider: 'local_deterministic',
       modelName: 'deterministic-evaluator',
       promptVersion: 'synthetic-baseline-v1',
       forcedErrorCaseKeys: '',
@@ -299,6 +304,13 @@ export function AIEvaluationPage() {
                       ),
                     },
                     { title: '模型', dataIndex: 'model_name', width: 180 },
+                    {
+                      title: '评测模式',
+                      dataIndex: 'provider',
+                      width: 140,
+                      render: (provider: string) =>
+                        provider === 'live' ? <Tag color="purple">真实模型</Tag> : <Tag>本地评测</Tag>,
+                    },
                     {
                       title: '样本',
                       key: 'samples',
@@ -538,6 +550,18 @@ export function AIEvaluationPage() {
           layout="vertical"
           onFinish={(values) => runEvaluation.mutate(values)}
         >
+          <Form.Item
+            name="provider"
+            label="评测模式"
+            extra="本地模式不调用 AI；真实模型模式会实际调用 AI，并记录耗时与 Token。"
+          >
+            <Select
+              options={[
+                { value: 'local_deterministic', label: '本地确定性评测' },
+                { value: 'live', label: '真实模型评测' },
+              ]}
+            />
+          </Form.Item>
           <Form.Item name="modelName" label="模型名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>

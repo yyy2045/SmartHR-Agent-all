@@ -305,6 +305,7 @@ describe('API client', () => {
       modelName: 'deterministic-evaluator',
       promptVersion: 'synthetic-test-v1',
       forcedErrorCaseKeys: ['BE-01'],
+      provider: 'live',
     })
     await fetchAIEvaluationRuns({ status: 'failed', limit: 20, offset: 0 })
     await fetchAIEvaluationRun('run-1')
@@ -318,6 +319,7 @@ describe('API client', () => {
       model_name: 'deterministic-evaluator',
       prompt_version: 'synthetic-test-v1',
       forced_error_case_keys: ['BE-01'],
+      provider: 'live',
     })
     expect(fetchMock.mock.calls[3][0]).toBe('/api/ai-evaluations/runs?status=failed&limit=20&offset=0')
     expect(fetchMock.mock.calls[4][0]).toBe('/api/ai-evaluations/runs/run-1')
