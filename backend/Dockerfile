@@ -20,7 +20,9 @@ RUN if [ "$INSTALL_OCR" = "true" ]; then \
       pip install --no-cache-dir --retries 5 '.[ocr]'; \
     else \
       pip install --no-cache-dir --retries 5 .; \
-    fi
+    fi && \
+    rm -rf /app/build /app/*.egg-info && \
+    find /app -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 RUN if [ "$INSTALL_OCR" = "true" ]; then \
       sed -i "s|http://deb.debian.org|${APT_MIRROR}|g" \
