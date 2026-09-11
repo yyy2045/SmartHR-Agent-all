@@ -129,11 +129,6 @@ const MessageTemplateManagementPage = lazy(() =>
     default: module.MessageTemplateManagementPage,
   })),
 )
-const CommunicationRecordsPage = lazy(() =>
-  import('./pages/CommunicationRecordsPage').then((module) => ({
-    default: module.CommunicationRecordsPage,
-  })),
-)
 const AnalyticsPage = lazy(() =>
   import('./pages/AnalyticsPage').then((module) => ({ default: module.AnalyticsPage })),
 )
@@ -187,7 +182,6 @@ function AppRoutes() {
                   }
                 >
                   <Route path="/onboardings" element={<OnboardingManagementPage />} />
-                  <Route path="/communications" element={<CommunicationRecordsPage />} />
                 </Route>
                 <Route
                   element={

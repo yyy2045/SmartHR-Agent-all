@@ -24,23 +24,10 @@ RecruitmentKnowledgeVersionStatus = Literal["draft", "published", "retired"]
 RecruitmentKnowledgeChunkStatus = Literal["pending", "processing", "completed", "failed"]
 
 
-class RecruitmentKnowledgeBaseResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    name: str
-    description: str | None
-    status: Literal["active", "inactive"]
-    resource_version: int
-    created_at: datetime
-    updated_at: datetime
-
-
 class RecruitmentKnowledgeDocumentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    knowledge_base_id: uuid.UUID
     title: str
     summary: str | None
     category: RecruitmentKnowledgeCategory
@@ -125,12 +112,35 @@ class RecruitmentKnowledgeRetrievalRequest(BaseModel):
     application_id: uuid.UUID | None = None
 
 
-class RecruitmentKnowledgeBaseListResponse(BaseModel):
-    items: list[RecruitmentKnowledgeBaseResponse]
+class RecruitmentKnowledgeDocumentListItem(RecruitmentKnowledgeDocumentResponse):
+    version_count: int
+    current_source_type: Literal["manual", "upload"] | None = None
+    current_source_filename: str | None = None
+    chunk_count: int
+    chunk_completed: int
+    chunk_failed: int
+    chunk_pending: int
+    chunk_processing: int
+    embedding_enabled: bool
+
+
+class RecruitmentKnowledgeDocumentListResponse(BaseModel):
+    total: int
+    items: list[RecruitmentKnowledgeDocumentListItem]
+
+
+class RecruitmentKnowledgeDocumentDetailResponse(RecruitmentKnowledgeDocumentResponse):
+    versions: list[RecruitmentKnowledgeVersionResponse]
+    raw_text: str | None
+    source_type: Literal["manual", "upload"] | None = None
+    source_filename: str | None = None
+    mime_type: str | None = None
+    parser_name: str | None = None
+    current_chunks: list[RecruitmentKnowledgeChunkResponse]
+    embedding_enabled: bool
 
 
 class RecruitmentKnowledgeDocumentVersionCreateRequest(BaseModel):
-    knowledge_base_id: uuid.UUID | None = None
     title: str = Field(min_length=1, max_length=200)
     summary: str | None = Field(default=None, max_length=1000)
     category: RecruitmentKnowledgeCategory

@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from app.config import settings
 from app.database import SessionLocal
 from app.models import (
-    RecruitmentKnowledgeBase,
     RecruitmentKnowledgeChunk,
     RecruitmentKnowledgeDocument,
     RecruitmentKnowledgeDocumentVersion,
@@ -36,10 +35,13 @@ from app.services.embedding_client import (
     EmbeddingUpstreamError,
     get_embedding_client,
 )
-from app.services.resume_parser import ResumeParseError, normalize_resume_text, parse_resume_file
+from app.services.mineru_client import (
+    MineruClientError,
+    get_mineru_client,
+)
+from app.services.resume_parser import normalize_resume_text
 
 SessionFactory = sessionmaker[Session]
-DEFAULT_KNOWLEDGE_BASE_NAME = "默认招聘知识库"
 MAX_KNOWLEDGE_CHUNK_TEXT_LENGTH = 1_800
 KNOWLEDGE_CHUNK_OVERLAP = 160
 SUPPORTED_KNOWLEDGE_EXTENSIONS = {
@@ -100,35 +102,6 @@ def _published_actor_snapshot(actor: User) -> dict[str, object]:
         "published_by_display_name": actor.display_name,
         "published_at": datetime.now(UTC),
     }
-
-
-def ensure_default_knowledge_base(db: Session, actor: User) -> RecruitmentKnowledgeBase:
-    knowledge_base = db.scalar(
-        select(RecruitmentKnowledgeBase).where(
-            RecruitmentKnowledgeBase.name == DEFAULT_KNOWLEDGE_BASE_NAME
-        )
-    )
-    if knowledge_base is not None:
-        return knowledge_base
-    knowledge_base = RecruitmentKnowledgeBase(
-        name=DEFAULT_KNOWLEDGE_BASE_NAME,
-        description="用于保存招聘制度、岗位标准、面试评分、Offer 规则和沟通话术。",
-        **_actor_snapshot(actor),
-    )
-    db.add(knowledge_base)
-    db.flush()
-    return knowledge_base
-
-
-def list_knowledge_bases(db: Session) -> list[RecruitmentKnowledgeBase]:
-    return list(
-        db.scalars(
-            select(RecruitmentKnowledgeBase).order_by(
-                RecruitmentKnowledgeBase.status,
-                RecruitmentKnowledgeBase.created_at,
-            )
-        )
-    )
 
 
 def _normalize_tags(tags: Iterable[str]) -> list[str]:
@@ -217,32 +190,18 @@ def _get_or_create_document(
     db: Session,
     payload: RecruitmentKnowledgeDocumentVersionCreateRequest,
     actor: User,
-) -> tuple[RecruitmentKnowledgeBase, RecruitmentKnowledgeDocument]:
-    knowledge_base = (
-        db.get(RecruitmentKnowledgeBase, payload.knowledge_base_id)
-        if payload.knowledge_base_id
-        else ensure_default_knowledge_base(db, actor)
-    )
-    if knowledge_base is None:
-        raise RecruitmentKnowledgeError("knowledge_base_not_found", "知识库不存在")
-    if knowledge_base.status != "active":
-        raise RecruitmentKnowledgeError("knowledge_base_inactive", "知识库已停用")
-
+) -> RecruitmentKnowledgeDocument:
     document = db.scalar(
         select(RecruitmentKnowledgeDocument)
-        .where(
-            RecruitmentKnowledgeDocument.knowledge_base_id == knowledge_base.id,
-            RecruitmentKnowledgeDocument.title == payload.title.strip(),
-        )
+        .where(RecruitmentKnowledgeDocument.title == payload.title.strip())
         .options(selectinload(RecruitmentKnowledgeDocument.versions))
     )
     if document is not None:
         if document.status == "archived":
             raise RecruitmentKnowledgeError("document_archived", "知识文档已归档，不能新增版本")
-        return knowledge_base, document
+        return document
 
     document = RecruitmentKnowledgeDocument(
-        knowledge_base=knowledge_base,
         title=payload.title.strip(),
         summary=payload.summary.strip() if payload.summary else None,
         category=payload.category,
@@ -254,7 +213,7 @@ def _get_or_create_document(
     )
     db.add(document)
     db.flush()
-    return knowledge_base, document
+    return document
 
 
 def _next_version_number(db: Session, document_id: uuid.UUID) -> int:
@@ -285,7 +244,7 @@ def create_manual_knowledge_version(
 ]:
     raw_text = normalize_resume_text(payload.raw_text)
     drafts = build_knowledge_chunks(raw_text)
-    knowledge_base, document = _get_or_create_document(db, payload, actor)
+    document = _get_or_create_document(db, payload, actor)
 
     existing = db.scalar(
         select(RecruitmentKnowledgeDocumentVersion)
@@ -324,7 +283,7 @@ def create_manual_knowledge_version(
     db.add(version)
     db.flush()
 
-    chunks = _create_chunks(db, knowledge_base, document, version, drafts)
+    chunks = _create_chunks(db, document, version, drafts)
     document.summary = payload.summary.strip() if payload.summary else document.summary
     document.category = payload.category
     document.tags = _normalize_tags(payload.tags)
@@ -338,7 +297,6 @@ def create_manual_knowledge_version(
 
 def _create_chunks(
     db: Session,
-    knowledge_base: RecruitmentKnowledgeBase,
     document: RecruitmentKnowledgeDocument,
     version: RecruitmentKnowledgeDocumentVersion,
     drafts: list[KnowledgeChunkDraft],
@@ -347,7 +305,6 @@ def _create_chunks(
     embedding_model = settings.embedding_model or "unconfigured"
     for draft in drafts:
         chunk = RecruitmentKnowledgeChunk(
-            knowledge_base=knowledge_base,
             document=document,
             document_version=version,
             chunk_index=draft.chunk_index,
@@ -378,6 +335,8 @@ async def parse_and_store_knowledge_upload(
     *,
     storage_root: Path,
     max_size_mb: int,
+    force_ocr: bool | None = None,
+    model_version: str | None = None,
 ) -> ParsedKnowledgeUpload:
     filename = Path(upload.filename or "knowledge.txt").name
     extension = Path(filename).suffix.lower()
@@ -405,14 +364,25 @@ async def parse_and_store_knowledge_upload(
                 raw_text = content.decode("gb18030")
             parser_name = detected_type
         else:
-            parsed = parse_resume_file(path, detected_type)
-            raw_text = "\n\n".join(segment.normalized_text for segment in parsed.segments)
-            parser_name = parsed.extraction_method
-    except (UnicodeDecodeError, ResumeParseError) as error:
+            raw_text = await get_mineru_client().parse_file(
+                filename,
+                content,
+                model_version=model_version,
+                language=settings.knowledge_parse_language,
+                is_ocr=force_ocr
+                if force_ocr is not None
+                else settings.knowledge_parse_force_ocr,
+                enable_table=settings.knowledge_parse_enable_table,
+                enable_formula=settings.knowledge_parse_enable_formula,
+                page_range=settings.knowledge_parse_page_range,
+            )
+            parser_name = "mineru"
+    except UnicodeDecodeError as error:
         path.unlink(missing_ok=True)
-        if isinstance(error, ResumeParseError):
-            raise RecruitmentKnowledgeError(error.code, error.message) from error
         raise RecruitmentKnowledgeError("invalid_text_encoding", "文本文件编码无法识别") from error
+    except MineruClientError as error:
+        path.unlink(missing_ok=True)
+        raise RecruitmentKnowledgeError("mineru_parse_failed", str(error)) from error
 
     normalized = normalize_resume_text(raw_text)
     if not normalized:
@@ -591,6 +561,118 @@ def visible_knowledge_scopes(user: User) -> set[str]:
     return scopes
 
 
+def _can_view_document(document: RecruitmentKnowledgeDocument, user: User) -> bool:
+    if user.has_role("administrator", "recruiter"):
+        return True
+    return document.status == "active" and (
+        document.visibility_scope in visible_knowledge_scopes(user)
+    )
+
+
+def list_recruitment_knowledge_documents(
+    db: Session,
+    *,
+    actor: User,
+    category: str | None = None,
+    status: str | None = None,
+    query: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[int, list[RecruitmentKnowledgeDocument]]:
+    filters = []
+    maintainer = actor.has_role("administrator", "recruiter")
+    if not maintainer:
+        filters.append(RecruitmentKnowledgeDocument.status == "active")
+        filters.append(
+            RecruitmentKnowledgeDocument.visibility_scope.in_(visible_knowledge_scopes(actor))
+        )
+    elif status:
+        filters.append(RecruitmentKnowledgeDocument.status == status)
+    if category:
+        filters.append(RecruitmentKnowledgeDocument.category == category)
+    if query:
+        filters.append(RecruitmentKnowledgeDocument.title.ilike(f"%{query.strip()}%"))
+
+    total = (
+        db.scalar(
+            select(func.count(RecruitmentKnowledgeDocument.id)).where(*filters)
+        )
+        or 0
+    )
+    documents = list(
+        db.scalars(
+            select(RecruitmentKnowledgeDocument)
+            .options(selectinload(RecruitmentKnowledgeDocument.versions))
+            .where(*filters)
+            .order_by(RecruitmentKnowledgeDocument.updated_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    )
+    return total, documents
+
+
+def current_version_chunk_stats(
+    db: Session,
+    document_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, dict[str, int]]:
+    if not document_ids:
+        return {}
+    rows = db.execute(
+        select(
+            RecruitmentKnowledgeChunk.document_id,
+            RecruitmentKnowledgeChunk.status,
+            func.count().label("chunk_count"),
+        )
+        .join(
+            RecruitmentKnowledgeDocumentVersion,
+            RecruitmentKnowledgeChunk.document_version_id == RecruitmentKnowledgeDocumentVersion.id,
+        )
+        .join(
+            RecruitmentKnowledgeDocument,
+            RecruitmentKnowledgeChunk.document_id == RecruitmentKnowledgeDocument.id,
+        )
+        .where(
+            RecruitmentKnowledgeDocument.id.in_(document_ids),
+            RecruitmentKnowledgeDocument.current_version_number
+            == RecruitmentKnowledgeDocumentVersion.version_number,
+        )
+        .group_by(RecruitmentKnowledgeChunk.document_id, RecruitmentKnowledgeChunk.status)
+    ).all()
+    stats: dict[uuid.UUID, dict[str, int]] = {}
+    for document_id, status, chunk_count in rows:
+        item = stats.setdefault(
+            document_id,
+            {"chunk_count": 0, "completed": 0, "failed": 0, "pending": 0, "processing": 0},
+        )
+        item["chunk_count"] += chunk_count
+        item.setdefault(status, 0)
+        item[status] += chunk_count
+    return stats
+
+
+def load_recruitment_knowledge_document(
+    db: Session,
+    *,
+    document_id: uuid.UUID,
+    actor: User,
+) -> RecruitmentKnowledgeDocument:
+    document = db.scalar(
+        select(RecruitmentKnowledgeDocument)
+        .where(RecruitmentKnowledgeDocument.id == document_id)
+        .options(
+            selectinload(RecruitmentKnowledgeDocument.versions).selectinload(
+                RecruitmentKnowledgeDocumentVersion.chunks
+            )
+        )
+    )
+    if document is None:
+        raise RecruitmentKnowledgeError("document_not_found", "知识文档不存在")
+    if not _can_view_document(document, actor):
+        raise RecruitmentKnowledgeError("document_not_visible", "无权查看该知识文档")
+    return document
+
+
 def _cosine_distance(left: list[float], right: list[float]) -> float:
     left_norm = sum(value * value for value in left) ** 0.5
     right_norm = sum(value * value for value in right) ** 0.5
@@ -633,7 +715,6 @@ async def retrieve_recruitment_knowledge(
         RecruitmentKnowledgeDocument.current_version_number
         == RecruitmentKnowledgeDocumentVersion.version_number,
         RecruitmentKnowledgeDocumentVersion.status == "published",
-        RecruitmentKnowledgeBase.status == "active",
     ]
     if payload.category:
         base_filters.append(RecruitmentKnowledgeDocument.category == payload.category)
@@ -648,10 +729,6 @@ async def retrieve_recruitment_knowledge(
                 RecruitmentKnowledgeDocumentVersion,
                 RecruitmentKnowledgeChunk.document_version_id
                 == RecruitmentKnowledgeDocumentVersion.id,
-            )
-            .join(
-                RecruitmentKnowledgeBase,
-                RecruitmentKnowledgeChunk.knowledge_base_id == RecruitmentKnowledgeBase.id,
             )
             .where(*base_filters)
         )

@@ -44,7 +44,6 @@ from app.models.offer import (
 from app.models.onboarding import Onboarding, OnboardingEvent
 from app.models.prompt import PromptTemplate, PromptTemplateVersion
 from app.models.recruitment_knowledge import (
-    RecruitmentKnowledgeBase,
     RecruitmentKnowledgeChunk,
     RecruitmentKnowledgeDocument,
     RecruitmentKnowledgeDocumentVersion,
@@ -131,7 +130,6 @@ __all__ = [
     "OnboardingEvent",
     "PromptTemplate",
     "PromptTemplateVersion",
-    "RecruitmentKnowledgeBase",
     "RecruitmentKnowledgeChunk",
     "RecruitmentKnowledgeDocument",
     "RecruitmentKnowledgeDocumentVersion",

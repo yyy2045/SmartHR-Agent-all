@@ -15,15 +15,12 @@ import {
   FileDoneOutlined,
   KeyOutlined,
   LogoutOutlined,
-  ScheduleOutlined,
   SettingOutlined,
-  MailOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
   ProfileOutlined,
   ReadOutlined,
-  SolutionOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
@@ -99,9 +96,6 @@ function pageMeta(pathname: string) {
   }
   if (pathname.startsWith('/message-templates')) {
     return { title: '沟通模板', subtitle: '维护面试、Offer 和入职沟通文案及版本历史' }
-  }
-  if (pathname.startsWith('/communications')) {
-    return { title: '沟通留痕', subtitle: '查询候选人沟通记录、正文快照和更正历史' }
   }
   if (pathname === '/jobs/new') {
     return { title: '新建职位', subtitle: '录入职位信息并建立筛选标准' }
@@ -186,16 +180,10 @@ export function AppLayout() {
   const canAccessMessageTemplates = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter'].includes(role),
   )
-  const canAccessCommunications = auth.user?.roles.some((role) =>
-    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
-  )
   const canAccessRecruitmentKnowledge = auth.user?.roles.some((role) =>
     ['administrator', 'recruiter', 'hiring_manager'].includes(role),
   )
   const isAdministrator = auth.user?.roles.includes('administrator') ?? false
-  const canAccessOnboardings = auth.user?.roles.some((role) =>
-    ['administrator', 'recruiter', 'hiring_manager'].includes(role),
-  )
   const navigationItems: NavigationItem[] = [
     {
       key: 'workbench',
@@ -256,16 +244,6 @@ export function AppLayout() {
             label: '录用管理',
             icon: <FileDoneOutlined />,
             path: '/offers',
-          },
-        ]
-      : []),
-    ...(canAccessOnboardings
-      ? [
-          {
-            key: 'onboardings' as const,
-            label: '入职跟踪',
-            icon: <ScheduleOutlined />,
-            path: '/onboardings',
           },
         ]
       : []),
@@ -335,16 +313,6 @@ export function AppLayout() {
             label: '沟通模板',
             icon: <BellOutlined />,
             path: '/message-templates',
-          },
-        ]
-      : []),
-    ...(canAccessCommunications
-      ? [
-          {
-            key: 'communications' as const,
-            label: '沟通留痕',
-            icon: <MailOutlined />,
-            path: '/communications',
           },
         ]
       : []),
@@ -420,7 +388,7 @@ export function AppLayout() {
           onClick={() => navigate('/workbench')}
         >
           <span className="brand-mark" aria-hidden="true">
-            <SolutionOutlined />
+            <img className="brand-logo" src="/logo.png" alt="" />
           </span>
           <span>
             <Text className="brand-name">SmartHR</Text>

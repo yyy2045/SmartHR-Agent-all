@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-RECRUITMENT_KNOWLEDGE_BASE_STATUSES = ("active", "inactive")
 RECRUITMENT_KNOWLEDGE_CATEGORIES = (
     "policy",
     "job_standard",
@@ -51,68 +50,12 @@ RECRUITMENT_KNOWLEDGE_VERSION_STATUSES = ("draft", "published", "retired")
 RECRUITMENT_KNOWLEDGE_CHUNK_STATUSES = ("pending", "processing", "completed", "failed")
 RECRUITMENT_KNOWLEDGE_SOURCE_TYPES = ("manual", "upload")
 
-BASE_STATUS_SQL = ", ".join(f"'{item}'" for item in RECRUITMENT_KNOWLEDGE_BASE_STATUSES)
 CATEGORY_SQL = ", ".join(f"'{item}'" for item in RECRUITMENT_KNOWLEDGE_CATEGORIES)
 VISIBILITY_SCOPE_SQL = ", ".join(f"'{item}'" for item in RECRUITMENT_KNOWLEDGE_VISIBILITY_SCOPES)
 DOCUMENT_STATUS_SQL = ", ".join(f"'{item}'" for item in RECRUITMENT_KNOWLEDGE_DOCUMENT_STATUSES)
 VERSION_STATUS_SQL = ", ".join(f"'{item}'" for item in RECRUITMENT_KNOWLEDGE_VERSION_STATUSES)
 CHUNK_STATUS_SQL = ", ".join(f"'{item}'" for item in RECRUITMENT_KNOWLEDGE_CHUNK_STATUSES)
 SOURCE_TYPE_SQL = ", ".join(f"'{item}'" for item in RECRUITMENT_KNOWLEDGE_SOURCE_TYPES)
-
-
-class RecruitmentKnowledgeBase(Base):
-    __tablename__ = "recruitment_knowledge_bases"
-    __table_args__ = (
-        CheckConstraint(
-            f"status IN ({BASE_STATUS_SQL})",
-            name="ck_rkb_status",
-        ),
-        CheckConstraint(
-            "length(trim(name)) BETWEEN 1 AND 120",
-            name="ck_rkb_name",
-        ),
-        CheckConstraint(
-            "description IS NULL OR length(description) <= 1000",
-            name="ck_rkb_description",
-        ),
-        CheckConstraint(
-            "resource_version >= 1",
-            name="ck_rkb_resource_version",
-        ),
-        UniqueConstraint("name", name="uq_rkb_name"),
-        Index("ix_rkb_status", "status"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="active", server_default="active"
-    )
-    resource_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default="1"
-    )
-    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), index=True
-    )
-    created_by_username: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_by_display_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
-    documents: Mapped[list[RecruitmentKnowledgeDocument]] = relationship(
-        back_populates="knowledge_base",
-        passive_deletes="all",
-        order_by="RecruitmentKnowledgeDocument.updated_at.desc()",
-    )
 
 
 class RecruitmentKnowledgeDocument(Base):
@@ -147,14 +90,8 @@ class RecruitmentKnowledgeDocument(Base):
             name="ck_rkd_resource_version",
         ),
         UniqueConstraint(
-            "knowledge_base_id",
             "title",
             name="uq_rkd_title",
-        ),
-        Index(
-            "ix_rkd_base_category",
-            "knowledge_base_id",
-            "category",
         ),
         Index(
             "ix_rkd_scope_status",
@@ -164,11 +101,6 @@ class RecruitmentKnowledgeDocument(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("recruitment_knowledge_bases.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     summary: Mapped[str | None] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
@@ -201,7 +133,6 @@ class RecruitmentKnowledgeDocument(Base):
         onupdate=func.now(),
     )
 
-    knowledge_base: Mapped[RecruitmentKnowledgeBase] = relationship(back_populates="documents")
     related_job: Mapped[Job | None] = relationship(foreign_keys=[related_job_id])
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id])
     versions: Mapped[list[RecruitmentKnowledgeDocumentVersion]] = relationship(
@@ -373,11 +304,6 @@ class RecruitmentKnowledgeChunk(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("recruitment_knowledge_bases.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
     document_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("recruitment_knowledge_documents.id", ondelete="RESTRICT"),
         nullable=False,
@@ -421,7 +347,6 @@ class RecruitmentKnowledgeChunk(Base):
     document_version: Mapped[RecruitmentKnowledgeDocumentVersion] = relationship(
         back_populates="chunks"
     )
-    knowledge_base: Mapped[RecruitmentKnowledgeBase] = relationship()
 
 
 class RecruitmentKnowledgeRetrievalLog(Base):

@@ -96,13 +96,6 @@ docker compose up -d --build
 #    健康:  http://localhost:8080/api/health/ready
 ```
 
-写入演示数据(可选,便于直接体验):
-
-```powershell
-docker compose exec api python -m app.demo.seed
-# 登录: demo-admin / Demo@123456(另有 demo-recruiter / demo-manager / demo-approver)
-```
-
 停止:`docker compose down`(默认保留数据卷;加 `-v` 才清数据)。
 
 ---
@@ -122,6 +115,23 @@ EMBEDDING_VERSION / EMBEDDING_TIMEOUT_SECONDS / EMBEDDING_BATCH_SIZE / EMBEDDING
 ```
 
 > Embedding 默认关闭;开启后新增知识文档、候选人档案会自动异步建索引,支持幂等跳过、失败隔离、受控重试、强制重建与模型版本并存。
+
+### 知识库文档解析(MinerU 在线,PDF / DOCX)
+```text
+MINERU_PARSE_BASE_URL=https://mineru.net/api/v4
+MINERU_PARSE_API_KEY=                  # 必填:MinerU 精准解析 API 的 Token(后台「API 管理」页创建)
+MINERU_PARSE_MODEL_VERSION=pipeline    # pipeline | vlm | MinerU-HTML
+MINERU_PARSE_TIMEOUT_SECONDS=30
+MINERU_PARSE_POLL_INTERVAL_SECONDS=3
+MINERU_PARSE_MAX_POLL_SECONDS=120
+KNOWLEDGE_PARSE_FORCE_OCR=false        # 强制对 PDF 启用 OCR(扫描件/图片型 PDF)
+KNOWLEDGE_PARSE_LANGUAGE=ch            # 解析语言
+KNOWLEDGE_PARSE_ENABLE_TABLE=true
+KNOWLEDGE_PARSE_ENABLE_FORMULA=true
+KNOWLEDGE_PARSE_PAGE_RANGE=            # 只解析指定 PDF 页(如 1-10),空=全部页
+```
+
+> 知识库上传 TXT / Markdown 走本地解码;PDF / DOCX 走 MinerU **精准解析 API**(需 Token、支持 pipeline/vlm)。上传时前端暴露「强制 OCR」+「解析引擎(pipeline/vlm)」两项;其余 `KNOWLEDGE_PARSE_*` 为全局默认值。精准 API 的结果压缩包也在 `cdn-mineru.openxlab.org.cn`,需服务器出网可达。
 
 ### 认证初始化
 API 启动时自动迁移,并在账号不存在时初始化唯一招聘专员:
@@ -147,7 +157,6 @@ backend/
       recruitment_knowledge.py     企业知识库 RAG(分块 / 索引 / 检索 / 引用)
       ai_observability.py          AI 调用日志 / 任务中心
     models/                    SQLAlchemy 模型(含 candidate_agent_report 等)
-    demo/seed.py               幂等演示数据种子
     evaluation/                 固定合成样本离线评测
   migrations/                  Alembic 迁移
 frontend/
@@ -176,8 +185,3 @@ npm run build
 
 关键路径均有测试覆盖:AI 客户端工具调用解析、Agent 运行时循环、工具调度器、知识库检索、导航与账号菜单,以及各业务域前端流程。
 
----
-
-## 🏗️ 演示数据
-
-`python -m app.demo.seed` 幂等生成:4 个演示账号、1 个 DEMO 岗位、4 位覆盖不同阶段(AI 初筛 / 人工决策 / 流程 / 面试 / Offer / 入职)的候选人、AI 任务与调用日志、企业知识库文档与 AI 评测样本——方便一键体验完整业务闭环与 Agent 研判。

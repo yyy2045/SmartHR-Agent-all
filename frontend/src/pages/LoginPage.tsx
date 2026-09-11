@@ -1,7 +1,6 @@
 import {
   LockOutlined,
   SafetyCertificateOutlined,
-  SolutionOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { Alert, Button, Form, Input, Typography } from 'antd'
@@ -47,7 +46,7 @@ export function LoginPage() {
       <aside className="login-brand-panel">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true">
-            <SolutionOutlined />
+            <img className="brand-logo" src="/logo.png" alt="" />
           </div>
           <div>
             <Text className="brand-name">SmartHR</Text>

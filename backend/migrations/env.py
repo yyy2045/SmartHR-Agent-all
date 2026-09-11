@@ -31,7 +31,6 @@ from app.models import (  # noqa: F401
     OnboardingEvent,
     PromptTemplate,
     PromptTemplateVersion,
-    RecruitmentKnowledgeBase,
     RecruitmentKnowledgeChunk,
     RecruitmentKnowledgeDocument,
     RecruitmentKnowledgeDocumentVersion,

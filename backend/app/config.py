@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=16, ge=1, le=100)
     embedding_max_concurrency: int = Field(default=2, ge=1, le=10)
 
+    mineru_parse_base_url: str = "https://mineru.net/api/v4"
+    mineru_parse_api_key: str = ""
+    mineru_parse_model_version: str = "pipeline"
+    mineru_parse_timeout_seconds: int = Field(default=30, ge=10, le=300)
+    mineru_parse_poll_interval_seconds: float = Field(default=3.0, ge=0.0, le=30.0)
+    mineru_parse_max_poll_seconds: int = Field(default=120, ge=30, le=600)
+    knowledge_parse_force_ocr: bool = False
+    knowledge_parse_language: str = "ch"
+    knowledge_parse_enable_table: bool = True
+    knowledge_parse_enable_formula: bool = True
+    knowledge_parse_page_range: str | None = None
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"

@@ -1,5 +1,4 @@
 import {
-  DatabaseOutlined,
   FileTextOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -10,13 +9,18 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Col,
+  Collapse,
+  Drawer,
+  Empty,
   Form,
   Input,
   InputNumber,
   Row,
   Select,
   Space,
+  Table,
   Tabs,
   Tag,
   Typography,
@@ -29,10 +33,13 @@ import { useMemo, useState } from 'react'
 import {
   ApiError,
   createRecruitmentKnowledgeManual,
-  fetchRecruitmentKnowledgeBases,
+  fetchRecruitmentKnowledgeDocumentDetail,
+  fetchRecruitmentKnowledgeDocuments,
   retrieveRecruitmentKnowledge,
   uploadRecruitmentKnowledgeDocument,
   type RecruitmentKnowledgeCategory,
+  type RecruitmentKnowledgeChunkRecord,
+  type RecruitmentKnowledgeDocumentListItem,
   type RecruitmentKnowledgeRetrievalRecord,
   type RecruitmentKnowledgeVisibilityScope,
 } from '../api/client'
@@ -58,6 +65,64 @@ const visibilityOptions: Array<{ value: RecruitmentKnowledgeVisibilityScope; lab
   { value: 'admin_only', label: '仅管理员' },
 ]
 
+type RecruitmentKnowledgeParseEngine = 'pipeline' | 'vlm'
+
+const parseEngineOptions: Array<{ value: RecruitmentKnowledgeParseEngine; label: string }> = [
+  { value: 'pipeline', label: 'pipeline' },
+  { value: 'vlm', label: 'vlm' },
+]
+
+const categoryLabelMap: Record<RecruitmentKnowledgeCategory, string> = {
+  policy: '招聘制度',
+  job_standard: '岗位标准',
+  interview: '面试评分',
+  offer: 'Offer 规则',
+  compensation: '薪酬说明',
+  communication: '沟通话术',
+  general: '通用知识',
+}
+
+const visibilityLabelMap: Record<RecruitmentKnowledgeVisibilityScope, string> = {
+  all_internal: '全体内部用户',
+  recruiter_manager: '专员 + 用人经理',
+  recruiter_only: '仅招聘专员',
+  admin_only: '仅管理员',
+}
+
+const chunkStatusMeta: Record<
+  RecruitmentKnowledgeChunkRecord['status'],
+  { label: string; color: string }
+> = {
+  pending: { label: '待处理', color: 'default' },
+  processing: { label: '处理中', color: 'processing' },
+  completed: { label: '已索引', color: 'success' },
+  failed: { label: '失败', color: 'error' },
+}
+
+function formatDateTime(value: string) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function renderDocumentChunkStatus(record: RecruitmentKnowledgeDocumentListItem) {
+  if (!record.embedding_enabled) {
+    return <Tag>未索引</Tag>
+  }
+  const processed = record.chunk_completed + record.chunk_failed
+  const color = record.chunk_failed > 0 ? 'warning' : 'success'
+  return (
+    <Tag color={color}>
+      {processed}/{record.chunk_count} 已处理
+    </Tag>
+  )
+}
+
 interface KnowledgeFormValues {
   title: string
   summary?: string
@@ -66,6 +131,8 @@ interface KnowledgeFormValues {
   visibilityScope: RecruitmentKnowledgeVisibilityScope
   changeNote: string
   rawText?: string
+  forceOcr?: boolean
+  parseEngine?: RecruitmentKnowledgeParseEngine
 }
 
 interface RetrievalFormValues {
@@ -89,16 +156,34 @@ export function RecruitmentKnowledgePage() {
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([])
   const [retrievalResult, setRetrievalResult] =
     useState<RecruitmentKnowledgeRetrievalRecord | null>(null)
+  const [documentFilter, setDocumentFilter] = useState<{
+    category?: RecruitmentKnowledgeCategory | null
+    q: string
+  }>({ q: '' })
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
 
   const canMaintain = useMemo(
     () => auth.user?.roles.some((role) => ['administrator', 'recruiter'].includes(role)) ?? false,
     [auth.user?.roles],
   )
 
-  const bases = useQuery({
-    queryKey: ['recruitment-knowledge', 'bases'],
-    queryFn: fetchRecruitmentKnowledgeBases,
-    staleTime: 30_000,
+  const documents = useQuery({
+    queryKey: ['recruitment-knowledge', 'documents', documentFilter],
+    queryFn: () =>
+      fetchRecruitmentKnowledgeDocuments({
+        category: documentFilter.category ?? null,
+        q: documentFilter.q || null,
+        limit: 50,
+        offset: 0,
+      }),
+    staleTime: 15_000,
+  })
+
+  const selectedDocument = useQuery({
+    queryKey: ['recruitment-knowledge', 'documents', selectedDocumentId],
+    queryFn: () => fetchRecruitmentKnowledgeDocumentDetail(selectedDocumentId!),
+    enabled: Boolean(selectedDocumentId),
+    staleTime: 15_000,
   })
 
   const manualMutation = useMutation({
@@ -134,6 +219,8 @@ export function RecruitmentKnowledgePage() {
         tags: values.tags ?? [],
         visibilityScope: values.visibilityScope,
         changeNote: values.changeNote,
+        forceOcr: values.forceOcr || undefined,
+        parseEngine: values.parseEngine ?? 'pipeline',
         file,
       })
     },
@@ -177,8 +264,8 @@ export function RecruitmentKnowledgePage() {
           <Space wrap>
             <Button
               icon={<ReloadOutlined />}
-              onClick={() => void bases.refetch()}
-              loading={bases.isFetching}
+              onClick={() => void documents.refetch()}
+              loading={documents.isFetching}
             >
               刷新
             </Button>
@@ -195,35 +282,8 @@ export function RecruitmentKnowledgePage() {
           />
         )}
 
-        {bases.isError && (
-          <Alert
-            type="error"
-            showIcon
-            className="page-alert"
-            message="无法读取企业知识库"
-            description={bases.error.message}
-          />
-        )}
-
         <Row gutter={[16, 16]}>
           <Col xs={24} xl={14}>
-            <section className="panel-card">
-              <Space direction="vertical" size="middle" className="full-width">
-                <Space align="center">
-                  <DatabaseOutlined />
-                  <Text strong>知识库概览</Text>
-                </Space>
-                <Space wrap>
-                  {(bases.data?.items ?? []).map((base) => (
-                    <Tag key={base.id} color={base.status === 'active' ? 'green' : 'default'}>
-                      {base.name}
-                    </Tag>
-                  ))}
-                  {!bases.isPending && !bases.data?.items.length && <Text type="secondary">暂无知识库</Text>}
-                </Space>
-              </Space>
-            </section>
-
             <section className="panel-card recruitment-knowledge-editor">
               <Tabs
                 items={[
@@ -344,6 +404,207 @@ export function RecruitmentKnowledgePage() {
             </section>
           </Col>
         </Row>
+
+        <section className="panel-card recruitment-knowledge-documents">
+          <Space direction="vertical" size="middle" className="full-width">
+            <Space align="center" className="full-width" style={{ justifyContent: 'space-between' }}>
+              <Space align="center">
+                <FileTextOutlined />
+                <Text strong>知识文档</Text>
+                <Text type="secondary">
+                  {documents.data ? `共 ${documents.data.total} 份` : ''}
+                </Text>
+              </Space>
+              <Space wrap>
+                <Select
+                  allowClear
+                  placeholder="按类别筛选"
+                  style={{ width: 160 }}
+                  options={categoryOptions}
+                  value={documentFilter.category}
+                  onChange={(value) =>
+                    setDocumentFilter((prev) => ({ ...prev, category: value ?? null }))
+                  }
+                />
+                <Input.Search
+                  allowClear
+                  placeholder="搜索标题"
+                  style={{ width: 220 }}
+                  onSearch={(value) => setDocumentFilter((prev) => ({ ...prev, q: value }))}
+                />
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={() => void documents.refetch()}
+                  loading={documents.isFetching}
+                />
+              </Space>
+            </Space>
+
+            <Table<RecruitmentKnowledgeDocumentListItem>
+              rowKey="id"
+              loading={documents.isPending}
+              dataSource={documents.data?.items ?? []}
+              pagination={false}
+              locale={{ emptyText: <Empty description="暂无知识文档，请先录入或上传" /> }}
+              onRow={(record) => ({
+                onClick: () => setSelectedDocumentId(record.id),
+                style: { cursor: 'pointer' },
+              })}
+              columns={[
+                {
+                  title: '标题',
+                  key: 'title',
+                  render: (_, record) => (
+                    <Space direction="vertical" size={2}>
+                      <Text strong>{record.title}</Text>
+                      <Text type="secondary">{record.summary ?? '无摘要'}</Text>
+                    </Space>
+                  ),
+                },
+                {
+                  title: '类别',
+                  dataIndex: 'category',
+                  width: 110,
+                  render: (value: RecruitmentKnowledgeCategory) => categoryLabelMap[value],
+                },
+                {
+                  title: '可见范围',
+                  dataIndex: 'visibility_scope',
+                  width: 140,
+                  render: (value: RecruitmentKnowledgeVisibilityScope) => visibilityLabelMap[value],
+                },
+                {
+                  title: '来源',
+                  key: 'source',
+                  width: 170,
+                  render: (_, record) => (
+                    <Space direction="vertical" size={2}>
+                      <Tag color={record.current_source_type === 'upload' ? 'blue' : 'default'}>
+                        {record.current_source_type === 'upload' ? '上传' : '手工'}
+                      </Tag>
+                      {record.current_source_filename && (
+                        <Text type="secondary">{record.current_source_filename}</Text>
+                      )}
+                    </Space>
+                  ),
+                },
+                {
+                  title: '版本',
+                  key: 'versions',
+                  width: 90,
+                  render: (_, record) => (
+                    <Text>V{record.current_version_number ?? '—'} / {record.version_count}</Text>
+                  ),
+                },
+                {
+                  title: '分块',
+                  key: 'chunks',
+                  width: 140,
+                  render: (_, record) => renderDocumentChunkStatus(record),
+                },
+                {
+                  title: '更新时间',
+                  dataIndex: 'updated_at',
+                  width: 170,
+                  render: formatDateTime,
+                },
+              ]}
+            />
+          </Space>
+        </section>
+
+        <Drawer
+          title={selectedDocument.data?.title ?? '知识文档预览'}
+          width={680}
+          open={Boolean(selectedDocumentId)}
+          onClose={() => setSelectedDocumentId(null)}
+        >
+          {selectedDocument.isPending && <Text type="secondary">正在加载文档…</Text>}
+          {!selectedDocument.isPending && !selectedDocument.data && (
+            <Alert
+              type="error"
+              showIcon
+              message="无法读取文档详情"
+              description={selectedDocument.error?.message}
+            />
+          )}
+          {selectedDocument.data && (
+            <Space direction="vertical" size="large" className="full-width">
+              <Space wrap>
+                <Tag>{categoryLabelMap[selectedDocument.data.category]}</Tag>
+                <Tag>{visibilityLabelMap[selectedDocument.data.visibility_scope]}</Tag>
+                <Tag
+                  color={selectedDocument.data.source_type === 'upload' ? 'blue' : 'default'}
+                >
+                  {selectedDocument.data.source_type === 'upload' ? '上传' : '手工'}
+                </Tag>
+                {selectedDocument.data.source_filename && (
+                  <Text type="secondary">{selectedDocument.data.source_filename}</Text>
+                )}
+                <Text type="secondary">版本 V{selectedDocument.data.current_version_number ?? '—'}</Text>
+              </Space>
+              {selectedDocument.data.summary && (
+                <Paragraph type="secondary">{selectedDocument.data.summary}</Paragraph>
+              )}
+              {selectedDocument.data.parser_name && (
+                <Text type="secondary">解析器：{selectedDocument.data.parser_name}</Text>
+              )}
+              <Collapse
+                defaultActiveKey={['chunks']}
+                items={[
+                  {
+                    key: 'chunks',
+                    label: `分块预览（${selectedDocument.data.current_chunks.length}）`,
+                    children: (
+                      <Space direction="vertical" size="small" className="full-width">
+                        {selectedDocument.data.current_chunks.length === 0 ? (
+                          <Empty description="暂无分块" />
+                        ) : (
+                          selectedDocument.data.current_chunks.map((chunk) => (
+                            <Card key={chunk.id} size="small" className="knowledge-chunk-card">
+                              <Space direction="vertical" size={4} className="full-width">
+                                <Space wrap>
+                                  <Tag>#{chunk.chunk_index}</Tag>
+                                  {chunk.heading_path.length > 0 && (
+                                    <Text type="secondary">{chunk.heading_path.join(' / ')}</Text>
+                                  )}
+                                  {chunk.source_locator && (
+                                    <Text type="secondary">{chunk.source_locator}</Text>
+                                  )}
+                                  <Tag color={chunkStatusMeta[chunk.status].color}>
+                                    {chunkStatusMeta[chunk.status].label}
+                                  </Tag>
+                                </Space>
+                                <Paragraph
+                                  className="knowledge-chunk-text"
+                                  style={{ whiteSpace: 'pre-wrap' }}
+                                >
+                                  {chunk.chunk_text}
+                                </Paragraph>
+                              </Space>
+                            </Card>
+                          ))
+                        )}
+                      </Space>
+                    ),
+                  },
+                  {
+                    key: 'raw',
+                    label: '查看正文（raw_text）',
+                    children: (
+                      <Paragraph
+                        className="knowledge-chunk-text"
+                        style={{ whiteSpace: 'pre-wrap' }}
+                      >
+                        {selectedDocument.data.raw_text ?? '暂无正文'}
+                      </Paragraph>
+                    ),
+                  },
+                ]}
+              />
+            </Space>
+          )}
+        </Drawer>
       </div>
     </>
   )
@@ -373,6 +634,7 @@ function KnowledgeEditorForm({
       initialValues={{
         category: 'policy',
         visibilityScope: 'all_internal',
+        parseEngine: 'pipeline',
       }}
       onFinish={onFinish}
     >
@@ -405,17 +667,31 @@ function KnowledgeEditorForm({
           <TextArea rows={9} placeholder="# 面试评分标准&#10;候选人需要..." />
         </Form.Item>
       ) : (
-        <Form.Item label="知识文件" required>
-          <Upload
-            beforeUpload={() => false}
-            maxCount={1}
-            fileList={uploadFiles}
-            onChange={({ fileList }) => onUploadFilesChange?.(fileList)}
-            accept=".txt,.md,.pdf,.docx"
-          >
-            <Button icon={<UploadOutlined />}>选择 TXT / Markdown / PDF / DOCX</Button>
-          </Upload>
-        </Form.Item>
+        <>
+          <Row gutter={12}>
+            <Col span={14}>
+              <Form.Item name="parseEngine" label="解析引擎">
+                <Select options={parseEngineOptions} />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item name="forceOcr" label="强制 OCR" valuePropName="checked">
+                <Checkbox>对扫描 PDF 启用 OCR</Checkbox>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item label="知识文件" required>
+            <Upload
+              beforeUpload={() => false}
+              maxCount={1}
+              fileList={uploadFiles}
+              onChange={({ fileList }) => onUploadFilesChange?.(fileList)}
+              accept=".txt,.md,.pdf,.docx"
+            >
+              <Button icon={<UploadOutlined />}>选择 TXT / Markdown / PDF / DOCX</Button>
+            </Upload>
+          </Form.Item>
+        </>
       )}
       <Button type="primary" htmlType="submit" icon={<FileTextOutlined />} loading={submitting}>
         {submitText}

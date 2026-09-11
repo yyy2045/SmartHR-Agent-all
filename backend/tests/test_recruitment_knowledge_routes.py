@@ -209,3 +209,86 @@ async def test_upload_text_knowledge_document_records_source_metadata(
         version = db.scalars(select(RecruitmentKnowledgeDocumentVersion)).one()
         assert version.storage_key is not None
         assert version.parser_name == "markdown"
+
+
+async def _create_document(
+    client: httpx.AsyncClient,
+    *,
+    title: str,
+    visibility_scope: str,
+) -> dict[str, object]:
+    payload = _manual_payload()
+    payload["title"] = title
+    payload["visibility_scope"] = visibility_scope
+    response = await client.post("/recruitment-knowledge/documents/manual", json=payload)
+    assert response.status_code == 201
+    return response.json()
+
+
+@pytest.mark.asyncio
+async def test_list_knowledge_documents_respects_visibility_scopes(
+    recruitment_knowledge_route_dependencies: RecruitmentKnowledgeRouteDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        await _create_document(client, title="管理员专享制度", visibility_scope="admin_only")
+        await _create_document(client, title="后端面试标准", visibility_scope="recruiter_manager")
+
+        body = (await client.get("/recruitment-knowledge/documents")).json()
+        assert body["total"] >= 2
+        titles = {item["title"] for item in body["items"]}
+        assert {"管理员专享制度", "后端面试标准"} <= titles
+        listed = next(item for item in body["items"] if item["title"] == "后端面试标准")
+        assert listed["version_count"] == 1
+        assert listed["current_source_type"] == "manual"
+        assert listed["chunk_count"] == 1
+
+        # 非维护角色只能看到对其可见的知识
+        await _login(client, "manager")
+        body = (await client.get("/recruitment-knowledge/documents")).json()
+        assert all(item["title"] == "后端面试标准" for item in body["items"])
+
+
+@pytest.mark.asyncio
+async def test_get_knowledge_document_detail_returns_chunks_and_raw_text(
+    recruitment_knowledge_route_dependencies: RecruitmentKnowledgeRouteDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        created = await _create_document(
+            client, title="后端面试评分标准", visibility_scope="recruiter_manager"
+        )
+        document_id = created["document"]["id"]
+
+        detail = await client.get(f"/recruitment-knowledge/documents/{document_id}")
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["title"] == "后端面试评分标准"
+        assert body["current_version_number"] == 1
+        assert "候选人需要说明资源边界" in body["raw_text"]
+        assert len(body["versions"]) == 1
+        assert len(body["current_chunks"]) == 1
+        first = body["current_chunks"][0]
+        assert first["chunk_index"] == 0
+        assert "候选人需要说明资源边界" in first["chunk_text"]
+        assert first["heading_path"] == ["接口设计"]
+        assert first["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_get_knowledge_document_detail_hides_invisible_document_from_manager(
+    recruitment_knowledge_route_dependencies: RecruitmentKnowledgeRouteDependencies,
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await _login(client, "recruiter")
+        created = await _create_document(
+            client, title="管理员专享制度", visibility_scope="admin_only"
+        )
+        document_id = created["document"]["id"]
+
+        await _login(client, "manager")
+        detail = await client.get(f"/recruitment-knowledge/documents/{document_id}")
+        assert detail.status_code == 403

@@ -26,14 +26,13 @@ import {
   fetchAIEvaluationRuns,
   fetchOfferPortalStatus,
   fetchCurrentUser,
-  fetchCommunicationRecord,
-  fetchCommunicationRecords,
   fetchInternalNotificationUnreadCount,
   fetchMessageTemplate,
   fetchMessageTemplates,
   fetchPromptTemplate,
   fetchPromptTemplates,
-  fetchRecruitmentKnowledgeBases,
+  fetchRecruitmentKnowledgeDocumentDetail,
+  fetchRecruitmentKnowledgeDocuments,
   fetchInternalNotifications,
   fetchJobs,
   fetchLiveHealth,
@@ -416,7 +415,6 @@ describe('API client', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await fetchRecruitmentKnowledgeBases()
     await createRecruitmentKnowledgeManual({
       title: '后端面试评分标准',
       summary: '统一评分口径',
@@ -444,10 +442,8 @@ describe('API client', () => {
       limit: 3,
     })
 
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/recruitment-knowledge/bases')
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/recruitment-knowledge/documents/manual')
-    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
-      knowledge_base_id: null,
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/recruitment-knowledge/documents/manual')
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
       title: '后端面试评分标准',
       summary: '统一评分口径',
       category: 'interview',
@@ -457,17 +453,23 @@ describe('API client', () => {
       raw_text: '# 接口设计\n需要说明幂等策略。',
       idempotency_key: 'knowledge-manual-key',
     })
-    expect(fetchMock.mock.calls[2][0]).toBe('/api/recruitment-knowledge/documents/upload')
-    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: 'POST' })
-    expect(fetchMock.mock.calls[2][1]?.body).toBeInstanceOf(FormData)
-    expect(fetchMock.mock.calls[3][0]).toBe('/api/recruitment-knowledge/retrieve')
-    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/recruitment-knowledge/documents/upload')
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST' })
+    expect(fetchMock.mock.calls[1][1]?.body).toBeInstanceOf(FormData)
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/recruitment-knowledge/retrieve')
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
       scenario: 'knowledge_preview',
       query: 'Offer 前需要确认什么？',
       category: 'offer',
       tags: ['审批'],
       limit: 3,
     })
+    await fetchRecruitmentKnowledgeDocuments({ category: 'offer', q: '审批', limit: 10 })
+    await fetchRecruitmentKnowledgeDocumentDetail('doc-1')
+    expect(fetchMock.mock.calls[3][0]).toBe(
+      '/api/recruitment-knowledge/documents?category=offer&q=%E5%AE%A1%E6%89%B9&limit=10',
+    )
+    expect(fetchMock.mock.calls[4][0]).toBe('/api/recruitment-knowledge/documents/doc-1')
   })
 
   it('builds message template and communication requests', async () => {
@@ -588,30 +590,6 @@ describe('API client', () => {
       expected_version: 5,
       idempotency_key: 'activate-key-1',
     })
-  })
-
-  it('builds communication record query requests', async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(new Response(JSON.stringify({ items: [], total: 0, limit: 20, offset: 0 }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    await fetchCommunicationRecords({
-      contextType: 'offer',
-      contextId: 'offer-1',
-      applicationId: 'application-1',
-      limit: 20,
-      offset: 40,
-    })
-    await fetchCommunicationRecord('record-1')
-
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      '/api/communications?context_type=offer&context_id=offer-1&application_id=application-1&limit=20&offset=40',
-    )
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/communications/record-1')
   })
 
   it('使用浏览器生成的 multipart 边界上传简历批次', async () => {

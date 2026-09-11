@@ -485,23 +485,8 @@ export type RecruitmentKnowledgeVisibilityScope =
   | 'recruiter_only'
   | 'admin_only'
 
-export interface RecruitmentKnowledgeBaseRecord {
-  id: string
-  name: string
-  description: string | null
-  status: 'active' | 'inactive'
-  resource_version: number
-  created_at: string
-  updated_at: string
-}
-
-export interface RecruitmentKnowledgeBaseListRecord {
-  items: RecruitmentKnowledgeBaseRecord[]
-}
-
 export interface RecruitmentKnowledgeDocumentRecord {
   id: string
-  knowledge_base_id: string
   title: string
   summary: string | null
   category: RecruitmentKnowledgeCategory
@@ -541,7 +526,6 @@ export interface RecruitmentKnowledgeCreateRecord {
 }
 
 export interface RecruitmentKnowledgeManualInput {
-  knowledgeBaseId?: string | null
   title: string
   summary?: string | null
   category: RecruitmentKnowledgeCategory
@@ -553,7 +537,6 @@ export interface RecruitmentKnowledgeManualInput {
 }
 
 export interface RecruitmentKnowledgeUploadInput {
-  knowledgeBaseId?: string | null
   title: string
   summary?: string | null
   category: RecruitmentKnowledgeCategory
@@ -562,6 +545,8 @@ export interface RecruitmentKnowledgeUploadInput {
   changeNote: string
   file: File
   idempotencyKey?: string
+  forceOcr?: boolean
+  parseEngine?: 'pipeline' | 'vlm'
 }
 
 export interface RecruitmentKnowledgeRetrievalCitation {
@@ -589,6 +574,61 @@ export interface RecruitmentKnowledgeRetrievalInput {
   category?: RecruitmentKnowledgeCategory | null
   tags?: string[]
   limit?: number
+}
+
+export interface RecruitmentKnowledgeChunkRecord {
+  id: string
+  document_id: string
+  document_version_id: string
+  chunk_index: number
+  chunk_text: string
+  heading_path: string[]
+  source_locator: string | null
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  embedding_model: string
+  embedding_dimension: number
+  embedding_version: string
+  attempt_count: number
+  failure_code: string | null
+  failure_message: string | null
+  embedded_at: string | null
+  updated_at: string
+}
+
+export interface RecruitmentKnowledgeDocumentListItem extends RecruitmentKnowledgeDocumentRecord {
+  version_count: number
+  current_source_type: 'manual' | 'upload' | null
+  current_source_filename: string | null
+  chunk_count: number
+  chunk_completed: number
+  chunk_failed: number
+  chunk_pending: number
+  chunk_processing: number
+  embedding_enabled: boolean
+}
+
+export interface RecruitmentKnowledgeDocumentListRecord {
+  total: number
+  items: RecruitmentKnowledgeDocumentListItem[]
+}
+
+export interface RecruitmentKnowledgeDocumentDetailRecord extends RecruitmentKnowledgeDocumentRecord {
+  versions: RecruitmentKnowledgeVersionRecord[]
+  raw_text: string | null
+  source_type: 'manual' | 'upload' | null
+  source_filename: string | null
+  mime_type: string | null
+  parser_name: string | null
+  current_chunks: RecruitmentKnowledgeChunkRecord[]
+  embedding_enabled: boolean
+}
+
+export interface RecruitmentKnowledgeDocumentListInput {
+  category?: RecruitmentKnowledgeCategory | null
+  status?: 'active' | 'archived' | null
+  q?: string | null
+  limit?: number
+  offset?: number
 }
 
 export type AnalyticsInterval = 'day' | 'week'
@@ -1498,9 +1538,6 @@ export type MessageTemplateType =
   | 'onboarding_date_confirmation'
 export type MessageTemplateStatus = 'active' | 'inactive' | 'all'
 export type CommunicationContextType = 'interview_round' | 'offer' | 'onboarding'
-export type CommunicationChannel = 'wechat' | 'phone' | 'sms' | 'email' | 'other'
-export type CommunicationRecordKind = 'sent' | 'correction'
-export type CommunicationAction = 'copy' | 'record_send' | 'correct'
 
 export interface MessageTemplateVersionRecord {
   id: string
@@ -1593,57 +1630,6 @@ export interface CommunicationCopyAuditRecord {
   context_id: string
   template_version_id: string | null
   copied_at: string
-}
-
-export interface CommunicationRecordSummaryRecord {
-  id: string
-  application_id: string
-  candidate_id: string
-  job_id: string
-  context_type: CommunicationContextType
-  context_id: string
-  record_kind: CommunicationRecordKind
-  channel: CommunicationChannel
-  channel_detail: string | null
-  recipient_masked: string
-  candidate_name_snapshot: string
-  subject_snapshot: string
-  sent_at: string
-  correction_count: number
-  latest_correction_id: string | null
-  allowed_actions: CommunicationAction[]
-}
-
-export interface CommunicationRecordDetailRecord extends CommunicationRecordSummaryRecord {
-  template_version_id: string | null
-  root_record_id: string | null
-  corrects_record_id: string | null
-  correction_sequence: number
-  correction_reason: string | null
-  recipient_type: 'phone' | 'email' | 'other'
-  body_snapshot: string
-  is_historical: boolean
-  historical_note: string | null
-  created_by_id: string | null
-  created_by_username: string
-  created_by_display_name: string
-  created_at: string
-  corrections: CommunicationRecordDetailRecord[]
-}
-
-export interface CommunicationRecordListRecord {
-  items: CommunicationRecordSummaryRecord[]
-  total: number
-  limit: number
-  offset: number
-}
-
-export interface CommunicationRecordFilters {
-  contextType?: CommunicationContextType
-  contextId?: string
-  applicationId?: string
-  limit?: number
-  offset?: number
 }
 
 export interface CommunicationPreviewInput {
@@ -2817,10 +2803,6 @@ export function publishPromptTemplateVersion(
   )
 }
 
-export function fetchRecruitmentKnowledgeBases(): Promise<RecruitmentKnowledgeBaseListRecord> {
-  return apiRequest('/api/recruitment-knowledge/bases', {}, '无法读取企业知识库')
-}
-
 export function createRecruitmentKnowledgeManual(
   input: RecruitmentKnowledgeManualInput,
 ): Promise<RecruitmentKnowledgeCreateRecord> {
@@ -2829,7 +2811,6 @@ export function createRecruitmentKnowledgeManual(
     {
       method: 'POST',
       body: JSON.stringify({
-        knowledge_base_id: input.knowledgeBaseId ?? null,
         title: input.title,
         summary: input.summary ?? null,
         category: input.category,
@@ -2853,9 +2834,10 @@ export function uploadRecruitmentKnowledgeDocument(
   body.append('category', input.category)
   body.append('change_note', input.changeNote)
   body.append('visibility_scope', input.visibilityScope)
-  if (input.knowledgeBaseId) body.append('knowledge_base_id', input.knowledgeBaseId)
   if (input.summary) body.append('summary', input.summary)
   input.tags.forEach((tag) => body.append('tags', tag))
+  if (input.forceOcr != null) body.append('force_ocr', String(input.forceOcr))
+  if (input.parseEngine) body.append('model_version', input.parseEngine)
   body.append('file', input.file)
   return apiRequest(
     '/api/recruitment-knowledge/documents/upload',
@@ -2880,6 +2862,35 @@ export function retrieveRecruitmentKnowledge(
       }),
     },
     '检索企业知识库失败',
+  )
+}
+
+export function fetchRecruitmentKnowledgeDocuments(
+  filters: RecruitmentKnowledgeDocumentListInput = {},
+  signal?: AbortSignal,
+): Promise<RecruitmentKnowledgeDocumentListRecord> {
+  const query = new URLSearchParams()
+  if (filters.category) query.set('category', filters.category)
+  if (filters.status) query.set('status', filters.status)
+  if (filters.q) query.set('q', filters.q)
+  if (filters.limit != null) query.set('limit', String(filters.limit))
+  if (filters.offset != null) query.set('offset', String(filters.offset))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(
+    `/api/recruitment-knowledge/documents${suffix}`,
+    { signal },
+    '读取企业知识文档失败',
+  )
+}
+
+export function fetchRecruitmentKnowledgeDocumentDetail(
+  documentId: string,
+  signal?: AbortSignal,
+): Promise<RecruitmentKnowledgeDocumentDetailRecord> {
+  return apiRequest(
+    `/api/recruitment-knowledge/documents/${encodeURIComponent(documentId)}`,
+    { signal },
+    '读取知识文档详情失败',
   )
 }
 
@@ -3360,23 +3371,6 @@ export function deactivateMessageTemplate(
     },
     '停用沟通模板失败',
   )
-}
-
-export function fetchCommunicationRecords(
-  filters: CommunicationRecordFilters = {},
-): Promise<CommunicationRecordListRecord> {
-  const query = new URLSearchParams()
-  if (filters.contextType) query.set('context_type', filters.contextType)
-  if (filters.contextId) query.set('context_id', filters.contextId)
-  if (filters.applicationId) query.set('application_id', filters.applicationId)
-  if (filters.limit !== undefined) query.set('limit', String(filters.limit))
-  if (filters.offset !== undefined) query.set('offset', String(filters.offset))
-  const suffix = query.size ? `?${query.toString()}` : ''
-  return apiRequest(`/api/communications${suffix}`, {}, '无法读取沟通留痕')
-}
-
-export function fetchCommunicationRecord(recordId: string): Promise<CommunicationRecordDetailRecord> {
-  return apiRequest(`/api/communications/${recordId}`, {}, '无法读取沟通留痕详情')
 }
 
 export function previewCommunication(

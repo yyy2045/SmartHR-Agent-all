@@ -5,7 +5,6 @@ import {
   LockOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
-  SolutionOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -145,7 +144,7 @@ function PortalShell({ children }: { children: ReactNode }) {
       <header className="candidate-offer-header">
         <div className="candidate-offer-brand">
           <span className="candidate-offer-brand-mark" aria-hidden="true">
-            <SolutionOutlined />
+            <img className="candidate-offer-brand-logo" src="/logo.png" alt="" />
           </span>
           <span>
             <Text strong>SmartHR</Text>

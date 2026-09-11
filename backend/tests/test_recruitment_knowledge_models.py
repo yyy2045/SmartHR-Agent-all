@@ -10,7 +10,6 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import (
-    RecruitmentKnowledgeBase,
     RecruitmentKnowledgeChunk,
     RecruitmentKnowledgeDocument,
     RecruitmentKnowledgeDocumentVersion,
@@ -56,22 +55,8 @@ def _user(db: Session) -> User:
     return user
 
 
-def _base(user: User) -> RecruitmentKnowledgeBase:
-    return RecruitmentKnowledgeBase(
-        name="默认招聘知识库",
-        description="公司招聘制度、面试标准和 Offer 规则",
-        created_by_id=user.id,
-        created_by_username=user.username,
-        created_by_display_name=user.display_name,
-    )
-
-
-def _document(
-    knowledge_base: RecruitmentKnowledgeBase,
-    user: User,
-) -> RecruitmentKnowledgeDocument:
+def _document(user: User) -> RecruitmentKnowledgeDocument:
     return RecruitmentKnowledgeDocument(
-        knowledge_base=knowledge_base,
         title="后端工程师面试评分标准",
         summary="用于统一后端岗位面试评分口径",
         category="interview",
@@ -115,13 +100,11 @@ def _version(
 
 
 def _chunk(
-    knowledge_base: RecruitmentKnowledgeBase,
     document: RecruitmentKnowledgeDocument,
     version: RecruitmentKnowledgeDocumentVersion,
 ) -> RecruitmentKnowledgeChunk:
     return RecruitmentKnowledgeChunk(
         id=uuid.uuid4(),
-        knowledge_base=knowledge_base,
         document=document,
         document_version=version,
         chunk_index=0,
@@ -142,10 +125,9 @@ def test_recruitment_knowledge_models_track_versions_chunks_and_retrieval_logs(
 ) -> None:
     with recruitment_knowledge_session_factory() as db:
         user = _user(db)
-        knowledge_base = _base(user)
-        document = _document(knowledge_base, user)
+        document = _document(user)
         version = _version(document, user)
-        chunk = _chunk(knowledge_base, document, version)
+        chunk = _chunk(document, version)
         retrieval_log = RecruitmentKnowledgeRetrievalLog(
             scenario="candidate_qa",
             query_hash="c" * 64,
@@ -162,7 +144,7 @@ def test_recruitment_knowledge_models_track_versions_chunks_and_retrieval_logs(
             retrieved_chunk_ids=[str(chunk.id)],
             details={"visibility_scopes": ["recruiter_manager"]},
         )
-        db.add_all([knowledge_base, document, version, chunk, retrieval_log])
+        db.add_all([document, version, chunk, retrieval_log])
         db.commit()
 
         stored = db.scalars(select(RecruitmentKnowledgeDocument)).one()
@@ -193,11 +175,10 @@ def test_recruitment_knowledge_document_constraints_reject_invalid_values(
 ) -> None:
     with recruitment_knowledge_session_factory() as db:
         user = _user(db)
-        knowledge_base = _base(user)
-        document = _document(knowledge_base, user)
+        document = _document(user)
         for key, value in document_changes.items():
             setattr(document, key, value)
-        db.add_all([knowledge_base, document])
+        db.add_all([document])
         with pytest.raises(IntegrityError):
             db.commit()
 
@@ -220,12 +201,11 @@ def test_recruitment_knowledge_version_constraints_reject_invalid_values(
 ) -> None:
     with recruitment_knowledge_session_factory() as db:
         user = _user(db)
-        knowledge_base = _base(user)
-        document = _document(knowledge_base, user)
+        document = _document(user)
         version = _version(document, user, status="draft")
         for key, value in version_changes.items():
             setattr(version, key, value)
-        db.add_all([knowledge_base, document, version])
+        db.add_all([document, version])
         with pytest.raises(IntegrityError):
             db.commit()
 
@@ -246,13 +226,12 @@ def test_recruitment_knowledge_chunk_constraints_reject_invalid_values(
 ) -> None:
     with recruitment_knowledge_session_factory() as db:
         user = _user(db)
-        knowledge_base = _base(user)
-        document = _document(knowledge_base, user)
+        document = _document(user)
         version = _version(document, user)
-        chunk = _chunk(knowledge_base, document, version)
+        chunk = _chunk(document, version)
         for key, value in chunk_changes.items():
             setattr(chunk, key, value)
-        db.add_all([knowledge_base, document, version, chunk])
+        db.add_all([document, version, chunk])
         with pytest.raises(IntegrityError):
             db.commit()
 
@@ -262,10 +241,9 @@ def test_recruitment_knowledge_versions_are_immutable(
 ) -> None:
     with recruitment_knowledge_session_factory() as db:
         user = _user(db)
-        knowledge_base = _base(user)
-        document = _document(knowledge_base, user)
+        document = _document(user)
         version = _version(document, user)
-        db.add_all([knowledge_base, document, version])
+        db.add_all([document, version])
         db.commit()
 
         version.status = "retired"
@@ -286,22 +264,20 @@ def test_recruitment_knowledge_version_and_chunk_uniqueness_are_scoped(
 ) -> None:
     with recruitment_knowledge_session_factory() as db:
         user = _user(db)
-        knowledge_base = _base(user)
-        document = _document(knowledge_base, user)
+        document = _document(user)
         same_key = uuid.uuid4()
         first_version = _version(document, user, idempotency_key=same_key)
         second_version = _version(document, user, version_number=2, idempotency_key=same_key)
-        db.add_all([knowledge_base, document, first_version, second_version])
+        db.add_all([document, first_version, second_version])
         with pytest.raises(IntegrityError):
             db.commit()
 
     with recruitment_knowledge_session_factory() as db:
         user = _user(db)
-        knowledge_base = _base(user)
-        document = _document(knowledge_base, user)
+        document = _document(user)
         version = _version(document, user)
-        first_chunk = _chunk(knowledge_base, document, version)
-        second_chunk = _chunk(knowledge_base, document, version)
-        db.add_all([knowledge_base, document, version, first_chunk, second_chunk])
+        first_chunk = _chunk(document, version)
+        second_chunk = _chunk(document, version)
+        db.add_all([document, version, first_chunk, second_chunk])
         with pytest.raises(IntegrityError):
             db.commit()

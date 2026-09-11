@@ -52,16 +52,15 @@ input {
 }
 
 .brand-mark {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  color: #ffffff;
-  font-size: 20px;
-  background: linear-gradient(145deg, #57a1ff, #1f6fe5);
-  border: 1px solid rgb(255 255 255 / 20%);
-  border-radius: 12px;
-  box-shadow: 0 8px 22px rgb(40 119 230 / 30%);
-  place-items: center;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.brand-mark .brand-logo {
+  display: block;
+  height: 38px;
+  width: auto;
 }
 
 .brand-name,
@@ -121,6 +120,10 @@ input {
 
 .login-brand-panel .brand-name {
   color: #ffffff;
+}
+
+.login-brand-panel .brand-mark .brand-logo {
+  height: 46px;
 }
 
 .login-brand-panel .brand-subtitle {
@@ -242,14 +245,15 @@ input {
 }
 
 .candidate-offer-brand-mark {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  color: #ffffff;
-  font-size: 18px;
-  background: #2269c8;
-  border-radius: 6px;
-  place-items: center;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.candidate-offer-brand-mark .candidate-offer-brand-logo {
+  display: block;
+  height: 26px;
+  width: auto;
 }
 
 .candidate-offer-security {
