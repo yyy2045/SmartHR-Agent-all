@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "smarthr-ai-screening-api"
 version = "0.1.0"
-description = "SmartHR AI 简历筛选 MVP 后端"
+description = "SmartHR 智能招聘平台后端"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "alembic>=1.14,<2",

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "SmartHR AI 简历筛选"
+    app_name: str = "SmartHR 智能招聘平台"
     app_env: str = "development"
     app_secret_key: str = Field(default="development-only-change-me", min_length=16)
     app_session_cookie: str = "smarthr_session"

@@ -50,7 +50,7 @@ export function LoginPage() {
           </div>
           <div>
             <Text className="brand-name">SmartHR</Text>
-            <Text className="brand-subtitle">AI 简历筛选工作台</Text>
+            <Text className="brand-subtitle">智能招聘平台</Text>
           </div>
         </div>
         <div className="login-brand-copy">
