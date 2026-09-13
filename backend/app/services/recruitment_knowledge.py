@@ -152,7 +152,7 @@ def build_knowledge_chunks(raw_text: str) -> list[KnowledgeChunkDraft]:
 
     drafts: list[KnowledgeChunkDraft] = []
     current_lines: list[str] = []
-    current_headings: list[str] = []
+    current_headings: list[str] | None = None
     current_locator: str | None = None
 
     def flush() -> None:
@@ -164,7 +164,7 @@ def build_knowledge_chunks(raw_text: str) -> list[KnowledgeChunkDraft]:
             KnowledgeChunkDraft(
                 chunk_index=len(drafts),
                 chunk_text=text[:MAX_KNOWLEDGE_CHUNK_TEXT_LENGTH],
-                heading_path=[*current_headings],
+                heading_path=[*(current_headings or [])],
                 source_locator=current_locator,
             )
         )
@@ -172,12 +172,17 @@ def build_knowledge_chunks(raw_text: str) -> list[KnowledgeChunkDraft]:
         current_locator = None
 
     for paragraph, headings, locator in paragraphs:
-        candidate_length = len("\n\n".join([*current_lines, paragraph]))
-        if current_lines and candidate_length > MAX_KNOWLEDGE_CHUNK_TEXT_LENGTH:
-            overlap = current_lines[-1][-KNOWLEDGE_CHUNK_OVERLAP:] if current_lines else ""
+        # 标题结构变化 => 强制切为新块,heading_path 携带完整祖先标题路径
+        # (如 "# test1" 的块 path=["test1"],"## test2" 的块 path=["test1","test2"])
+        if current_headings is not None and headings != current_headings:
             flush()
-            if overlap:
-                current_lines.append(overlap)
+        if current_lines:
+            candidate_length = len("\n\n".join([*current_lines, paragraph]))
+            if candidate_length > MAX_KNOWLEDGE_CHUNK_TEXT_LENGTH:
+                overlap = current_lines[-1][-KNOWLEDGE_CHUNK_OVERLAP:] if current_lines else ""
+                flush()
+                if overlap:
+                    current_lines.append(overlap)
         if not current_lines:
             current_headings = [*headings]
             current_locator = locator
